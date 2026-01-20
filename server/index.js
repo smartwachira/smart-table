@@ -8,6 +8,9 @@ const Venue = require('./models/venue');
 const MenuCategory = require('./models/MenuCategory');
 const MenuItem = require('./models/MenuItem');
 
+//Import Routes
+const menuRoutes = require('./routes/menuRoutes')
+
 //load environment variables
 dotenv.config(); //reads the .env file and attaches the variables to process.env
 
@@ -17,6 +20,9 @@ const PORT = process.env.PORT || 5000;
 //Middleware
 app.use(cors());
 app.use(express.json()); //Crucial for parsing JSON bodies
+
+//Mount Routes
+app.use('/api/menu', menuRoutes)
 
 // Define Associations (Relationships)
 Venue.hasMany(MenuCategory,{
