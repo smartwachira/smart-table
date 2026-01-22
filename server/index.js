@@ -4,7 +4,7 @@ const dotenv = require('dotenv');
 const sequelize = require('./config/db');
 
 //Import Models (This registers them with Sequelize)
-const Venue = require('./models/venue');
+const Venue = require('./models/Venue');
 const MenuCategory = require('./models/MenuCategory');
 const MenuItem = require('./models/MenuItem');
 

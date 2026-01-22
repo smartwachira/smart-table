@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from "axios";
 import './Menu.css';
+import MenuCategory from './MenuCategory';
 
 const Menu = () => {
     const { venueId } = useParams();
@@ -51,23 +52,8 @@ const Menu = () => {
         {/* SAFE GUARD: Check if MenuCategories exists before mapping */}
         {venue.MenuCategories && venue.MenuCategories.length > 0 ? (
           venue.MenuCategories.map((category) => (
-            <div key={category.category_id} className="menu-category">
-              <h2 className="category-title">{category.name}</h2>
-              
-              <div className="items-list">
-                {/* SAFE GUARD: Check if MenuItems exists */}
-                {category.MenuItems && category.MenuItems.map((item) => (
-                  <div key={item.item_id} className="menu-item">
-                    <div className="item-info">
-                      <h3 className="item-name">{item.name}</h3>
-                      <p className="item-desc">{item.description}</p>
-                      <span className="item-price">KES {item.price}</span>
-                    </div>
-                    <button className="add-btn">+</button>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <MenuCategory key={category.category_id} category= {category}/>
+
           ))
         ) : (
           <div className="empty-menu">

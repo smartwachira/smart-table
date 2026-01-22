@@ -1,10 +1,19 @@
-const Venue = require('../models/venue');
+const Venue = require('../models/Venue');
 const MenuCategory = require('../models/MenuCategory');
 const MenuItem = require('../models/MenuItem');
+const { v4: uuidv4 } = require('uuid'); 
+// usage: uuidv4()
 
 exports.getMenu = async (req, res) => {
     try {
         const { venueId } = req.params;
+
+        //Validate UUID format BEFORE hitting the DB
+        const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+    
+        if (!uuidRegex.test(venueId)) {
+        return res.status(400).json({ message: 'Invalid Venue ID format' });
+        }
 
         // "findOne" finds the first match
         // "include" tells Sequelize to perform a JOIN (connect tables).
