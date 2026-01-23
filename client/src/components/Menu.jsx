@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import axios from "axios";
 import './Menu.css';
 import MenuCategory from './MenuCategory';
+import FloatingCart from './FloatingCart';
 
 const Menu = () => {
     const { venueId } = useParams();
@@ -61,6 +62,7 @@ const Menu = () => {
           </div>
         )}
       </div>
+      <FloatingCart/>
     </div>
   );
 

@@ -1,8 +1,9 @@
 // This component handles one single dish. Doesn't care about fetching data; it just displays what it's given
-
+import { useCart } from  '../context/CartContext';
 import './Menu.css';
 
 const MenuItem = ({item}) => {
+    const {addToCart} = useCart();
     return (
         <div className="menu-item">
             <div className="item-info">
@@ -11,7 +12,7 @@ const MenuItem = ({item}) => {
                 <span className="item-price"> KES {item.price}</span>
             </div>
 
-            <button className='add-btn' onClick={()=>alert(`Added ${item.name}`)}></button>
+            <button className='add-btn' onClick={()=> addToCart(item )}>+</button>
         </div>
     );
 
