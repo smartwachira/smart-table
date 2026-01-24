@@ -7,6 +7,8 @@ const sequelize = require('./config/db');
 const Venue = require('./models/Venue');
 const MenuCategory = require('./models/MenuCategory');
 const MenuItem = require('./models/MenuItem');
+const Order = require('./models/Order');
+const OrderItem = require('./models/OrderItem');
 
 //Import Routes
 const menuRoutes = require('./routes/menuRoutes')
@@ -41,6 +43,15 @@ MenuCategory.hasMany(MenuItem,{
 MenuItem.belongsTo(MenuCategory, {
   foreignKey: 'category_id'
 });
+
+Venue.hasMany(Order, {foreignKey: "venue_id"});
+Order.belongsTo(Venue, {foreignKey: "venue_id"});
+
+Order.hasMany(OrderItem, {foreignKey: "order_id"});
+OrderItem.belongsTo(Order, {foreignKey: "order_id"});
+
+MenuItem.hasMany(OrderItem, {foreignKey: 'item_id'});
+OrderItem.belongsTo(MenuItem, {foreignKey: 'item_id'});
 
 //Routes
 app.get('/', (req, res) =>{
