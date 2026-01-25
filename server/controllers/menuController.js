@@ -3,7 +3,8 @@ const MenuCategory = require('../models/MenuCategory');
 const MenuItem = require('../models/MenuItem');
 const { v4: uuidv4 } = require('uuid'); 
 // usage: uuidv4()
-
+// This function sits between user's request(req),
+// processes  it, and sends back the final result(res)
 exports.getMenu = async (req, res) => {
     try {
         const { venueId } = req.params;
