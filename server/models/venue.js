@@ -1,6 +1,9 @@
 const { DataTypes } = require('sequelize');
-const sequelize = require('../config/db');
+const sequelize = require('../config/db'); 
 
+
+
+// Now this will work:
 const Venue = sequelize.define('Venue',{
     venue_id: {
         type: DataTypes.UUID,

@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
+import axios from 'axios';
 import './Checkout.css';
 
 const Checkout = () => {
@@ -10,26 +11,32 @@ const Checkout = () => {
   // State for form inputs
   const [tableNumber, setTableNumber] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('M-Pesa');
+  const { venueId } = useParams();
 
   // Handle Order Submission
-  const handlePlaceOrder = () => {
+  const handlePlaceOrder = async () => {
     if (!tableNumber) {
       alert("Please enter your table number.");
       return;
     }
 
-    const orderDetails = {
-      tableNumber,
-      paymentMethod,
-      items: cartItems,
-      total: getCartTotal()
-    };
+    try {
+        const orderDetails = {
+        venueId,
+        tableNumber,
+        paymentMethod,
+        items: cartItems,
+        total: getCartTotal()
+        };
 
-    console.log("Order Placing:", orderDetails);
-    alert("Order Placed!");
+        // Send to Backend
+        await axios.post('/api/orders', orderDetails);
+    } catch (error) {
+    console.error("Order failed", error);
+    alert("Failed to place order. Try again.");
     // In Sprint 5, we will connect this to the backend API
   };
-
+}
   // Empty Cart State
   if (cartItems.length === 0) {
     return (

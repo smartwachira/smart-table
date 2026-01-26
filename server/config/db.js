@@ -13,8 +13,6 @@ const sequelize = new Sequelize(
         dialect: process.env.DB_Dialect,
         logging:false, //Disable logging every SQL query to the console (cleaner)
     }
-).authenticate()//test connection
-  .then(() => console.log('Database connected...'))
-  .catch(err => console.log('Error: ' + err));
+);
 
 module.exports = sequelize;
