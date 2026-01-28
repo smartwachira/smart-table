@@ -3,15 +3,19 @@ const OrderItem = require('../models/OrderItem');
 const sequelize = require('../config/db');
 const { request } = require('express');
 
+
 exports.createOrder = async (req,res) => {
     const t = await sequelize.transaction(); //Start a "Safety Net"
 
     try {
 
         // Collect data from request
-        const { venueId, tableNumber, items, total, paymentMethod } = req.body;
+        const {tableNumber, items, total, paymentMethod } = req.body;
 
         console.log("DEBUG BODY:", req.body)
+
+        const { venueId } = req.body;
+       
 
         if (!items || items.length === 0){
             return res.status(400).json({ message: "Cannot place empty order"});
@@ -50,3 +54,30 @@ exports.createOrder = async (req,res) => {
         res.status(500).json({ message: 'Failed to place order', error: error.message})
     }
 };
+
+//Fetch all orders from the database
+
+exports.getOrders = async (req, res) => {
+    try {
+        const { venueId } = req.params;
+
+        const orders = await Order.findAll({
+            where: {venue_id: venueId},
+            include: [
+                {model: OrderItem,
+                    include: [
+                        { model: require('../models/MenuItem') }//Include the name of the items
+                    ]
+                }
+            ],
+            order: [['createdAt', 'DESC']], //newest orders first
+            limit: 50,
+            offset: 0
+        });
+
+        res.json(orders);
+    } catch (error){
+        console.error('Error fetching orders:', error);
+        res.status(500).json({ message: 'Failed to fetch orders'});
+    }
+}
