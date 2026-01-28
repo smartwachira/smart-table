@@ -6,16 +6,23 @@ const CartContext = createContext();
 export const useCart = () => useContext(CartContext);
 
 export const CartProvider = ({ children }) =>{
-    // 1. Load initial cart from local storage if it exists
+    // 1. Load initial cart and VenueId from local storage if it exists
     const [cartItems, setCartItems] = useState(()=>{
         const localData = localStorage.getItem('smartTableCart');
         return localData ? JSON.parse(localData) :[];
     });
 
-    // 2. Save the cart (Whenever cart changes, save it to local storage)
+    const [venueId, setVenueId] = useState(()=>{
+        return localStorage.getItem("smartTableVenueId") || null;
+    })
+
+    // 2. Save the cart and VenueId (Whenever cart changes, save it to local storage)
     useEffect(()=>{
         localStorage.setItem("smartTableCart", JSON.stringify(cartItems));
     }, [cartItems]);
+    useEffect(()=>{
+        localStorage.setItem("smartTableVenueId", venueId);
+    }, [venueId]);
 
     //3. Add item to cart
     const addToCart = (item )=>{
@@ -62,7 +69,16 @@ export const CartProvider = ({ children }) =>{
     const clearCart = () => setCartItems([]);
 
     return (
-        <CartContext.Provider value={{cartItems, addToCart, removeFromCart, getCartTotal, getCartCount, clearCart}}>
+        <CartContext.Provider value={{
+            cartItems, 
+            addToCart, 
+            removeFromCart, 
+            getCartTotal, 
+            getCartCount, 
+            clearCart,
+            venueId,
+            setVenueId
+            }}>
             {children}
         </CartContext.Provider>
     );

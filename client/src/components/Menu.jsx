@@ -4,17 +4,20 @@ import axios from "axios";
 import './Menu.css';
 import MenuCategory from './MenuCategory';
 import FloatingCart from './FloatingCart';
+import { useCart } from '../context/CartContext';
 
 const Menu = () => {
     const { venueId } = useParams();
+    const { setVenueId } = useCart();
     const [venue, setVenue] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
+
     useEffect(() =>{
         const fetchMenu = async () =>{
             try {
-                //API call(The Request)
+                //API call(The GET Request)
                 console.log("fetching menu for:", venueId); //debug log 1
                 const response = await axios.get(`/api/menu/${venueId}`);
 
@@ -31,8 +34,9 @@ const Menu = () => {
 
         if (venueId) {
             fetchMenu();
+            setVenueId(venueId); // save 
         }
-    }, [venueId]);
+    }, [venueId,setVenueId]);
 
     //The Rendering (The Display)
 
