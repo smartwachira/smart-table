@@ -1,3 +1,6 @@
+// Kitchen Display System (KDS)- 
+// it acts as the digital screen for chefs to see incoming orders in real-time
+
 import {useState, useEffect } from 'react';
 import { Await, useParams } from 'react-router-dom';
 import axios from 'axios';
@@ -6,9 +9,10 @@ import { useCallback } from 'react';
 
 const Kitchen = () => {
     const { venueId } = useParams();
-    const [orders, setOrders] = useState();
-    const [loading, setLoading] = useState(loading);
+    const [orders, setOrders] = useState([]);
+    const [loading, setLoading] = useState(true);
 
+    // The "Fetcher"
     const fetchOrders = useCallback(async () => {
             
             try {
@@ -18,7 +22,8 @@ const Kitchen = () => {
             } catch (error){
                 console.error("Error Loading orders:", error);
             } finally {
-            setLoading(false);}
+                setLoading(false);
+            }
         }, [venueId]); 
 
     //Initial Load + Auto-Refresh every 30 seconds
@@ -41,7 +46,7 @@ const Kitchen = () => {
 
             <div className="orders-grid">
                 {orders.length === 0 ? ( <p>No active orders.</p>):(
-                    orders.map((order) =>{
+                    orders.map((order) =>(
                         <div key={order.order_id} className={`order-card ${order.status}`}>
                             <div className="order-header">
                                 <span className="table-badge">Table {order.table_number}</span>
@@ -67,8 +72,8 @@ const Kitchen = () => {
                                 <span className="total-price">KES {order.total_amount}</span>
                             </div>
                         </div>
-                    })
-                )}
+                    ))
+                )};
             </div>
         </div>
     );

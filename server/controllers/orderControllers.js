@@ -48,6 +48,7 @@ exports.createOrder = async (req,res) => {
             message: 'Order placed successfully',
             orderId: newOrder.order_id
         });
+       
     } catch (error){
         await t.rollback(); // Failure
         console.error('Order Error:', error);
