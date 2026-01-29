@@ -50,6 +50,7 @@ const Kitchen = () => {
                         <div key={order.order_id} className={`order-card ${order.status}`}>
                             <div className="order-header">
                                 <span className="table-badge">Table {order.table_number}</span>
+                                <span className="customer-name-tag">👤 {order.customer_name}</span>
                                 <span className="order-time">
                                     {new Date(order.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                                 </span>

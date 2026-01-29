@@ -11,6 +11,7 @@ const Checkout = () => {
   // State for form inputs
   const [tableNumber, setTableNumber] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('M-Pesa');
+  const [customerName, setCustomerName] = useState('');
   //const { venueId } = useParams();
 
   // Handle Order Submission
@@ -24,6 +25,7 @@ const Checkout = () => {
         const orderDetails = {
         venueId: venueId,
         tableNumber: tableNumber,
+        customerName: customerName,
         paymentMethod,
         items: cartItems,
         total: getCartTotal()
@@ -101,6 +103,17 @@ const Checkout = () => {
             placeholder="e.g. 5"
             className="form-input"
           />
+        </div>
+        <div className="form-group">
+          <label >Your Name</label>
+          <input 
+            type="text" 
+            className="form-input"
+            onChange={(e)=>setCustomerName(e.target.value)}
+            placeholder='e.g. John Maina'
+            value={customerName}
+          />
+          
         </div>
         
         <div className="form-group">
