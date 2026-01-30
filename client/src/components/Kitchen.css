@@ -105,3 +105,18 @@
     text-transform: uppercase;
     color: #f57c00;
 }
+
+.complete-btn {
+    background-color: #2e7d32;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 5px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background-color 0.2s;
+
+}
+.complete-btn:hover{
+    background-color: #1b5e20;
+}
