@@ -111,3 +111,18 @@ exports.updateOrderStatus = async (req, res) =>{
         res.status(500).json({message: 'Failed to update order'})
     }
 };
+
+//Get single order
+exports.getOrderStatus = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const order = await Order.findByPk(orderId, {
+      include: [{ model: OrderItem, include: [require('../models/MenuItem')] }]
+    });
+
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+    res.json(order);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error' });
+  }
+};
