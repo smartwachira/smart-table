@@ -3,6 +3,7 @@ import Menu from './components/Menu';
 import { CartProvider } from "./context/CartContext";
 import Checkout from "./components/Checkout";
 import Kitchen from "./components/Kitchen";
+import OrderStatus from "./components/OrderStatus";
 
 
 function App(){
@@ -13,6 +14,7 @@ function App(){
           <Route path="/menu/:venueId" element={<Menu/>}></Route>
           <Route path="/checkout" element={<Checkout/>}></Route>
           <Route path="/kitchen/:venueId" element={<Kitchen/>}></Route>
+          <Route path="/order-status/:orderId" element={<OrderStatus/>}></Route>
           {/* The default Route */}
           {/* (<h1>...</h1>) directly inline. This is fine for simple placeholders, 
           but usually, you would replace this with a <LandingPage /> component later. */}

@@ -47,7 +47,7 @@ exports.createOrder = async (req,res) => {
        
     } catch (error){
         await t.rollback(); // Failure
-        console.error('Order Error:', error);
+        console.error('❌ Order Error:', error);
         res.status(500).json({ message: 'Failed to place order', error: error.message})
     }
 };
@@ -112,17 +112,18 @@ exports.updateOrderStatus = async (req, res) =>{
     }
 };
 
-//Get single order
-exports.getOrderStatus = async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    const order = await Order.findByPk(orderId, {
-      include: [{ model: OrderItem, include: [require('../models/MenuItem')] }]
-    });
+// Get order status
 
-    if (!order) return res.status(404).json({ message: 'Order not found' });
-    res.json(order);
-  } catch (error) {
-    res.status(500).json({ message: 'Server error' });
-  }
-};
+exports.getOrderStatus = async (req, res) =>{
+    try {
+        const { orderId } = req.params;
+        const order = await Order.findByPk(orderId, {
+            include: [{ model: OrderItem, include: [require('../models/MenuItem')]}]
+        });
+
+        if (!order) return res.status(404).json({ message: 'Order not found'});
+        res.json(order);
+    } catch(error){
+        res.status(500).json({message: 'Server error'});
+    }
+}
