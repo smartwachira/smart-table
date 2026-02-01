@@ -14,7 +14,7 @@ const OrderStatus = () =>{
 
     const fetchStatus = useCallback(async () => {
         try {
-            const res = await axios.get(`api/orders/track/${orderId}`);
+            const res = await axios.get(`/api/orders/track/${orderId}`);
             setOrder(res.data);
         } catch (error) {
             console.error("Error fetching status",error);

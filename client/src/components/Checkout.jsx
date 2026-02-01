@@ -34,13 +34,13 @@ const Checkout = () => {
         console.log("🚀 DEBUG: Sending Order Payload:", orderDetails);
 
         // Send to Backend
-        await axios.post('/api/orders', orderDetails);
+        const response = await axios.post('/api/orders', orderDetails);
         
 
         alert("Order Placed Successfully!");
 
         //Redirect to Tracking Page
-        navigate(`/order-status/${Response.data.orderId}`); 
+        navigate(`/order-status/${response.data.orderId}`); 
     } catch (error) {
     console.error("Order failed", error);
     alert("Failed to place order. Try again.");
