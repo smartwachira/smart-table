@@ -1,7 +1,7 @@
-const Venue = require('../models/Venue');
-const MenuCategory = require('../models/MenuCategory');
-const MenuItem = require('../models/MenuItem');
-const { v4: uuidv4 } = require('uuid'); 
+import Venue from '../models/Venue';
+import MenuCategory from '../models/MenuCategory';
+import MenuItem from '../models/MenuItem';
+import { v4 as uuidv4 } from 'uuid';
 // usage: uuidv4()
 // This function sits between user's request(req),
 // processes  it, and sends back the final result(res)
@@ -27,7 +27,7 @@ exports.getMenu = async (req, res) => {
                         {
                             model: MenuItem,
                             where: {is_available: true},
-                            required: false
+                            required: false,
 
                         }
                     ]

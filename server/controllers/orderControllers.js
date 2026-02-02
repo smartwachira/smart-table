@@ -1,7 +1,7 @@
-const Order = require('../models/Order');
-const OrderItem = require('../models/OrderItem');
-const sequelize = require('../config/db');
-const { request } = require('express');
+import Order from '../models/Order';
+import OrderItem from '../models/OrderItem';
+import sequelize from '../config/db';
+import { request } from 'express';
 
 
 exports.createOrder = async (req,res) => {

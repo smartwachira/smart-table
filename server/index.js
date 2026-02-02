@@ -1,19 +1,20 @@
-const express = require("express");
-const cors = require('cors');
-const dotenv = require('dotenv');
-const sequelize = require('./config/db');
+import express from "express";
+import cors from 'cors';
+import dotenv from 'dotenv';
+import sequelize from './config/db';
 
 //Import Models (This registers them with Sequelize)
-const Venue = require('./models/Venue');
-const MenuCategory = require('./models/MenuCategory');
-const MenuItem = require('./models/MenuItem');
-const Order = require('./models/Order');
-const OrderItem = require('./models/OrderItem');
-const User = require('./models/User');
+import Venue from './models/Venue';
+import MenuCategory from './models/MenuCategory';
+import MenuItem from './models/MenuItem';
+import Order from './models/Order';
+import OrderItem from './models/OrderItem';
+import User from './models/User';
 
 //Import Routes
-const menuRoutes = require('./routes/menuRoutes')
-const orderRoutes = require('./routes/orderRoutes');
+import menuRoutes from './routes/menuRoutes';
+import orderRoutes from './routes/orderRoutes';
+import authRoutes from './routes/authRoutes';
 
 //load environment variables
 dotenv.config(); //reads the .env file and attaches the variables to process.env
@@ -28,6 +29,7 @@ app.use(express.json()); //Crucial for parsing JSON bodies
 //Mount Routes
 app.use('/api/menu', menuRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api/auth', authRoutes)
 
 // Define Associations (Relationships)
 Venue.hasMany(MenuCategory,{
