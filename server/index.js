@@ -1,20 +1,20 @@
 import express from "express";
 import cors from 'cors';
 import dotenv from 'dotenv';
-import sequelize from './config/db';
+import sequelize from './config/db.js';
 
 //Import Models (This registers them with Sequelize)
-import Venue from './models/Venue';
-import MenuCategory from './models/MenuCategory';
-import MenuItem from './models/MenuItem';
-import Order from './models/Order';
-import OrderItem from './models/OrderItem';
-import User from './models/User';
+import Venue from './models/Venue.js';
+import MenuCategory from './models/MenuCategory.js';
+import MenuItem from './models/MenuItem.js';
+import Order from './models/Order.js';
+import OrderItem from './models/OrderItem.js';
+import User from './models/User.js';
 
 //Import Routes
-import menuRoutes from './routes/menuRoutes';
-import orderRoutes from './routes/orderRoutes';
-import authRoutes from './routes/authRoutes';
+import menuRoutes from './routes/menuRoutes.js';
+import orderRoutes from './routes/orderRoutes.js';
+import authRoutes from './routes/authRoutes.js';
 
 //load environment variables
 dotenv.config(); //reads the .env file and attaches the variables to process.env

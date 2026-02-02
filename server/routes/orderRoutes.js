@@ -1,6 +1,6 @@
 import express from 'express';
-import router from express.Router();
-import orderController from '../controllers/orderControllers';
+const router = express.Router();
+import * as orderController from '../controllers/orderControllers.js';
 
 // POST /api/orders
 router.post('/', orderController.createOrder);

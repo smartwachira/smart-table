@@ -1,10 +1,10 @@
-import Order from '../models/Order';
-import OrderItem from '../models/OrderItem';
-import sequelize from '../config/db';
+import Order from '../models/Order.js';
+import OrderItem from '../models/OrderItem.js';
+import sequelize from '../config/db.js';
 import { request } from 'express';
 
 
-exports.createOrder = async (req,res) => {
+export const createOrder = async (req,res) => {
     const t = await sequelize.transaction(); //Start a "Safety Net"
 
     try {
@@ -54,7 +54,7 @@ exports.createOrder = async (req,res) => {
 
 //Fetch all orders from the database
 
-exports.getOrders = async (req, res) => {
+export const getOrders = async (req, res) => {
     try {
         const { venueId } = req.params;
 
@@ -80,7 +80,7 @@ exports.getOrders = async (req, res) => {
 }
 
 //Update Order status
-exports.updateOrderStatus = async (req, res) =>{
+export const updateOrderStatus = async (req, res) =>{
     try {
         //collect data
         const { orderId} = req.params;
@@ -114,7 +114,7 @@ exports.updateOrderStatus = async (req, res) =>{
 
 // Get order status
 
-exports.getOrderStatus = async (req, res) =>{
+export const getOrderStatus = async (req, res) =>{
     try {
         const { orderId } = req.params;
         const order = await Order.findByPk(orderId, {

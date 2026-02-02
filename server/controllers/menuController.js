@@ -1,11 +1,11 @@
-import Venue from '../models/Venue';
-import MenuCategory from '../models/MenuCategory';
-import MenuItem from '../models/MenuItem';
+import Venue from '../models/Venue.js';
+import MenuCategory from '../models/MenuCategory.js';
+import MenuItem from '../models/MenuItem.js';
 import { v4 as uuidv4 } from 'uuid';
 // usage: uuidv4()
 // This function sits between user's request(req),
 // processes  it, and sends back the final result(res)
-exports.getMenu = async (req, res) => {
+export const getMenu = async (req, res) => {
     try {
         const { venueId } = req.params;
 
@@ -45,3 +45,5 @@ exports.getMenu = async (req, res) => {
         res.status(500).json({ message: 'Server Error'});
     }
 };
+
+
