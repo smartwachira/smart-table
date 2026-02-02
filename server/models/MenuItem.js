@@ -1,5 +1,6 @@
-const { DataTypes } = require('sequelize');
-const sequelize = require('../config/db');
+import sequelize from '../config/db.js';
+import { DataTypes } from "sequelize";
+
 const MenuItem = sequelize.define("MenuItem", {
     item_id: {
         type: DataTypes.UUID,
@@ -39,4 +40,5 @@ const MenuItem = sequelize.define("MenuItem", {
     tableName: "menu_items"
 });
 
-module.exports = MenuItem;
+// ✅ New
+export default MenuItem;

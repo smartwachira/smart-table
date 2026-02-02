@@ -1,39 +1,32 @@
 import sequelize from '../config/db.js';
 import { DataTypes } from "sequelize";
 
-const Order = sequelize.define ('Order', {
-    order_id: {
+const User = sequelize.define("User", {
+    user_id: {
         type: DataTypes.UUID,
         defaultValue: DataTypes.UUIDV4,
         primaryKey: true
     },
-    customer_name: {
+    username: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        unique: true // No two staff members can have the same username
+    },
+    password: {
         type: DataTypes.STRING,
         allowNull: false
+
     },
-    table_number: {
-        type: DataTypes.STRING,
-        allowNull: false
-    },
-    status: {
-        type: DataTypes.STRING,
-        defaultValue: 'pending', 
-        allowNull: false
-    },
-    total_amount: {
-        type: DataTypes.DECIMAL(10,2),
-        allowNull: false
-    },
-    payment_method: {
-        type: DataTypes.STRING,
+    role: {
+        type: DataTypes.ENUM("manager","kitchen","waiter"),
+        defaultValue: 'waiter',
         allowNull: false
     },
     venue_id: {
         type: DataTypes.UUID,
         allowNull: false
     }
-
 });
 
 // ✅ New
-export default Order;
+export default User;

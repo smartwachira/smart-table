@@ -9,6 +9,7 @@ const MenuCategory = require('./models/MenuCategory');
 const MenuItem = require('./models/MenuItem');
 const Order = require('./models/Order');
 const OrderItem = require('./models/OrderItem');
+const User = require('./models/User');
 
 //Import Routes
 const menuRoutes = require('./routes/menuRoutes')
@@ -54,6 +55,9 @@ OrderItem.belongsTo(Order, {foreignKey: "order_id"});
 
 MenuItem.hasMany(OrderItem, {foreignKey: 'item_id'});
 OrderItem.belongsTo(MenuItem, {foreignKey: 'item_id'});
+
+Venue.hasMany(User, { foreignKey: 'venue_id'});
+User.belongsTo(Venue, {foreignKey: "venue_id"})
 
 //Routes
 app.get('/', (req, res) =>{

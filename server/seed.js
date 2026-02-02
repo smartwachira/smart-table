@@ -1,9 +1,16 @@
-const sequelize = require('./config/db');
-const Venue = require('./models/Venue'); // Ensure this matches your filename (Venue.js vs venue.js)
-const MenuCategory = require('./models/MenuCategory');
-const MenuItem = require('./models/MenuItem');
-const Order = require('./models/Order');
-const OrderItem = require('./models/OrderItem');
+import sequelize from './config/db.js';
+import bcrypt from 'bcryptjs';
+
+const hashedPassword = await bcrypt.hash("password123", 10)
+
+
+import Venue from './models/Venue.js'; // Ensure this matches your filename (Venue.js vs venue.js)
+import MenuCategory from './models/MenuCategory.js';
+import MenuItem from './models/MenuItem.js';
+import Order from './models/Order.js';
+import OrderItem from './models/OrderItem.js';
+import User from './models/User.js';
+
 
 // Define associations to ensure DB schema is created correctly during sync
 Venue.hasMany(MenuCategory, { foreignKey: 'venue_id', onDelete: 'CASCADE' });
@@ -109,6 +116,24 @@ const seedDatabase = async () => {
         price_at_time: 350.00
       }
     ]);
+
+    //7. Create a Manager
+    await User.create({
+      username: 'manager',
+      password: hashedPassword,
+      role: "manager",
+      venue_id: venue.venue_id
+    });
+
+    //8. Create a chef
+    await User.create({
+      username: 'chef',
+      password: hashedPassword,
+      role: 'kitchen',
+      venue_id: venue.venue_id
+    });
+
+    console.log("✅ Created Staff: Manager & Chef (Password: password123)")
     console.log('✅ Created Sample Order for "John Doe"');
 
     console.log('🌱 Database seeded successfully!');
