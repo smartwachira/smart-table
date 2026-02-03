@@ -16,7 +16,18 @@ const Kitchen = () => {
     const fetchOrders = useCallback(async () => {
             
         try {
-            const response = await axios.get(`/api/orders/${venueId}`);
+            //Get Token , Stop if no token
+            const token = localStorage.getItem('token');
+            if (!token) return;
+            
+
+            //Get order and send token
+            const response = await axios.get(`/api/orders/${venueId}`,{
+                header: {Authorization: token}
+            });
+            if (!response){
+                console.log("no orders")
+            }
             setOrders(response.data);
                 
         } catch (error){
@@ -29,7 +40,16 @@ const Kitchen = () => {
     // Function: Update order status
     const handleStatusChange = async (orderId, newStatus)=>{
         try {
-            await axios.put(`/api/orders/${orderId}/status`, {status: newStatus});
+            //Get Token , Stop if no token
+            const token = localStorage.getItem('token');
+            if (!token) return;
+            console.log("Token",token)
+
+
+            await axios.patch(`/api/orders/${orderId}/status`, 
+                {status: newStatus},
+                {headers: { Authorization: `Bearer ${token}`}} //<--- Send Token
+            );
             fetchOrders();
         } catch (error){
             alert("Failed to update status");

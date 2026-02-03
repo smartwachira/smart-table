@@ -1,7 +1,10 @@
 import Order from '../models/Order.js';
 import OrderItem from '../models/OrderItem.js';
+import MenuItem from '../models/MenuItem.js';
 import sequelize from '../config/db.js';
 import { request } from 'express';
+;
+
 
 
 export const createOrder = async (req,res) => {
@@ -55,30 +58,30 @@ export const createOrder = async (req,res) => {
 //Fetch all orders from the database
 
 export const getOrders = async (req, res) => {
-    try {
-        const { venueId } = req.params;
+  try {
+    const { venueId } = req.params;
 
-        const orders = await Order.findAll({
-            where: {venue_id: venueId},
-            include: [
-                {model: OrderItem,
-                    include: [
-                        { model: require('../models/MenuItem') }//Include the name of the items
-                    ]
-                }
-            ],
-            order: [['createdAt', 'DESC']], //newest orders first
-            limit: 50,
-            offset: 0
-        });
+    const orders = await Order.findAll({
+      where: { 
+        venue_id: venueId,
+        // Only show active orders in the kitchen (hide completed ones)
+        status: ['pending', 'preparing', 'ready'] 
+      },
+      include: [
+        {
+          model: OrderItem,
+          include: [MenuItem] // Include Food Names
+        }
+      ],
+      order: [['createdAt', 'ASC']] // Oldest orders first
+    });
 
-        res.json(orders);
-    } catch (error){
-        console.error('Error fetching orders:', error);
-        res.status(500).json({ message: 'Failed to fetch orders'});
-    }
-}
-
+    res.json(orders);
+  } catch (error) {
+    console.error('❌ Get Orders Error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
 //Update Order status
 export const updateOrderStatus = async (req, res) =>{
     try {
@@ -112,18 +115,18 @@ export const updateOrderStatus = async (req, res) =>{
     }
 };
 
-// Get order status
+// 5. TRACK ORDER (For Customer) - FIXED SYNTAX
+export const getOrderStatus = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const order = await Order.findByPk(orderId, {
+      include: [{ model: OrderItem, include: [MenuItem] }]
+    });
 
-export const getOrderStatus = async (req, res) =>{
-    try {
-        const { orderId } = req.params;
-        const order = await Order.findByPk(orderId, {
-            include: [{ model: OrderItem, include: [require('../models/MenuItem')]}]
-        });
-
-        if (!order) return res.status(404).json({ message: 'Order not found'});
-        res.json(order);
-    } catch(error){
-        res.status(500).json({message: 'Server error'});
-    }
-}
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+    res.json(order);
+  } catch (error) {
+    console.error('❌ Track Order Error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};

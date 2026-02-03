@@ -5,6 +5,7 @@ import Checkout from "./components/Checkout";
 import Kitchen from "./components/Kitchen";
 import OrderStatus from "./components/OrderStatus";
 import Login from "./components/Login ";
+import PrivateRoute from "./components/PrivateRoute";
 
 
 function App(){
@@ -14,7 +15,11 @@ function App(){
         <Routes>
           <Route path="/menu/:venueId" element={<Menu/>}></Route>
           <Route path="/checkout" element={<Checkout/>}></Route>
-          <Route path="/kitchen/:venueId" element={<Kitchen/>}></Route>
+          <Route path="/kitchen/:venueId" element={
+            <PrivateRoute allowedRoles={["manager", "kitchen"]}>
+              <Kitchen/>
+            </PrivateRoute>}>
+          </Route>
           <Route path="/order-status/:orderId" element={<OrderStatus/>}></Route>
           <Route path="/login" element={<Login/>}></Route>
           {/* The default Route */}
