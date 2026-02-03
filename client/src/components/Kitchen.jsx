@@ -7,12 +7,15 @@ import axios from 'axios';
 import './Kitchen.css';
 import { useCallback } from 'react';
 
+
+
 const Kitchen = () => {
     const { venueId } = useParams();
     const [orders, setOrders] = useState([]);
     const [loading, setLoading] = useState(true);
+    const userRole = localStorage.getItem("role");
 
-    // The "Fetcher"
+    // Function:The "Fetcher"
     const fetchOrders = useCallback(async () => {
             
         try {
@@ -54,6 +57,21 @@ const Kitchen = () => {
         } catch (error){
             alert("Failed to update status");
             console.error("Error updating status",error);
+        }
+    }
+
+    // Delete Function
+    const handleDelete = async (orderId) => {
+        if(!window.confirm("Are you sure you want to DELETE this order?")) return;
+
+        try {
+            const token = localStorage.getItem('token');
+            await axios.delete(`/api/orders/${orderId}`,
+                {headers: {Authorization: token}}
+            );
+            fetchOrders(); //Refresh list
+        }catch(error){
+            alert("Failed to delete: "+ (error.response?.data?.message || error.message))
         }
     }
 
@@ -106,7 +124,18 @@ const Kitchen = () => {
 
                                 <div className="order-footer">
                                     <span className="status-label">{order.status}</span>
-                                    <button className="complete-btn" onClick={()=> handleStatusChange(order.order_id, 'served')}>Mark Ready ✅</button>
+                                    <div className="action-buttons">
+                                        {/* CHEF/MANAGER ACTION: Mark Ready */}
+                                        {order.status === "pending" && (
+                                            <button className="complete-btn" onClick={()=> handleStatusChange(order.order_id, 'served')}>Mark Ready ✅</button>
+                                        )}
+
+                                        {/* MANAGER ACTION ONLY: Delete */}
+                                        {userRole === 'manager' && (
+                                            <button className="delete-btn" onClick={()=>handleDelete(order.order_id)}>🗑️ Void</button>
+                                        )}
+                                    </div>
+                                    
                                     <span className="total-price">KES {order.total_amount}</span>
                                 </div>
                             </div>

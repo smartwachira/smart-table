@@ -22,6 +22,7 @@ export const verifyToken = (req, res, next) => {
         const token = authHeader.startsWith("Bearer ") 
             ? authHeader.slice(7, authHeader.length).trimLeft() 
             : authHeader;
+            
         const decoded = jwt.verify(token, JWT_SECRET);
 
         //4. Add user info to the request object so routes can use it

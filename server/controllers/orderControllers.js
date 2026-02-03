@@ -130,3 +130,29 @@ export const getOrderStatus = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+
+//DELETE ORDER
+export const deleteOrder = async (req,res) => {
+  try{
+    const { orderId } = req.params;
+
+    // 1. SECURITY CHECK:Only Managers can delete
+    if(req.user.role !== 'manager'){
+      return res.status(403).json({message: "Access Denied: Managers Only"});
+    }
+
+    //2. Find and Destroy
+    const order = await Order.findByPk(orderId);
+    if(!order) return res.status(404).json({message: "Order not found"});
+
+    //  Because of "Cascade" in our model, 
+    // deleting the Order *should* automatically delete the orderItems
+    await order.destroy();
+
+    res.json({message: "Order deleted successfully"});
+  } catch (error) {
+    console.error("Delete Error:", error);
+    res.status(500).json({message: "Failed to delete order"});
+  }
+
+}

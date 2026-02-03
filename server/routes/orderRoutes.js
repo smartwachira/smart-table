@@ -10,8 +10,10 @@ router.post('/', orderController.createOrder);
 router.get("/:venueId", orderController.getOrders);
 router.get("/track/:orderId",orderController.getOrderStatus);
 
+
 // Protected Routes (Staff Only)
 router.patch("/:orderId/status",verifyToken, orderController.updateOrderStatus);
+router.delete("/:orderId",verifyToken,orderController.deleteOrder)
 
 
 export default router;
