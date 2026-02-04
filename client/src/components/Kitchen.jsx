@@ -62,12 +62,13 @@ const Kitchen = () => {
 
     // Delete Function
     const handleDelete = async (orderId) => {
+        //Safety switch
         if(!window.confirm("Are you sure you want to DELETE this order?")) return;
 
         try {
             const token = localStorage.getItem('token');
             await axios.delete(`/api/orders/${orderId}`,
-                {headers: {Authorization: token}}
+                {headers: {Authorization: `Bearer ${token}`}}
             );
             fetchOrders(); //Refresh list
         }catch(error){

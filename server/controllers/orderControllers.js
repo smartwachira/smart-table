@@ -65,7 +65,7 @@ export const getOrders = async (req, res) => {
       where: { 
         venue_id: venueId,
         // Only show active orders in the kitchen (hide completed ones)
-        status: ['pending', 'preparing', 'ready'] 
+        status: ['pending', 'preparing', 'ready','served'] 
       },
       include: [
         {
@@ -134,17 +134,19 @@ export const getOrderStatus = async (req, res) => {
 //DELETE ORDER
 export const deleteOrder = async (req,res) => {
   try{
+    //1. ID CHECK
     const { orderId } = req.params;
 
-    // 1. SECURITY CHECK:Only Managers can delete
+    // 2. SECURITY CHECK:Only Managers can delete
     if(req.user.role !== 'manager'){
       return res.status(403).json({message: "Access Denied: Managers Only"});
     }
 
-    //2. Find and Destroy
+    //3. VERIFICATION: Find and Destroy
     const order = await Order.findByPk(orderId);
     if(!order) return res.status(404).json({message: "Order not found"});
 
+    //THE CLEANUP
     //  Because of "Cascade" in our model, 
     // deleting the Order *should* automatically delete the orderItems
     await order.destroy();
