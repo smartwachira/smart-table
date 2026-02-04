@@ -6,10 +6,13 @@ import { Await, useParams } from 'react-router-dom';
 import axios from 'axios';
 import './Kitchen.css';
 import { useCallback } from 'react';
+import {useNavigate} from 'react-router-dom';
+
 
 
 
 const Kitchen = () => {
+    
     const { venueId } = useParams();
     const [orders, setOrders] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -76,6 +79,17 @@ const Kitchen = () => {
         }
     }
 
+    //FUNCTION: Handle Logout
+    const  navigate = useNavigate();
+    
+
+    const handleLogout  = ()=>{
+        localStorage.removeItem('token');
+        localStorage.removeItem("role");
+        localStorage.removeItem('venueId');
+        navigate("/login");
+    }
+
     //Initial Load + Auto-Refresh every 30 seconds
     useEffect(() =>{
 
@@ -94,6 +108,7 @@ const Kitchen = () => {
             <header className="kitchen-header">
                 <h1>Kitchen Display System (KDS)</h1>
                 <button onClick={fetchOrders} className="refresh-btn">Refresh</button>
+                <button onClick={handleLogout} className="logout-btn" style={{marginLeft: '10px', background: '#333'}}>Logout</button>
             </header>
 
             <div className="orders-grid">
