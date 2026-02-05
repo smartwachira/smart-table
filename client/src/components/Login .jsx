@@ -2,6 +2,7 @@ import { useState } from 'react';
 import axios from  'axios';
 import { useNavigate} from 'react-router-dom';
 import './Login.css';
+import toast from 'react-hot-toast';
 
 const Login = ()=>{
     //The memory
@@ -21,7 +22,9 @@ const Login = ()=>{
             localStorage.setItem('role',res.data.role);
             localStorage.setItem('venueId',res.data.venue_id);
 
-            alert(`Welcome back, ${res.data.role}!`);
+            toast.success(`Welcome back, ${res.data.role}!`,{
+                icon: '👋',
+            });
 
             //Redirect based on Rank
             if (res.data.role === "kitchen"){
@@ -33,7 +36,7 @@ const Login = ()=>{
             }
             
         } catch(err){
-            alert("Invalid Username or Password");
+            toast.error("Invalid Username or Password");
             console.log((err));
         }
     };

@@ -3,6 +3,7 @@ import { useNavigate, } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import axios from 'axios';
 import './Checkout.css';
+import toast from 'react-hot-toast';
 
 const Checkout = () => {
   const { cartItems, addToCart, removeFromCart, getCartTotal, venueId } = useCart();
@@ -17,7 +18,7 @@ const Checkout = () => {
   // Handle Order Submission
   const handlePlaceOrder = async () => {
     if (!tableNumber) {
-      alert("Please enter your table number.");
+      toast.error("Please enter your table number.");
       return;
     }
 
@@ -37,13 +38,20 @@ const Checkout = () => {
         const response = await axios.post('/api/orders', orderDetails);
         
 
-        alert("Order Placed Successfully!");
+        //Notification
+        toast.success("Order Placed! Redirecting...",{
+          duration: 4000,
+          style: {
+            background: '#333',
+            color: 'fff'
+          }
+        })
 
         //Redirect to Tracking Page
         navigate(`/order-status/${response.data.orderId}`); 
     } catch (error) {
     console.error("Order failed", error);
-    alert("Failed to place order. Try again.");
+    toast.error("Failed to place order. Try again.");
     // In Sprint 5, we will connect this to the backend API
   };
 }

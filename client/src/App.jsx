@@ -6,12 +6,14 @@ import Kitchen from "./components/Kitchen";
 import OrderStatus from "./components/OrderStatus";
 import Login from "./components/Login ";
 import PrivateRoute from "./components/PrivateRoute";
+import { Toaster } from 'react-hot-toast';
 
 
 function App(){
   return (
     <CartProvider>
       <Router>
+        <Toaster position="top-center" reverseOrder={false}/>
         <Routes>
           <Route path="/menu/:venueId" element={<Menu/>}></Route>
           <Route path="/checkout" element={<Checkout/>}></Route>

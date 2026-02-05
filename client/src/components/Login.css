@@ -18,6 +18,7 @@
 .login-form input{
     padding: 10px;
     font-size: 1rem;
+    background-color: black;
 }
 .login-form button {
     padding: 10px;

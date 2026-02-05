@@ -7,6 +7,7 @@ import axios from 'axios';
 import './Kitchen.css';
 import { useCallback } from 'react';
 import {useNavigate} from 'react-router-dom';
+import toast from 'react-hot-toast';
 
 
 
@@ -56,9 +57,10 @@ const Kitchen = () => {
                 {status: newStatus},
                 {headers: { Authorization: `Bearer ${token}`}} //<--- Send Token
             );
+            toast.success("Order Updated");
             fetchOrders();
         } catch (error){
-            alert("Failed to update status");
+            toast.error("Failed to update status");
             console.error("Error updating status",error);
         }
     }
@@ -73,9 +75,10 @@ const Kitchen = () => {
             await axios.delete(`/api/orders/${orderId}`,
                 {headers: {Authorization: `Bearer ${token}`}}
             );
+            toast.success("Order Voided 🗑️");
             fetchOrders(); //Refresh list
         }catch(error){
-            alert("Failed to delete: "+ (error.response?.data?.message || error.message))
+            toast.error("Failed to delete: "+ (error.response?.data?.message || error.message))
         }
     }
 
