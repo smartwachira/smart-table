@@ -5,6 +5,7 @@ import './Menu.css';
 import MenuCategory from './MenuCategory';
 import FloatingCart from './FloatingCart';
 import { useCart } from '../context/CartContext';
+import MenuSkeleton  from './MenuSkeleton';
 
 const Menu = () => {
     const { venueId } = useParams();
@@ -19,6 +20,7 @@ const Menu = () => {
             try {
                 //API call(The GET Request)
                 console.log("fetching menu for:", venueId); //debug log 1
+                
                 const response = await axios.get(`/api/menu/${venueId}`);
 
                 console.log("API Response Data:", response.data) //debug log 2
@@ -42,7 +44,18 @@ const Menu = () => {
 
     // Gatekeepers - prevent the app from crashing
 
-    if (loading) return <div className="loading">Loading Menu...</div>;
+    if (loading) return (
+      <div className="menu-container">
+        <div className="menu-header">
+          <h1>Loading Menu...</h1>
+        </div>
+        <div className="menu-grid">
+          {[1,2,3,4,5,6].map((n)=>(
+            <MenuSkeleton key={n}/>
+          ))}
+        </div>
+      </div>
+    );
     if (error) return <div className="error">{error}</div>;
     if (!venue) return <div>No menu found.</div>;
 
