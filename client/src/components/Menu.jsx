@@ -7,12 +7,14 @@ import FloatingCart from './FloatingCart';
 import { useCart } from '../context/CartContext';
 import MenuSkeleton  from './MenuSkeleton';
 
+
 const Menu = () => {
     const { venueId } = useParams();
     const { setVenueId } = useCart();
     const [venue, setVenue] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [activeCategory, setActiveCategory] = useState(null) //Track the active bar
 
 
     useEffect(() =>{
@@ -20,11 +22,16 @@ const Menu = () => {
             try {
                 //API call(The GET Request)
                 console.log("fetching menu for:", venueId); //debug log 1
-                
+
                 const response = await axios.get(`/api/menu/${venueId}`);
 
                 console.log("API Response Data:", response.data) //debug log 2
                 setVenue(response.data);
+
+                //Set the first category as active by default if data exists
+                if (response.data.MenuCategories && response.data.MenuCategories.length > 0){
+                  setActiveCategory(response.data.MenuCategories[0].category_id);
+                }
                 setLoading(false);
 
             } catch (err) {
@@ -39,6 +46,15 @@ const Menu = () => {
             setVenueId(venueId); // save 
         }
     }, [venueId,setVenueId]);
+
+    // ---SCROLL HANDLER ---
+    const handleScrollTo = (category_id) =>{
+      setActiveCategory(category_id);
+      const element = document.getElementById(`cat-${category_id}`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'start'})
+      }
+    }
 
     //The Rendering (The Display)
 
@@ -59,6 +75,9 @@ const Menu = () => {
     if (error) return <div className="error">{error}</div>;
     if (!venue) return <div>No menu found.</div>;
 
+    //Safety check for categories 
+    const categories = venue.MenuCategories || [];
+
     return (
     <div className="menu-container">
       <header className="venue-header">
@@ -66,12 +85,33 @@ const Menu = () => {
         <p className="venue-location">{venue.location}</p>
       </header>
 
+      {/* ---- STICKY NAVIGATION BAR --- */}
+      {categories.length > 0 && (
+        <div className="category-nav">
+          {categories.map((cat)=>(
+            <button 
+              key={cat.category_id} 
+              className={`nav-pill ${activeCategory === cat.category_id? 'active': ''}`}
+              onClick={()=> handleScrollTo(cat.category_id)}
+            >
+              {cat.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+
+      {/* --- MENU LIST --- */}
+
       <div className="menu-content">
         {/* SAFE GUARD: Check if MenuCategories exists before mapping */}
-        {venue.MenuCategories && venue.MenuCategories.length > 0 ? (
-          venue.MenuCategories.map((category) => (
-            <MenuCategory key={category.category_id} category= {category}/>
-
+        {categories && categories.length > 0 ? (
+          categories.map((category) => (
+            <div className="category-section"
+                  key={category.category_id}
+                  id={`cat-${category.category_id}`}>
+            <MenuCategory  category= {category}/>
+            </div>
           ))
         ) : (
           <div className="empty-menu">
