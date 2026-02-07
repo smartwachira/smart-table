@@ -8,7 +8,11 @@ import './Kitchen.css';
 import { useCallback } from 'react';
 import {useNavigate} from 'react-router-dom';
 import toast from 'react-hot-toast';
+import io from 'socket.io-client';
+import MenuItem from '../../../server/models/MenuItem';
 
+// Sound Effect URl
+const BEEP_URL = 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3';
 
 
 
@@ -18,6 +22,18 @@ const Kitchen = () => {
     const [orders, setOrders] = useState([]);
     const [loading, setLoading] = useState(true);
     const userRole = localStorage.getItem("role");
+    const navigate = useNavigate();
+
+
+    // Play Sound Function
+    const playSound = ()=>{
+        try{
+            const audio = new Audio(BEEP_URL);
+            audio.play();
+        } catch (err){
+            console.error("Audio play failed", err);
+        }
+    };
 
     // Function:The "Fetcher"
     const fetchOrders = useCallback(async () => {
@@ -30,7 +46,7 @@ const Kitchen = () => {
 
             //Get order and send token
             const response = await axios.get(`/api/orders/${venueId}`,{
-                header: {Authorization: token}
+                headers: {Authorization: token}
             });
             if (!response){
                 console.log("no orders")
@@ -39,6 +55,7 @@ const Kitchen = () => {
                 
         } catch (error){
             console.error("Error Loading orders:", error);
+            toast.error("Could not load orders");
         } finally {
             setLoading(false);
         }
@@ -57,8 +74,11 @@ const Kitchen = () => {
                 {status: newStatus},
                 {headers: { Authorization: `Bearer ${token}`}} //<--- Send Token
             );
+
             toast.success("Order Updated");
-            fetchOrders();
+            setOrders(prev => prev.map(o =>
+                o.order_id === orderId ? { ...o, status: newStatus} : o
+            ))
         } catch (error){
             toast.error("Failed to update status");
             console.error("Error updating status",error);
@@ -76,14 +96,14 @@ const Kitchen = () => {
                 {headers: {Authorization: `Bearer ${token}`}}
             );
             toast.success("Order Voided 🗑️");
-            fetchOrders(); //Refresh list
+            
         }catch(error){
             toast.error("Failed to delete: "+ (error.response?.data?.message || error.message))
         }
     }
 
     //FUNCTION: Handle Logout
-    const  navigate = useNavigate();
+    
     
 
     const handleLogout  = ()=>{
@@ -96,10 +116,45 @@ const Kitchen = () => {
     //Initial Load + Auto-Refresh every 30 seconds
     useEffect(() =>{
 
-
+        //1. Initial fetch
         fetchOrders();
-        const interval = setInterval(fetchOrders, 30000);
-        return () => clearInterval(interval);
+
+        //2. Connect to socket "Universal Connector"
+        const socket = io(import.meta.env.VITE_API_URL || "http://localhost:5000")
+        
+        //3. Join Venue Room
+        socket.emit('join_venue', venueId);
+
+        //Event: Listen  for new Orders
+        socket.on('receive_order',(data)=>{
+
+            //Reconstruct the order object(raw data) to match the API structure(nested MenuItem objects)
+            const newOrder = {
+                ...data.order,
+                OrderItems: data.items.map(item => ({
+                    order_item_id: item.item_id || Math.random(),
+                    quantity: item.quantity,
+                    MenuItem: {
+                        name: item.name
+                    }
+                }))
+            };
+
+            //Add to top of list
+            setOrders(prevOrders => [newOrder, ...prevOrders]);
+
+            //Notify & Beep
+            toast.success(`New Order: Table ${newOrder.table_number}`,{
+                icon: '🔔',
+                duration: 5000
+            });
+            playSound();
+            
+        });
+        
+
+        
+        return () => socket.disconnect();
     },[venueId, fetchOrders]);
 
 

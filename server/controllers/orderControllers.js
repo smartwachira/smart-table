@@ -43,6 +43,13 @@ export const createOrder = async (req,res) => {
         // 4. Commit (save) changes.
         await t.commit(); //success
 
+        //BROADCAST: to socket system
+        const io = req.app.get('socketio')
+        io.to(venueId).emit('receive_order',{
+          order: newOrder,
+          items: items
+        });
+
         res.status(201).json({
             message: 'Order placed successfully',
             orderId: newOrder.order_id
@@ -106,6 +113,13 @@ export const updateOrderStatus = async (req, res) =>{
         order.status = status;
         await order.save();
 
+        const io = req.app.get('socketio')
+
+        io.emit(`order_status_${orderId}`,{
+          status: status,
+          orderId: orderId
+        })
+
         res.json({message: 'Order updated', order});
 
 
@@ -145,11 +159,16 @@ export const deleteOrder = async (req,res) => {
     //3. VERIFICATION: Find and Destroy
     const order = await Order.findByPk(orderId);
     if(!order) return res.status(404).json({message: "Order not found"});
-
+    const venue_id = order.venueId;
     //THE CLEANUP
     //  Because of "Cascade" in our model, 
     // deleting the Order *should* automatically delete the orderItems
     await order.destroy();
+
+    //REAL-TIME NOTIFICATION
+    const io = req.app.get('socketio');
+
+    io.to(venue_id).emit('delete_order', orderId);
 
     res.json({message: "Order deleted successfully"});
   } catch (error) {
