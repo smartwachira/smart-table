@@ -9,7 +9,7 @@ import { useCallback } from 'react';
 import {useNavigate} from 'react-router-dom';
 import toast from 'react-hot-toast';
 import io from 'socket.io-client';
-import MenuItem from '../../../server/models/MenuItem';
+
 
 // Sound Effect URl
 const BEEP_URL = 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3';
@@ -151,6 +151,14 @@ const Kitchen = () => {
             playSound();
             
         });
+
+        //Event: Order Deleted
+        socket.on("delete_order",(deletedOrderId)=>{
+            setOrders(prevOrders => prevOrders.filter(o => o.order_id !== deletedOrderId));
+            toast('Order Voided', { icon: '🗑️' });
+            playSound();
+            
+        })
         
 
         
