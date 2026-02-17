@@ -11,6 +11,7 @@ import toast from 'react-hot-toast';
 import io from 'socket.io-client';
 
 
+
 // Sound Effect URl
 const BEEP_URL = 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3';
 
@@ -171,7 +172,7 @@ const Kitchen = () => {
 
     return (
         <div className="kitchen-container">
-            <header className="kitchen-header">
+            <header className="kitchen-header ">
                 <h1>Kitchen Display System (KDS)</h1>
                 <button onClick={fetchOrders} className="refresh-btn">Refresh</button>
                 <button onClick={handleLogout} className="logout-btn" style={{marginLeft: '10px', background: '#333'}}>Logout</button>

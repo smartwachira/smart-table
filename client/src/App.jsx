@@ -7,7 +7,14 @@ import OrderStatus from "./components/OrderStatus";
 import Login from "./components/Login ";
 import PrivateRoute from "./components/PrivateRoute";
 import { Toaster } from 'react-hot-toast';
+import "./index.css"
+import Mainlayout from "./layouts/MainLayout";
 
+const MenuPage =()=>{
+  <div className="p-4 border-2 border-dashed border-gray-300 rounded-lg h-96 flex items-center justify-center">
+    <p className="text-gray-500">Menu Content Will Go Here</p>
+  </div>
+}
 
 function App(){
   return (
@@ -15,6 +22,9 @@ function App(){
       <Router>
         <Toaster position="top-center" reverseOrder={false}/>
         <Routes>
+          <Route element={<Mainlayout/>}>
+            <Route path="/" element={<MenuPage/>}></Route>
+          </Route>
           <Route path="/menu/:venueId" element={<Menu/>}></Route>
           <Route path="/checkout" element={<Checkout/>}></Route>
           <Route path="/kitchen/:venueId" element={
