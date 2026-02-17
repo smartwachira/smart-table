@@ -1,0 +1,14 @@
+# This automates testing Even if you don't have tests yet, set up the build check
+
+name: Production Build check
+on: [push, pull_request]
+jobs: 
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install & Build Client
+        run: |
+          cd Client
+          npm Install
+          npm run build
