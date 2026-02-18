@@ -1,5 +1,7 @@
 // "Global brain" of the Shopping cart
 import { createContext, useState, useEffect,useContext} from 'react';
+import toast from 'react-hot-toast';
+
 const CartContext = createContext();
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -12,17 +14,17 @@ export const CartProvider = ({ children }) =>{
         return localData ? JSON.parse(localData) :[];
     });
 
-    const [venueId, setVenueId] = useState(()=>{
-        return localStorage.getItem("smartTableVenueId") || null;
-    })
+    // const [venueId, setVenueId] = useState(()=>{
+    //     return localStorage.getItem("smartTableVenueId") || null;
+    // })
 
     // 2. Save the cart and VenueId (Whenever cart changes, save it to local storage)
     useEffect(()=>{
         localStorage.setItem("smartTableCart", JSON.stringify(cartItems));
     }, [cartItems]);
-    useEffect(()=>{
-        localStorage.setItem("smartTableVenueId", venueId);
-    }, [venueId]);
+    // useEffect(()=>{
+    //     localStorage.setItem("smartTableVenueId", venueId);
+    // }, [venueId]);
 
     //3. Add item to cart
     const addToCart = (item )=>{
@@ -32,11 +34,13 @@ export const CartProvider = ({ children }) =>{
             //If yes just increase quantity
             if (existingItem) {
                 // If yes, just increase quantity
+                toast.success(`Updated ${item.name} quantity`);
                 return prevItems.map((i) =>
                 i.item_id === item.item_id ? { ...i, quantity: i.quantity + 1 } : i
                 );
             } else {
                 // If no, add new item with quantity 1
+                toast.success(`Added ${item.name} to order`);
                 return [...prevItems, { ...item, quantity: 1 }];
             }
         });
@@ -76,8 +80,8 @@ export const CartProvider = ({ children }) =>{
             getCartTotal, 
             getCartCount, 
             clearCart,
-            venueId,
-            setVenueId
+            // venueId,
+            // setVenueId
             }}>
             {children}
         </CartContext.Provider>

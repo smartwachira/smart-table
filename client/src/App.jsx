@@ -18,15 +18,15 @@ const MenuPage =()=>{
 }
 
 function App(){
+
   return (
-    <CartProvider>
       <Router>
         <Toaster position="top-center" reverseOrder={false}/>
         <Routes>
           <Route element={<Mainlayout/>}>
-            {/* <Route path="/" element={<MenuPage/>}></Route> */}
+            <Route path="/" element={<Menu />} />
           </Route>
-          <Route path="/" element={<Menu />} />
+          
           <Route path="/menu/:venueId" element={<Menu/>}></Route>
           <Route path="/checkout" element={<Checkout/>}></Route>
           <Route path="/kitchen/:venueId" element={
@@ -43,7 +43,7 @@ function App(){
           <Route path="*" element={<div>Page Not Found</div>}></Route>
         </Routes>
       </Router>
-    </CartProvider>
+    
   )
 }
 

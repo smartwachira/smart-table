@@ -7,6 +7,7 @@
 // //import { useCart } from '../context/CartContext';
 // import MenuSkeleton  from './MenuSkeleton';
 import MenuItem from './MenuItem';
+import { useCart } from '../context/CartContext';
 
 
 //Mock Data for Ui Testing
@@ -32,10 +33,8 @@ const MOCK_MENU = [
 
 
 const Menu =()=>{
-  const handleAddTocart=(item)=>{
-    console.log("Added:",item.name);
-    alert(`Added ${item.name} to cart!`);
-  }
+  const { handleAddTocart} = useCart()
+  
 
 
   return(

@@ -45,18 +45,17 @@ const MenuItem = ({item, onAddToCart}) => {
                     {description}
                 </p>
 
-                <button
-                    onClick={()=>is_available && onAddToCart(item)}
+                <button 
+                    onClick={() => is_available && onAddToCart}
                     disabled={!is_available}
-                    className={`w-full py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors font-medium 
-                        ${is_available
-                             ? 'bg-brand-muted text-brand-secondary hover:bg-brand-primary hover:text-white active:scale-95'
-                             : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                    
+                    className={`w-full py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all font-medium active:scale-95
+                        ${is_available 
+                        ? 'bg-surface-muted text-brand-secondary hover:bg-brand-primary hover:text-white' 
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                         }`}
                 >
-                    <Plus size={18}/>
-                    {is_available? 'Add to Order':'Unavailable'}
+                    <Plus size={18} />
+                    {is_available ? 'Add to Order' : 'Unavailable'}
                 </button>
             </div>
 

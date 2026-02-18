@@ -1,8 +1,13 @@
 import { Link } from "react-router-dom";
 import { ShoppingBag, UtensilsCrossed,Menu, X } from "lucide-react";
 import { useState } from "react";
+import { useCart } from "../context/CartContext";
+
 const Navbar = ()=>{
+    const {getCartCount} = useCart();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+
     return (
         <nav className="sticky top-0 z-50 w-full bg-white/80 backdrop-blur-md border-b border-gray-100">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -29,12 +34,16 @@ const Navbar = ()=>{
 
                         {/* Cart Button */}
                         <button className="relative p-2 hover:bg-gray-100 rounded-full transition-colors group">
-                            <ShoppingBag className="w-6 h-6 text-gray-600 group-hover:text-brand-primary">
-                                {/* Badge */}
+                            <ShoppingBag className="w-6 h-6 text-gray-600 group-hover:text-brand-primary"/>
+                            {/* Badge */}
+                            {getCartCount >0 && (
                                 <span className="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white transform translate-x-1/4 -translate-y-1/4 bg-brand-accent rounded-full shadow-sm">
-                                0
+                                {getCartCount}
                                 </span>
-                            </ShoppingBag>
+                            )}
+                        
+                                
+                            
                         </button>
                     </div>
 
