@@ -9,6 +9,6 @@ jobs:
       - uses: actions/checkout@v3
       - name: Install & Build Client
         run: |
-          cd Client
-          npm Install
+          cd client
+          npm install
           npm run build

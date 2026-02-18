@@ -30,7 +30,7 @@ export const CartProvider = ({ children }) =>{
     const addToCart = (item )=>{
         setCartItems((prevItems) =>{
             //check if item  is already in cart
-            const existingItem = prevItems.find((i)=> i.item_id === item.item_id);
+            const existingItem = prevItems.find((i)=> i.id === item.id);
             //If yes just increase quantity
             if (existingItem) {
                 // If yes, just increase quantity
@@ -59,15 +59,10 @@ export const CartProvider = ({ children }) =>{
         );
     };
 
+    //Function : Calculate Total count
+    const cartCount = cartItems.reduce((total, item) => total + item.quantity, 0);
     //Function : Calculate Total Price
-    const getCartTotal = () =>{
-        return cartItems.reduce((total, item) => total + parseFloat(item.price) * item.quantity, 0);
-    };
-
-    //Function: Count Total Items
-    const getCartCount = () =>{
-        return cartItems.reduce((total, item) => total + item.quantity, 0);
-    };
+    const cartTotal = cartItems.reduce((total, item) => total + (item.price * item.quantity), 0);
 
     //Function : Clear the cart
     const clearCart = () => setCartItems([]);
@@ -77,8 +72,8 @@ export const CartProvider = ({ children }) =>{
             cartItems, 
             addToCart, 
             removeFromCart, 
-            getCartTotal, 
-            getCartCount, 
+            cartCount, 
+            cartTotal, 
             clearCart,
             // venueId,
             // setVenueId

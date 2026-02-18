@@ -7,7 +7,8 @@
 // //import { useCart } from '../context/CartContext';
 // import MenuSkeleton  from './MenuSkeleton';
 import MenuItem from './MenuItem';
-import { useCart } from '../context/CartContext';
+//import { useCart } from '../context/CartContext';
+
 
 
 //Mock Data for Ui Testing
@@ -33,9 +34,8 @@ const MOCK_MENU = [
 
 
 const Menu =()=>{
-  const { handleAddTocart} = useCart()
   
-
+  
 
   return(
     <div className="w-full animate-fadeIn">
@@ -51,7 +51,7 @@ const Menu =()=>{
           <MenuItem
             key={item.id}
             item={item}
-            onAddToCart={handleAddTocart}
+            
           />
         ))}
       </div>

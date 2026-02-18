@@ -1,10 +1,10 @@
 // This component handles one single dish. Doesn't care about fetching data; it just displays what it's given
-//import { useCart } from  '../context/CartContext';
+import { useCart } from  '../context/CartContext';
 
 import { Plus, Ban } from 'lucide-react';
 
-const MenuItem = ({item, onAddToCart}) => {
-    //const {addToCart} = useCart();
+const MenuItem = ({item}) => {
+    const {addToCart} = useCart();
     const{ name, description,price,image_url,is_available} =item;
     return (
         <div className="group relative bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-full transition-all hover:shadow-md">
@@ -46,7 +46,7 @@ const MenuItem = ({item, onAddToCart}) => {
                 </p>
 
                 <button 
-                    onClick={() => is_available && onAddToCart}
+                    onClick={() => addToCart(item)}
                     disabled={!is_available}
                     className={`w-full py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all font-medium active:scale-95
                         ${is_available 
