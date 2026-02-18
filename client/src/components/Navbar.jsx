@@ -4,9 +4,9 @@ import { useState } from "react";
 import { useCart } from "../context/CartContext";
 
 const Navbar = ()=>{
-    const {cartCount} = useCart();
+    const {cartCount,toggleCart} = useCart();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
+    
 
     return (
         <nav className="sticky top-0 z-50 w-full bg-white/80 backdrop-blur-md border-b border-gray-100">
@@ -33,7 +33,10 @@ const Navbar = ()=>{
                         </Link>
 
                         {/* Cart Button */}
-                        <button className="relative p-2 hover:bg-gray-100 rounded-full transition-colors group">
+                        <button 
+                            className="relative p-2 hover:bg-gray-100 rounded-full transition-colors group"
+                            onClick={toggleCart}
+                        >
                             <ShoppingBag className="w-6 h-6 text-gray-600 group-hover:text-brand-primary"/>
                             {/* Badge */}
                             {cartCount >0 && (

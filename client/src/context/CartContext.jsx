@@ -14,6 +14,11 @@ export const CartProvider = ({ children }) =>{
         return localData ? JSON.parse(localData) :[];
     });
 
+    // Add Visibility state
+    const [isCartOpen, setIsCartOpen] = useState(false);
+
+    const toggleCart = ()=> setIsCartOpen(prev=>!prev);
+
     // const [venueId, setVenueId] = useState(()=>{
     //     return localStorage.getItem("smartTableVenueId") || null;
     // })
@@ -34,9 +39,9 @@ export const CartProvider = ({ children }) =>{
             //If yes just increase quantity
             if (existingItem) {
                 // If yes, just increase quantity
-                toast.success(`Updated ${item.name} quantity`);
+                toast.success(`Updated ${item.name}`);
                 return prevItems.map((i) =>
-                i.item_id === item.item_id ? { ...i, quantity: i.quantity + 1 } : i
+                i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i
                 );
             } else {
                 // If no, add new item with quantity 1
@@ -47,13 +52,20 @@ export const CartProvider = ({ children }) =>{
     };
 
     //Function: Remove item (or decrease quantity)
-    const removeFromCart = (itemId) =>{
+    const removeFromCart = (itemId) => {
         setCartItems((prevItems) =>
-            prevItems.reduce((acc, item)=>{
-                if (item.item_id === itemId){
-                    if (item.quantity === 1) return acc;
-                    return [...acc, {...item, quantity: item.quantity - 1}];
+            prevItems.reduce((acc, item) => {
+                // FIX: Use 'id', not 'item_id'
+                if (item.id === itemId) {
+                    // If quantity is 1, remove it (skip adding to acc)
+                    if (item.quantity === 1) {
+                        toast.error("Item removed");
+                        return acc;
+                    }
+                    // Otherwise, decrease quantity
+                    return [...acc, { ...item, quantity: item.quantity - 1 }];
                 }
+                // Keep other items
                 return [...acc, item];
             }, [])
         );
@@ -75,6 +87,9 @@ export const CartProvider = ({ children }) =>{
             cartCount, 
             cartTotal, 
             clearCart,
+            isCartOpen,
+            setIsCartOpen,
+            toggleCart
             // venueId,
             // setVenueId
             }}>
