@@ -1,128 +1,62 @@
-import { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
-import axios from "axios";
-import './Menu.css';
-import MenuCategory from './MenuCategory';
-import FloatingCart from './FloatingCart';
-import { useCart } from '../context/CartContext';
-import MenuSkeleton  from './MenuSkeleton';
+// //import { useState, useEffect } from 'react';
+// //import { useParams } from 'react-router-dom';
+// //import axios from "axios";
+// //import './Menu.css';
+// import MenuCategory from './MenuCategory';
+// import FloatingCart from './FloatingCart';
+// //import { useCart } from '../context/CartContext';
+// import MenuSkeleton  from './MenuSkeleton';
+import MenuItem from './MenuItem';
 
 
-const Menu = () => {
-    const { venueId } = useParams();
-    const { setVenueId } = useCart();
-    const [venue, setVenue] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
-    const [activeCategory, setActiveCategory] = useState(null) //Track the active bar
+//Mock Data for Ui Testing
+const MOCK_MENU = [
+  {
+    id:1,
+    name: "Sizzling Steak",
+    description: "Premium aged beef steak served with peppercorn sauce and golden fries",
+    price:950,
+    image_url: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=800&q=80",
+    is_available: true,
+
+  },
+  {
+    id: 3,
+    name: "Mojito Special",
+    description: "Refreshing mint and lime cocktail. The perfect summer drink.",
+    price: 650,
+    image_url: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?auto=format&fit=crop&w=800&q=80",
+    is_available: false, // Testing Sold Out logic
+  }
+]
 
 
-    useEffect(() =>{
-        const fetchMenu = async () =>{
-            try {
-                //API call(The GET Request)
-                console.log("fetching menu for:", venueId); //debug log 1
+const Menu =()=>{
+  const handleAddTocart=(item)=>{
+    console.log("Added:",item.name);
+    alert(`Added ${item.name} to cart!`);
+  }
 
-                const response = await axios.get(`/api/menu/${venueId}`);
 
-                console.log("API Response Data:", response.data) //debug log 2
-                setVenue(response.data);
-
-                //Set the first category as active by default if data exists
-                if (response.data.MenuCategories && response.data.MenuCategories.length > 0){
-                  setActiveCategory(response.data.MenuCategories[0].category_id);
-                }
-                setLoading(false);
-
-            } catch (err) {
-                console.error("Error fetching menu:", err);
-                setError("Failed to load menu. Please scan the QR code again.");
-                setLoading(false);
-            }
-        };
-
-        if (venueId) {
-            fetchMenu();
-            setVenueId(venueId); // save 
-        }
-    }, [venueId,setVenueId]);
-
-    // ---SCROLL HANDLER ---
-    const handleScrollTo = (category_id) =>{
-      setActiveCategory(category_id);
-      const element = document.getElementById(`cat-${category_id}`);
-      if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'start'})
-      }
-    }
-
-    //The Rendering (The Display)
-
-    // Gatekeepers - prevent the app from crashing
-
-    if (loading) return (
-      <div className="menu-container">
-        <div className="menu-header">
-          <h1>Loading Menu...</h1>
-        </div>
-        <div className="menu-grid">
-          {[1,2,3,4,5,6].map((n)=>(
-            <MenuSkeleton key={n}/>
-          ))}
-        </div>
+  return(
+    <div className="w-full animate-fadeIn">
+      {/* Section Header */}
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-bold text-gray-500 text-gray-900">Popular Items</h2>
+        <span className="text-sm text-gray-500">{ MOCK_MENU.length} items</span>
       </div>
-    );
-    if (error) return <div className="error">{error}</div>;
-    if (!venue) return <div>No menu found.</div>;
 
-    //Safety check for categories 
-    const categories = venue.MenuCategories || [];
-
-    return (
-    <div className="menu-container">
-      <header className="venue-header">
-        <h1>{venue.name}</h1>
-        <p className="venue-location">{venue.location}</p>
-      </header>
-
-      {/* ---- STICKY NAVIGATION BAR --- */}
-      {categories.length > 0 && (
-        <div className="category-nav">
-          {categories.map((cat)=>(
-            <button 
-              key={cat.category_id} 
-              className={`nav-pill ${activeCategory === cat.category_id? 'active': ''}`}
-              onClick={()=> handleScrollTo(cat.category_id)}
-            >
-              {cat.name}
-            </button>
-          ))}
-        </div>
-      )}
-
-
-      {/* --- MENU LIST --- */}
-
-      <div className="menu-content">
-        {/* SAFE GUARD: Check if MenuCategories exists before mapping */}
-        {categories && categories.length > 0 ? (
-          categories.map((category) => (
-            <div className="category-section"
-                  key={category.category_id}
-                  id={`cat-${category.category_id}`}>
-            <MenuCategory  category= {category}/>
-            </div>
-          ))
-        ) : (
-          <div className="empty-menu">
-            <p>This venue has no menu categories yet.</p>
-          </div>
-        )}
+      {/* Responsive Grid System */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        {MOCK_MENU.map((item)=>(
+          <MenuItem
+            key={item.id}
+            item={item}
+            onAddToCart={handleAddTocart}
+          />
+        ))}
       </div>
-      <FloatingCart/>
     </div>
-  );
-
+  )
 };
-
 export default Menu;

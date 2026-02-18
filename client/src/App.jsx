@@ -11,8 +11,9 @@ import "./index.css"
 import Mainlayout from "./layouts/MainLayout";
 
 const MenuPage =()=>{
-  <div className="p-4 border-2 border-dashed border-gray-300 rounded-lg h-96 flex items-center justify-center">
-    <p className="text-gray-500">Menu Content Will Go Here</p>
+  <div className="p-8 text-center border-2 border-dashed border-gray-300 rounded-xl">
+      <h2 className="text-2xl font-bold text-gray-700">Menu Content Goes Here</h2>
+      <p className="text-gray-500 mt-2">We will migrate the Menu Component next.</p>
   </div>
 }
 
@@ -23,8 +24,9 @@ function App(){
         <Toaster position="top-center" reverseOrder={false}/>
         <Routes>
           <Route element={<Mainlayout/>}>
-            <Route path="/" element={<MenuPage/>}></Route>
+            {/* <Route path="/" element={<MenuPage/>}></Route> */}
           </Route>
+          <Route path="/" element={<Menu />} />
           <Route path="/menu/:venueId" element={<Menu/>}></Route>
           <Route path="/checkout" element={<Checkout/>}></Route>
           <Route path="/kitchen/:venueId" element={
@@ -37,7 +39,7 @@ function App(){
           {/* The default Route */}
           {/* (<h1>...</h1>) directly inline. This is fine for simple placeholders, 
           but usually, you would replace this with a <LandingPage /> component later. */}
-          <Route path="/" element={<h1>Welcome to SmartTable. Scan a QR Code.</h1>}></Route>
+          {/* <Route path="/" element={<h1>Welcome to SmartTable. Scan a QR Code.</h1>}></Route> */}
           <Route path="*" element={<div>Page Not Found</div>}></Route>
         </Routes>
       </Router>
