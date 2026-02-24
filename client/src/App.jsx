@@ -1,6 +1,5 @@
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import Menu from './components/Menu';
-import { CartProvider } from "./context/CartContext";
 import Checkout from "./components/Checkout";
 import Kitchen from "./components/Kitchen";
 import OrderStatus from "./components/OrderStatus";
@@ -9,13 +8,6 @@ import PrivateRoute from "./components/PrivateRoute";
 import { Toaster } from 'react-hot-toast';
 import "./index.css"
 import Mainlayout from "./layouts/MainLayout";
-
-const MenuPage =()=>{
-  <div className="p-8 text-center border-2 border-dashed border-gray-300 rounded-xl">
-      <h2 className="text-2xl font-bold text-gray-700">Menu Content Goes Here</h2>
-      <p className="text-gray-500 mt-2">We will migrate the Menu Component next.</p>
-  </div>
-}
 
 function App(){
 

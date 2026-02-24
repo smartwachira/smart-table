@@ -52,7 +52,9 @@ const Navbar = ()=>{
 
                     {/* Mobile Menu Button */}
                     <div className="md:hidden flex items-center">
-                        <button className="p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none">
+                        <button 
+                            onClick={()=> setIsMobileMenuOpen(!isMobileMenuOpen)}
+                            className="p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none">
                             {isMobileMenuOpen ? <X size={24}/>:<Menu size={24}/>}
                         </button>
                     </div>

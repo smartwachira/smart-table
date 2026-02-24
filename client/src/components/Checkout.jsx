@@ -1,156 +1,139 @@
 import { useState } from 'react';
-import { useNavigate, } from 'react-router-dom';
+import {useNavigate} from 'react-router-dom';
 import { useCart } from '../context/CartContext';
-import axios from 'axios';
-import './Checkout.css';
+import { Smartphone, MapPin, ShieldCheck, Loader2   } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const Checkout = () => {
-  const { cartItems, addToCart, removeFromCart, getCartTotal, venueId } = useCart();
-  const navigate = useNavigate();
-  
-  // State for form inputs
-  const [tableNumber, setTableNumber] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('M-Pesa');
-  const [customerName, setCustomerName] = useState('');
-  //const { venueId } = useParams();
+const Checkout = ()=>{
+    const { cartItems, cartTotal, clearCart} = useCart();
+    const navigate = useNavigate();
 
-  // Handle Order Submission
-  const handlePlaceOrder = async () => {
-    if (!tableNumber) {
-      toast.error("Please enter your table number.");
-      return;
+    //Form  State
+    const [tableNumber, setTableNumber] = useState('');
+    const [phone, setPhone] = useState('');
+    const [isProcessing, setIsProcessing] = useState(false);
+
+    const handleCheckout = async (e) =>{
+        e.preventDefault();
+
+        //1. Basic Validation
+        if (!tableNumber || !phone){
+            return toast.error("Please fill in all fields");
+        }
+
+        setIsProcessing(true);
+        toast.loading("Initiating M-pesa STK Push...",{id: 'mpesa'});
+
+
+        //2. Simulate Backend API Call & Daraja Delay (3 seconds)
+        //In Sprint 11, we will replace this with an actual Axios POST request
+        setTimeout(()=>{
+            toast.success("Payment Received! Order placed.",{ id: 'mpesa'});
+            setIsProcessing(false);
+            clearCart();
+            navigate('/orders'); //Redirect to their order status page
+        }, 3500);
+
+
     }
 
-    try {
-        const orderDetails = {
-        venueId: venueId,
-        tableNumber: tableNumber,
-        customerName: customerName,
-        paymentMethod,
-        items: cartItems,
-        total: getCartTotal()
-        };
+    //Prevent checkout if cart is empty
+    if (cartItems.length ===0){
+        return (
+            <div className="flex flex-col items-center justify-center h-96 text-center px-4">
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">Your cart is empty</h2>
+                <p className="text-gray-500 mb-6">Add some delicious items before Checking out.</p>
+                <button className="bg-brand-primary text-white px-6 py-2 rounded-lg font-medium">
+                    Back to Menu
+                </button>
+            </div>
+        )
+    }
 
-        console.log("🚀 DEBUG: Sending Order Payload:", orderDetails);
-
-        // Send to Backend
-        const response = await axios.post('/api/orders', orderDetails);
-        
-
-        //Notification
-        toast.success("Order Placed! Redirecting...",{
-          duration: 4000,
-          style: {
-            background: '#333',
-            color: 'fff'
-          }
-        })
-
-        //Redirect to Tracking Page
-        navigate(`/order-status/${response.data.orderId}`); 
-    } catch (error) {
-    console.error("Order failed", error);
-    toast.error("Failed to place order. Try again.");
-    // In Sprint 5, we will connect this to the backend API
-  };
-}
-  // Empty Cart State
-  if (cartItems.length === 0) {
     return (
-      <div className="checkout-empty">
-        <h2>Your cart is empty</h2>
-        <p>Looks like you haven't added anything yet.</p>
-        <button className="back-btn" onClick={() => navigate(-1)}>
-          Back to Menu
-        </button>
-      </div>
-    );
-  }
+        <div className="max-w-3xl mx-auto animate-fadeIn">
+            <h1 className="text-2xl font-bold text-gray-900 mb-6">Checkout</h1>
 
-  return (
-    <div className="checkout-container">
-      <header className="checkout-header">
-        <h1>Your Order</h1>
-      </header>
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden md:flex">
 
-      {/* List of Items */}
-      <div className="checkout-items">
-        {cartItems.map((item) => (
-          <div key={item.item_id} className="checkout-item">
-            <div className="item-details">
-              <h3 className="item-name">{item.name}</h3>
-              <p className="item-price">KES {item.price}</p>
+                {/**Left Column: Order Summary */}
+                <div className="bg-surface-muted p-6 md:w-5/12 border-b md:border-b-0 md:border-r border-gray-100">
+                    <h3 className="font-semibold text-gray-900 mb-4">Order Summary</h3>
+                    <div className="space-y-3 mb-6 max-h-60 overflow-y-auto pr-2">
+                        {cartItems.map(item =>(
+                            <div className="flex justify-between text-sm">
+                                <span className="text-gray-600">{item.quantity}x{item.name}</span>
+                                <span className='font-medium text-gray-900'>{(item.price * item.quantity).toLocaleString()}</span>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="pt-4 border-t border-gray-200 flex justify-between items-center">
+                        <span className="font-bold text-gray-900 text-lg">Total</span>
+                        <span className="font-bold text-brand-primary text-xl">{cartTotal.toLocaleString()} KES</span>
+                    </div>
+                </div>
+
+                {/* Right Column: Payment Form */}
+                <div className="p-6 md:w-7/12">
+                    <form onSubmit={handleCheckout} className="space-y-5">
+
+                        {/* Table Number Input */}
+                        <div>
+                            <label  className="block text-sm font-medium text-gray-700 mb-1">Table Number</label>
+                            <div className="relative">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <MapPin className="h-5 w-5 text-gray-400"></MapPin>
+                                </div>
+                                <input 
+                                    type="number" 
+                                    required
+                                    value={tableNumber}
+                                    onChange={(e)=> setTableNumber(e.target.value)}
+                                    placeholder='e.g. 12'
+                                    className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl focus:ring-brand-primary focus:border-brand-primary transition-colors" />
+                            </div>
+                        </div>
+
+                        {/* Phone Number Input (Mpesa Styling) */}
+                        <div>
+                            <label htmlFor="" className="block text-sm font-medium text-gray-700 mb-1">M-Pesa Mobile Number</label>
+                            <div className="relative">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <Smartphone className="h-5 w-5 text-[#52B520]"/>
+                                </div>
+                                <input 
+                                    placeholder='07XX XXX XXX'
+                                    type="tel"
+                                    value={phone} 
+                                    onChange={(e)=>setPhone(e.target.value)}
+                                    className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl focus:ring-[#52B520] focus:border-[#52B520] transition-colors font-medium" />
+                            </div>
+                            <p className="mt-2 text-xs text-gray-500 flex items-center gap-1">
+                                <ShieldCheck size={14} className='text-[#52B520]'></ShieldCheck>
+                                Keep your phone unlocked. A prompt will appear shortly.
+                            </p>
+                        </div>
+
+                        {/* Submit Button */}
+                        <button 
+                            type='submit'
+                            disabled={isProcessing}
+                            className={`w-full mt-6 py-4 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all shadow-lg
+                                ${isProcessing ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#52B520] hover:bg-[#459ela] active:scale-95 shadow-[#52B520]/30'}`}
+                        >
+                            {isProcessing ? (
+                                <><Loader2 className='animate-spin' size={20}/> Awaiting PIN...</>
+
+                            ):(
+                                `Pay ${cartTotal.toLocaleString()} Kes with Mpesa`
+                            )}
+                        </button>
+                        
+                    </form>
+                </div>
             </div>
-            
-            <div className="quantity-controls">
-              <button 
-                className="qty-btn" 
-                onClick={() => removeFromCart(item.item_id)}
-              >
-                -
-              </button>
-              <span className="qty-value">{item.quantity}</span>
-              <button 
-                className="qty-btn" 
-                onClick={() => addToCart(item)}
-              >
-                +
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Order Details Form */}
-      <div className="order-form">
-        <div className="form-group">
-          <label>Table Number</label>
-          <input 
-            type="text" 
-            value={tableNumber} 
-            onChange={(e) => setTableNumber(e.target.value)} 
-            placeholder="e.g. 5"
-            className="form-input"
-          />
         </div>
-        <div className="form-group">
-          <label >Your Name</label>
-          <input 
-            type="text" 
-            className="form-input"
-            onChange={(e)=>setCustomerName(e.target.value)}
-            placeholder='e.g. John Maina'
-            value={customerName}
-          />
-          
-        </div>
-        
-        <div className="form-group">
-          <label>Payment Method</label>
-          <select 
-            value={paymentMethod} 
-            onChange={(e) => setPaymentMethod(e.target.value)}
-            className="form-select"
-          >
-            <option value="M-Pesa">M-Pesa</option>
-            <option value="Cash">Cash</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="checkout-footer">
-        <div className="total-section">
-          <span className="total-label">Total</span>
-          <span className="total-amount">KES {getCartTotal().toFixed(2)}</span>
-        </div>
-        <button className="confirm-btn" onClick={handlePlaceOrder}>
-          Confirm Order
-        </button>
-      </div>
-    </div>
-  );
+    )
 };
 
 export default Checkout;
