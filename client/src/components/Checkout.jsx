@@ -3,6 +3,7 @@ import {useNavigate} from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { Smartphone, MapPin, ShieldCheck, Loader2   } from 'lucide-react';
 import toast from 'react-hot-toast';
+import axios from 'axios';
 
 const Checkout = ()=>{
     const { cartItems, cartTotal, clearCart} = useCart();
@@ -21,18 +22,48 @@ const Checkout = ()=>{
             return toast.error("Please fill in all fields");
         }
 
+        if (phone.length < 10){
+            return toast.error("Please enter a valid phone number");
+        }
+
         setIsProcessing(true);
-        toast.loading("Initiating M-pesa STK Push...",{id: 'mpesa'});
+        toast.loading("Initiating M-Pesa STK Push...", { id: 'mpesa' });
+
+        try {
+            //2. Data Transformation (Mapping Frontend State to Backend Schema)
+            const orderPayLoad = {
+                table_number: tableNumber,
+                phone_number: phone,
+                total_amount: cartTotal,
+                items: cartItems.map(item=>({
+                    item_id: item.id,
+                    quantity: item.quantity,
+                    price: item.price
+
+                }))
+            };
+
+            //3. Network Request
+            await axios.post('/api/orders',orderPayLoad);
 
 
-        //2. Simulate Backend API Call & Daraja Delay (3 seconds)
-        //In Sprint 11, we will replace this with an actual Axios POST request
-        setTimeout(()=>{
+            //4. Success Handling
             toast.success("Payment Received! Order placed.",{ id: 'mpesa'});
-            setIsProcessing(false);
             clearCart();
-            navigate('/orders'); //Redirect to their order status page
-        }, 3500);
+
+            //Navigate to orders page (In the future, we can pass the specific order ID)
+            navigate('/orders');
+
+        } catch (error){
+            //5. Error Handling
+            console.error("Checkout Error:",error);
+
+            const errorMessage = error.response?.data?.message || "Checkout failed. Please try again.";
+            toast.error(errorMessage, {id: 'mpesa'});
+        } finally {
+            //6. Cleanup (Always runs)
+            setIsProcessing(false);
+        }
 
 
     }

@@ -9,6 +9,7 @@ import { Toaster } from 'react-hot-toast';
 import "./index.css"
 import Mainlayout from "./layouts/MainLayout";
 
+
 function App(){
 
   return (
@@ -21,6 +22,7 @@ function App(){
           
           <Route path="/menu/:venueId" element={<Menu/>}></Route>
           <Route path="/checkout" element={<Checkout/>}></Route>
+          <Route path="/orders" element={<OrderStatus/>}></Route>
           <Route path="/kitchen/:venueId" element={
             <PrivateRoute allowedRoles={["manager", "kitchen"]}>
               <Kitchen/>
