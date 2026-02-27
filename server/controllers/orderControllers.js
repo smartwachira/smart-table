@@ -13,7 +13,7 @@ export const createOrder = async (req,res) => {
     try {
 
         // Collect data from request
-        const {venueId,tableNumber, items, total, paymentMethod, customerName } = req.body;
+        const {venue_id,table_number, items, total_amount, payment_method, customer_name,phone_number } = req.body;
 
         if (!items || items.length === 0){
             return res.status(400).json({ message: "Cannot place empty order"});
@@ -21,11 +21,12 @@ export const createOrder = async (req,res) => {
 
         // 1. Create the Main Order Record
         const newOrder = await Order.create({
-            venue_id: venueId,
-            customer_name: customerName || `Guest (table ${tableNumber})`,
-            table_number: tableNumber,
-            total_amount: total,
-            payment_method: paymentMethod,
+            venue_id: venue_id,
+            customer_name: customer_name || `Guest (table ${tableNumber})`,
+            table_number: table_number,
+            phone_number:phone_number,
+            total_amount: total_amount,
+            payment_method: payment_method ,
             status: "pending"
         }, {transaction: t}); // pass the transaction object
 
