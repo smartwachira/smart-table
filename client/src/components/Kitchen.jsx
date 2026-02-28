@@ -4,7 +4,7 @@
 import {useState, useEffect } from 'react';
 import { Await, useParams } from 'react-router-dom';
 import axios from 'axios';
-import './Kitchen.css';
+//import './Kitchen.css';
 import { useCallback } from 'react';
 import {useNavigate} from 'react-router-dom';
 import toast from 'react-hot-toast';

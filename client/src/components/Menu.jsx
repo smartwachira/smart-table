@@ -1,60 +1,95 @@
-// //import { useState, useEffect } from 'react';
-// //import { useParams } from 'react-router-dom';
-// //import axios from "axios";
-// //import './Menu.css';
-// import MenuCategory from './MenuCategory';
-// import FloatingCart from './FloatingCart';
-// //import { useCart } from '../context/CartContext';
-// import MenuSkeleton  from './MenuSkeleton';
-import MenuItem from './MenuItem';
-//import { useCart } from '../context/CartContext';
-
-
-
-//Mock Data for Ui Testing
-const MOCK_MENU = [
-  {
-    id:1,
-    name: "Sizzling Steak",
-    description: "Premium aged beef steak served with peppercorn sauce and golden fries",
-    price:950,
-    image_url: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=800&q=80",
-    is_available: true,
-
-  },
-  {
-    id: 3,
-    name: "Mojito Special",
-    description: "Refreshing mint and lime cocktail. The perfect summer drink.",
-    price: 650,
-    image_url: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?auto=format&fit=crop&w=800&q=80",
-    is_available: false, // Testing Sold Out logic
-  }
-]
+import { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
+import axios from "axios";
+import { UtensilsCrossed, Loader2 } from 'lucide-react';
+import { useCart } from '../context/CartContext';
+import MenuCategory from './MenuCategory';
 
 
 const Menu =()=>{
-  
-  
+  const { venueId } = useParams();
+  const {addToCart} = useCart();
+
+  //State Management
+  const [venue,setVenue] = useState(null);
+  const [categories, setCategories] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(()=>{
+    const fetchMenu = async ()=>{
+      try{
+        setIsLoading(true);
+        //Fallback for local testing if URL doesn't have a venue ID
+        const targetVenue = venueId || '';
+
+        const response = await axios.get(`/api/menu/${targetVenue}`);
+
+        setVenue(response.data);
+
+        //The ADAPTER PATTERN: Map 'item_id' from backend to 'id' for frontend
+        const mappedCategories = response.data.MenuCategories.map(cat =>({
+          ...cat,
+          MenuItems: cat.MenuItems.map( item=>({
+            ...item,
+            id: item.item_id
+          }))
+        }));
+
+        setCategories(mappedCategories);
+      } catch (err){
+        console.error("Menu fetch error:",err);
+        setError("Failed to load the menu. Please scan the QR code again.");
+      } finally{
+        setIsLoading(false);
+      }
+    };
+
+    fetchMenu();
+
+  },[venueId]);
+
+  //Loading State
+  if (isLoading){
+    return (
+      <div className="flex flex-col items-center justify-center h-64 text-brand-primary">
+        <Loader2 className="w-10 h-10 animate-spin mb-4"></Loader2>
+        <p className="font-medium text-gray-600">Loading digital menu...</p>
+      </div>
+    )
+  }
+
+  // Error State
+  if(error){
+    return(
+      <div className="flex flex-col items-center justify-center h-64 text-center px-4">
+        <UtensilsCrossed className="w-12 h-12 text-gray-300 mb-4"></UtensilsCrossed>
+        <p className="text-red-500 font-medium">{error}</p>
+      </div>
+    );
+  }
 
   return(
-    <div className="w-full animate-fadeIn">
-      {/* Section Header */}
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold text-gray-500 text-gray-900">Popular Items</h2>
-        <span className="text-sm text-gray-500">{ MOCK_MENU.length} items</span>
-      </div>
+    <div className="w-full">
+      {venue && (
+        <div className="mb-4 text-center sm:text-left bg-surface-muted p-6 rounded-2xl border border-gray-100">
+          <h1 className="text-3xl font-bold text-brand-secondary">{venue.name}</h1>
+          <p className="text-gray-500 mt-1">Tap an item to add it to your order.</p>
+        </div>
+      )}
 
-      {/* Responsive Grid System */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {MOCK_MENU.map((item)=>(
-          <MenuItem
-            key={item.id}
-            item={item}
-            
-          />
-        ))}
-      </div>
+      {/* Map the Categories */}
+      {categories.length > 0?(
+        categories.map((category)=>(
+          <MenuCategory
+            key={category.category_id}
+            category={category}
+            onAddToCart={addToCart}
+          ></MenuCategory>
+        ))
+      ) : (
+        <p className="text-center text-gray-500 py-10">No menu items available today.</p>
+      )}
     </div>
   )
 };

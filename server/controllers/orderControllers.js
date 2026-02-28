@@ -22,7 +22,7 @@ export const createOrder = async (req,res) => {
         // 1. Create the Main Order Record
         const newOrder = await Order.create({
             venue_id: venue_id,
-            customer_name: customer_name || `Guest (table ${tableNumber})`,
+            customer_name: customer_name || `Guest (table ${table_number})`,
             table_number: table_number,
             phone_number:phone_number,
             total_amount: total_amount,
@@ -46,7 +46,7 @@ export const createOrder = async (req,res) => {
 
         //BROADCAST: to socket system
         const io = req.app.get('socketio')
-        io.to(venueId).emit('receive_order',{
+        io.to(venue_id).emit('receive_order',{
           order: newOrder,
           items: items
         });

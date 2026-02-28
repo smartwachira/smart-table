@@ -35,12 +35,12 @@ const Checkout = ()=>{
 
 
         setIsProcessing(true);
-        toast.loading(paymentMethod === ' mpesa'? "Initiating M-Pesa STK Push..." : "Sending order to kitchen...", { id: 'checkout' });
+        toast.loading(paymentMethod === 'mpesa'? "Initiating M-Pesa STK Push..." : "Sending order to kitchen...", { id: 'checkout' });
 
         try {
             //2. Data Transformation (Mapping Frontend State to Backend Schema)
             const orderPayLoad = {
-                venue_id: venueId,
+                venue_id: venueId || 'c5337ce2-d99f-443c-9a01-81f49016beb9',
                 table_number: tableNumber,
                 customer_name: customerName,
                 payment_method:paymentMethod,
@@ -104,7 +104,7 @@ const Checkout = ()=>{
                     <h3 className="font-semibold text-gray-900 mb-4">Order Summary</h3>
                     <div className="space-y-3 mb-6 max-h-60 overflow-y-auto pr-2">
                         {cartItems.map(item =>(
-                            <div className="flex justify-between text-sm">
+                            <div key={item.id} className="flex justify-between text-sm">
                                 <span className="text-gray-600">{item.quantity}x{item.name}</span>
                                 <span className='font-medium text-gray-900'>{(item.price * item.quantity).toLocaleString()}</span>
                             </div>
@@ -210,7 +210,7 @@ const Checkout = ()=>{
                             type='submit'
                             disabled={isProcessing}
                             className={`w-full mt-6 py-4 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all shadow-lg
-                                ${isProcessing ? 'bg-gray-400 cursor-not-allowed' : paymentMethod === 'mpesa'? 'bg-[#52B520] hover:bg-[#459ela] active:scale-95 shadow-[#52B520]/30 ': 'bg-brand-primary hover:bg-emarald-600 shadow-brand-primary/30'}`}
+                                ${isProcessing ? 'bg-gray-400 cursor-not-allowed' : paymentMethod === 'mpesa'? 'bg-[#52B520] hover:bg-[#459e1a] active:scale-95 shadow-[#52B520]/30 ': 'bg-brand-primary hover:bg-emerald-600 shadow-brand-primary/30'}`}
                         >
                             {isProcessing ? (
                                 <><Loader2 className='animate-spin' size={20}/> Processing...</>

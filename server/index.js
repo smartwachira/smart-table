@@ -40,7 +40,7 @@ app.use(express.json()); //Crucial for parsing JSON bodies
 //Mount Routes
 app.use('/api/menu', menuRoutes);
 app.use('/api/orders', orderRoutes);
-app.use('/api/auth', authRoutes)
+app.use('/api/auth', authRoutes);
 
 // Socket Connection Logic
 io.on('connection',(socket)=>{
