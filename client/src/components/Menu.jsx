@@ -6,9 +6,10 @@ import { useCart } from '../context/CartContext';
 import MenuCategory from './MenuCategory';
 
 
+
 const Menu =()=>{
-  const { venueId } = useParams();
-  const {addToCart} = useCart();
+  const { venueId: urlVenueId } = useParams();
+  const {addToCart, setVenueId} = useCart();
 
   //State Management
   const [venue,setVenue] = useState(null);
@@ -21,7 +22,9 @@ const Menu =()=>{
       try{
         setIsLoading(true);
         //Fallback for local testing if URL doesn't have a venue ID
-        const targetVenue = venueId || '';
+        const targetVenue = urlVenueId || '123e4567-e89b-12d3-a456-426614174000';
+        //Saved to con text
+        setVenueId(targetVenue);
 
         const response = await axios.get(`/api/menu/${targetVenue}`);
 
@@ -47,7 +50,7 @@ const Menu =()=>{
 
     fetchMenu();
 
-  },[venueId]);
+  },[urlVenueId,setVenueId]);
 
   //Loading State
   if (isLoading){

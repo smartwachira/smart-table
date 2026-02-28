@@ -31,7 +31,11 @@ const Order = sequelize.define ('Order', {
     venue_id: {
         type: DataTypes.UUID,
         allowNull: false
-    }
+    },
+    phone_number: {
+        type: DataTypes.STRING,
+        
+    },
 
 });
 

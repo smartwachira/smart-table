@@ -17,7 +17,7 @@ function App(){
         <Toaster position="top-center" reverseOrder={false}/>
         <Routes>
           <Route element={<Mainlayout/>}>
-            <Route path="/" element={<Menu />} />
+            <Route path="/menu/:venueId" element={<Menu />} />
           </Route>
           
           <Route path="/menu/:venueId" element={<Menu/>}></Route>

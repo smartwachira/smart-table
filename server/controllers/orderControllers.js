@@ -26,7 +26,7 @@ export const createOrder = async (req,res) => {
             table_number: table_number,
             phone_number:phone_number,
             total_amount: total_amount,
-            payment_method: payment_method ,
+            payment_method: payment_method,
             status: "pending"
         }, {transaction: t}); // pass the transaction object
 

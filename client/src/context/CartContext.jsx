@@ -14,6 +14,11 @@ export const CartProvider = ({ children }) =>{
         return localData ? JSON.parse(localData) :[];
     });
 
+    //Manage venue ID in State and Localstorage
+    const [venueId, setVenueId] = useState((()=>{
+        return localStorage.getItem("smartTableVenueId") || null;
+    }));
+
     // Add Visibility state
     const [isCartOpen, setIsCartOpen] = useState(false);
 
@@ -89,9 +94,9 @@ export const CartProvider = ({ children }) =>{
             clearCart,
             isCartOpen,
             setIsCartOpen,
-            toggleCart
-            // venueId,
-            // setVenueId
+            toggleCart,
+            venueId,
+            setVenueId
             }}>
             {children}
         </CartContext.Provider>

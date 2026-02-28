@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import {useNavigate,useParams} from 'react-router-dom';
+import {useNavigate} from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { Smartphone, MapPin, ShieldCheck, Loader2, User,Banknote} from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -7,9 +7,9 @@ import axios from 'axios';
 
 
 const Checkout = ()=>{
-    const { cartItems, cartTotal, clearCart} = useCart();
+    const { cartItems, cartTotal, clearCart,venueId} = useCart();
     const navigate = useNavigate();
-    const { venueId } = useParams();
+    
 
     //Form  State
 
@@ -35,16 +35,16 @@ const Checkout = ()=>{
 
 
         setIsProcessing(true);
-        toast.loading(paymentMethod === 'mpesa'? "Initiating M-Pesa STK Push..." : "Sending order to kitchen...", { id: 'checkout' });
+        toast.loading( paymentMethod === 'mpesa'? "Initiating M-Pesa STK Push..." : "Sending order to kitchen...", { id: 'checkout' });
 
         try {
             //2. Data Transformation (Mapping Frontend State to Backend Schema)
             const orderPayLoad = {
-                venue_id: venueId || 'c5337ce2-d99f-443c-9a01-81f49016beb9',
+                venue_id: venueId ,
                 table_number: tableNumber,
                 customer_name: customerName,
                 payment_method:paymentMethod,
-                phone_number: paymentMethod ==='mpesa'? phone:null,
+                phone_number: paymentMethod ==='mpesa'? phone : null,
                 total_amount: cartTotal,
                 items: cartItems.map(item=>({
                     item_id: item.id,
