@@ -3,7 +3,7 @@ import { useParams, useNavigate} from 'react-router-dom';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import io from 'socket.io-client';
-import {ChefHat, RefreshCw, Logout,CheckCircle,Trash2,Clock,User,BellRing} from 'lucide-react';
+import {ChefHat, RefreshCw, LogOut,CheckCircle,Trash2,Clock,User,BellRing} from 'lucide-react';
 
 //Sound Effect URL
 const BEEP_URL = 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3';
@@ -85,7 +85,8 @@ const Kitchen = () =>{
 
         } catch (error){
             toast.error("Failed to delete: " + (error.response?.data?.message || error.message));
-        }
+        };
+    }
 
         //Handle Logout
         const handleLogout = ()=>{
@@ -109,9 +110,147 @@ const Kitchen = () =>{
         useEffect(()=>{
             fetchOrders();
 
-            const socket = io(import)
-        })
+            const socket = io(import.meta.env.VITE_API_URL || "http://localhost:5000");
+
+            socket.emit('join_venue',venueId);
+
+            //Listen for new Orders
+            socket.on('receive_order',()=>{
+                // ARCHITECT'S TRICK: Instead of manually stitching the data together and risking 
+                // missing food names, we just tell the component to fetch the fresh, perfect data 
+                // directly from the database whenever the socket pings us!
+                fetchOrders();
+
+                toast.success(`New Order Arrived!`,{
+                    icon: '🔔',
+                    duration: 5000,
+                    style: { background: '#fff',color: '#16a34a',fontWeight: 'bold'}
+                });
+                playSound();
+            });
+
+            //Listen for Deleted Orders
+            socket.on("delete_order", (deletedOrderId)=>{
+                setOrders(prevOrders => prevOrders.filter(o=>o.order_id !== deletedOrderId));
+                toast('An order was voided',{icon: '🗑️' });
+            });
+
+            return ()=>socket.disconnect();
+        },[venueId, fetchOrders, playSound]);
+
+        if (loading){
+            return (
+                <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50">
+                    <ChefHat className="animate-bounce text-brand-primary w-16 h-16 mb-4"></ChefHat>
+                    <h2 className="text-xl font-bold text-gray-700">Loading Kitchen Display...</h2>
+                </div>
+            );
+        }
+
+        return (
+            <div className="min-h-screen bg-gray-100 p-4 md:p-8">
+                {/* KDS Header */}
+                <header className="flex flex-col md:flex-row justify-between items-center mb-8 bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-200">
+                    <div className="flex items-center gap-3 mb-4 md:mb-0">
+                        <div className="p-3 bg-brand-primary/10 rounded-xl">
+                            <ChefHat className="text-brand-primary w-8 h-8"></ChefHat>
+                        </div>
+                        <div>
+                            <h1 className="text-2xl font-bold text-gray-900 leading-tight">Kitchen Display</h1>
+                            <p className="text-sm text-gray-500 font-medium">Live Order Stream</p>
+
+                        </div>
+                    </div>
+                    <div className="flex gap-3">
+                        <button onClick={fetchOrders} className="flex items-center gap-2 px-4 py-2 bg-white border-2 border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 hover:border-gray-300 font-medium transition-all">
+                            <RefreshCw></RefreshCw> Refresh
+                        </button>
+                        <button onClick={handleLogout} className="flex items-center gap-2 px-2 py-2 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 font-medium transition-all">
+                            <LogOut size={18}/> Logout
+
+                        </button>
+                    </div>
+                </header>
+
+                {/* Orders Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    {orders.length === 0?(
+                        <div className="col-span-full flex flex-col items-center justify-center py-20 bg-white rounded-2xl border border-dashed border-gray-300">
+                            <BellRing className="w-12 h-12 text-gray-300 mb-3"></BellRing>
+                            <p className="text-lg font-medium text-gray-400">Waiting for customers...</p>
+                        </div>
+                    ) : (
+                        orders.map((order)=>(
+                            <div key={order.order_id} className={`flex flex-col bg-white rounded-2xl shadow-sm border-2 overflow-hidden transition-all hover:shadow-md ${order.status === 'pending'}? 'border-amber-200': 'border-gray-100`}>
+
+                                {/* Card Header */}
+                                <div className={`p-4 border-b flex justify-between items-start ${getStatusColor(order.status)}`}>
+                                    <div>
+                                        <h3 className="text-xl font-bold text-gray-900 mb-1">Table {order.table_number}</h3>
+                                        <div className="flex items-center gap-1 text-sm font-medium opacity-80">
+                                            <User size={14}></User> {order.customer_name}
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <div className="flex items-center justify-end gap-1 text-sm font-bold opacity-90 mb-1">
+                                            <Clock size={14}></Clock>
+                                            {new Date(order.createdAt).toLocaleTimeString([], {hour: '2-digit',minute: '2-digit'})}
+                                        </div>
+                                        <span className="uppercase text-[10px] tracking-wider font-bold px-2 py-1 rounded-full bg-white/50 backdrop-blur-sm shadow-sm">
+                                            {order.status}
+                                        </span>
+
+                                        
+                                    </div>
+                                </div>
+                                {/* Card Body (Items) */}
+                                <div className="p-4 flex-grow bg-white">
+                                    <ul className="space-y-3">
+                                        {order.OrderItems.map((item)=>(
+                                            <li key={item.order_item_id} className="flex items-start gap-3 border-b border-gray-50 pb-2 last:border-0 last:pb-0">
+                                                <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 text-brand-primary font-bold text-sm shrink-0">
+                                                    {item.quantity}x
+                                                </span>
+                                                <span className="font-medium text-gray-800 pt-1 leading-snug">
+                                                    {item.MenuItem ? item.MenuItem.name : "Unknown Item"}
+                                                </span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+
+                                {/* Card Footer (Actions) */}
+                                <div className="p-4 bg-gray-50 border-t border-gray-100 flex gap-2">
+                                    {order.status === "pending" && (
+                                        <button 
+                                            className="flex-1 flex items-center justify-center gap-2 bg-[#52B520] hover:bg-[#459e1a] text-white py-3 px-4 rounded-xl font-bold transition-all active:scale-95 shadow-sm shadow-[#52B520]/20"
+                                            onClick={()=> handleStatusChange(order.order_id, 'ready')}
+                                        >
+                                            <CheckCircle size={18}></CheckCircle> Mark Ready
+                                        </button>
+                                    )}
+                                    {userRole === 'manager' && (
+                                        <button 
+                                            className="flex items-center justify-center p-3 text-red-500 hover:bg-red-50 border-red-100 rounded-xl transition-all"
+                                            title='Void Order'
+                                            onClick={()=>handleDelete(order.order_id)}
+                                        >
+                                            <Trash2 size={18}></Trash2>
+                                        </button>
+                                    )}
+                                </div>
+
+                                
+
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+        )
 
 
-    }
-}
+    
+};
+
+export default Kitchen;
