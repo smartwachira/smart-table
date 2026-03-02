@@ -28,9 +28,19 @@ const Checkout = ()=>{
             return toast.error("Please provide your name and table number");
         }
 
+
+        //Format the phone number for safaricom Daraja (Convert 07xx to 2547xx)
+        let formattedPhone = phone.replace(/\s+/g,''); //remove spaces
+        if (formattedPhone.startsWith('0')){
+            formattedPhone = '254' + formattedPhone.substring(1);
+
+        } else if (formattedPhone.startsWith('+')){
+            formattedPhone = formattedPhone.substring(1);
+        }
+
         //Only validate phone if M-Pesa is selected
-        if (paymentMethod === 'mpesa' && phone.length < 10){
-            return toast.error("Please enter a valid M-Pesa number");
+        if (paymentMethod === 'mpesa' && !/^(2547|2541)\d{8}$/.test(formattedPhone)){
+            return toast.error("Please enter a valid Safaricom number (e.g., 07XX or 2547XX");
         }
 
 
@@ -44,7 +54,7 @@ const Checkout = ()=>{
                 table_number: tableNumber,
                 customer_name: customerName,
                 payment_method:paymentMethod,
-                phone_number: paymentMethod ==='mpesa'? phone : null,
+                phone_number: paymentMethod ==='mpesa'? formattedPhone : null,
                 total_amount: cartTotal,
                 items: cartItems.map(item=>({
                     item_id: item.id,

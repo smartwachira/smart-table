@@ -13,30 +13,46 @@ export const createOrder = async (req,res) => {
     try {
 
         // Collect data from request
-        const {venue_id,table_number, items, total_amount, payment_method, customer_name,phone_number } = req.body;
+        const {venue_id,table_number, items, payment_method, customer_name,phone_number } = req.body;
 
         if (!items || items.length === 0){
             return res.status(400).json({ message: "Cannot place empty order"});
         }
 
-        // 1. Create the Main Order Record
+        //Fetch all requested items from the database to verify prices
+        const itemIds = items.map(item=>item.item_id);
+        const dbItems = await MenuItem.findAll({ where: {item_id: itemIds}});
+
+        //Calculate the TRUE total amount on the server
+        let trueTotalAmount = 0;
+
+    
+
+        // Prepare the Items Data
+        const orderItemsData = items.map((clientItem) => {
+          const realItem = dbItems.find(dbI =>dbI.item_id === clientItem.item_id);
+          if (!realItem) throw new Error(`Item ${clientItem.item_id} not found`);
+
+          const itemTotal = Number(realItem.price) * clientItem.quantity;
+          trueTotalAmount += itemTotal;
+
+          return {
+            item_id: realItem.item_id,
+            quantity: clientItem.quantity,
+            price_at_time: realItem.price
+          }
+        });
+
+        // Create the Main Order Record
         const newOrder = await Order.create({
-            venue_id: venue_id,
+            venue_id,
             customer_name: customer_name || `Guest (table ${table_number})`,
-            table_number: table_number,
-            phone_number:phone_number,
-            total_amount: total_amount,
-            payment_method: payment_method,
+            table_number,
+            phone_number,
+            total_amount: trueTotalAmount,
+            payment_method,
             status: "pending"
         }, {transaction: t}); // pass the transaction object
-
-        // 2. Prepare the Items Data
-        const orderItemsData = items.map((item) => ({ 
-            order_id: newOrder.order_id,
-            item_id: item.item_id,          
-            quantity: item.quantity,
-            price_at_time: item.price
-        }));
 
         //3. Bulk Insert all Items at once
         await OrderItem.bulkCreate(orderItemsData, { transaction: t});
@@ -45,11 +61,13 @@ export const createOrder = async (req,res) => {
         await t.commit(); //success
 
         //BROADCAST: to socket system
-        const io = req.app.get('socketio')
-        io.to(venue_id).emit('receive_order',{
-          order: newOrder,
-          items: items
-        });
+        const io = req.app.get('socketio');
+        if (io){
+          io.to(venue_id).emit('receive_order',{
+            order: newOrder,
+            items: items
+          });
+        }
 
         res.status(201).json({
             message: 'Order placed successfully',
