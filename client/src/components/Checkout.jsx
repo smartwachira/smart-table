@@ -64,17 +64,37 @@ const Checkout = ()=>{
                 }))
             };
 
-            //3. Network Request
-            await axios.post('/api/orders',orderPayLoad);
+            //3. Create Order in Database
+            const response = await axios.post('/api/orders',orderPayLoad);
+            const newOrderId = response.data.orderId; //Capture the generated UUID
+            const trueTotalAmount = response.data.amount
+
+            // Trigger M-Pesa STK Push (If selected)
+            if (paymentMethod === 'mpesa'){
+                //Update the loading text to guide the user
+                toast.loading("Check your phone! Waiting for M-Pesa PIN...",{id: 'checkout'});
+
+                //Call Daraja Endpoint
+                await axios.post('/api/mpesa/stkpush',{
+                    phone: formattedPhone, 
+                    amount: trueTotalAmount,
+                    orderId: newOrderId
+
+                });
+
+                toast.success('M-pesa prompt sent!',{id: 'checkout'});
+            } else {
+                //Cash payment success message
+                toast.success("Order placed successfully!",{id:'checkout'})
+            }
 
 
-            //4. Success Handling
-            toast.success(paymentMethod==='mpesa'? "Payment Received! Order placed." : "Order placed successfully!",{ id: 'mpesa'});
+            //Cleanup
             clearCart();
             
 
             //Navigate to orders page (In the future, we can pass the specific order ID)
-            navigate('/orders');
+            navigate(`/orders/${newOrderId}`);
 
         } catch (error){
             //5. Error Handling

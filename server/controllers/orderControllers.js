@@ -29,12 +29,12 @@ export const createOrder = async (req,res) => {
     
 
         // Prepare the Items Data
-        const orderItemsData = items.map((clientItem) => {
+        const validatedItems = items.map((clientItem) => {
           const realItem = dbItems.find(dbI =>dbI.item_id === clientItem.item_id);
           if (!realItem) throw new Error(`Item ${clientItem.item_id} not found`);
 
-          const itemTotal = Number(realItem.price) * clientItem.quantity;
-          trueTotalAmount += itemTotal;
+          trueTotalAmount = Number(realItem.price) * clientItem.quantity;
+          
 
           return {
             item_id: realItem.item_id,
@@ -54,6 +54,11 @@ export const createOrder = async (req,res) => {
             status: "pending"
         }, {transaction: t}); // pass the transaction object
 
+        const orderItemsData = validatedItems.map(item => ({
+            ...item,
+            order_id: newOrder.id || newOrder.order_id || newOrder.getDataValue('order_id')
+        }));
+
         //3. Bulk Insert all Items at once
         await OrderItem.bulkCreate(orderItemsData, { transaction: t});
 
@@ -71,7 +76,8 @@ export const createOrder = async (req,res) => {
 
         res.status(201).json({
             message: 'Order placed successfully',
-            orderId: newOrder.order_id
+            orderId: newOrder.order_id || newOrder.id,
+            amount: trueTotalAmount
         });
        
     } catch (error){

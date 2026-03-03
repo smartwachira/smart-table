@@ -17,6 +17,7 @@ import User from './models/User.js';
 import menuRoutes from './routes/menuRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
 import authRoutes from './routes/authRoutes.js';
+import mpesaRoutes from './routes/mpesaRoutes.js';
 
 //load environment variables
 dotenv.config(); //reads the .env file and attaches the variables to process.env
@@ -41,6 +42,7 @@ app.use(express.json()); //Crucial for parsing JSON bodies
 app.use('/api/menu', menuRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/mpesa',mpesaRoutes);
 
 // Socket Connection Logic
 io.on('connection',(socket)=>{
