@@ -10,7 +10,14 @@ const User = sequelize.define("User", {
     username: {
         type: DataTypes.STRING,
         allowNull: false,
-        unique: true // No two staff members can have the same username
+        unique:true
+
+    },
+    email: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        unique: true, // No two staff members can have the same username
+        validate: { isEmail:true}
     },
     password: {
         type: DataTypes.STRING,

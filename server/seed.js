@@ -200,8 +200,8 @@ const seedDatabase = async () => {
     const hashedPassword = await bcrypt.hash("password123", 10);
     
     await User.bulkCreate([
-      { username: 'manager', password: hashedPassword, role: "manager", venue_id: venue.venue_id },
-      { username: 'chef', password: hashedPassword, role: 'kitchen', venue_id: venue.venue_id }
+      { username: 'manager',email:'manager001@gmail.com', password: hashedPassword, role: "manager", venue_id: venue.venue_id },
+      { username: 'chef',email:'chef001@gmail.com', password: hashedPassword, role: 'kitchen', venue_id: venue.venue_id }
     ]);
     console.log("✅ Created Staff: Manager & Chef (Password: password123)");
 

@@ -4,6 +4,7 @@ import Checkout from "./components/Checkout";
 import Kitchen from "./components/Kitchen";
 import OrderStatus from "./components/OrderStatus";
 import Login from "./components/Login ";
+import VenueRegistration from "./components/VenueRegistration";
 import PrivateRoute from "./components/PrivateRoute";
 import { Toaster } from 'react-hot-toast';
 import "./index.css"
@@ -29,6 +30,7 @@ function App(){
             </PrivateRoute>}>
           </Route>
           <Route path="/order-status/:orderId" element={<OrderStatus/>}></Route>
+          <Route path="/register-venue" element={<VenueRegistration />} />
           <Route path="/login" element={<Login/>}></Route>
           {/* The default Route */}
           {/* (<h1>...</h1>) directly inline. This is fine for simple placeholders, 
