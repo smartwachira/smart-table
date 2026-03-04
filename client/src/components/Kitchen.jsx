@@ -41,7 +41,7 @@ const Kitchen = () =>{
 
         } catch (error){
             console.error("Error Loading orders:", error);
-            toast.error("Could not load orders");
+            toast.error("Could not load orders",{ id: 'kitchen' });
         } finally {
             setIsLoading(false)
         }
@@ -59,12 +59,12 @@ const Kitchen = () =>{
                 {headers: {Authorization: `Bearer ${token}`}}
             );
 
-            toast.success("Order Updated");
+            toast.success("Order Updated",{ id: 'kitchen' });
             setOrders(prev=>prev.map(o=>
                 o.order_id === orderId ? {...o,status:newStatus} : o
             ));
         } catch (error){
-            toast.error("Failed to update status");
+            toast.error("Failed to update status",{ id: 'kitchen' });
             console.error("Error updating status", error);
         }
     }
@@ -78,13 +78,13 @@ const Kitchen = () =>{
             await axios.delete(`/api/orders/${orderId}`,
                 { headers: { Authorization: `Bearer ${token}`}}
             );
-            toast.success("Order Voided 🗑️");
+            toast.success("Order Voided 🗑️",{ id: 'kitchen' });
             // Note: We don't manually filter here because the socket will broadcast 'delete_order' 
             // and remove it for everyone automatically!
 
 
         } catch (error){
-            toast.error("Failed to delete: " + (error.response?.data?.message || error.message));
+            toast.error("Failed to delete: " + (error.response?.data?.message || error.message),{ id: 'kitchen' });
         };
     }
 
@@ -125,14 +125,14 @@ const Kitchen = () =>{
                     icon: '🔔',
                     duration: 5000,
                     style: { background: '#fff',color: '#16a34a',fontWeight: 'bold'}
-                });
+                },{ id: 'kitchen' });
                 playSound();
             });
 
             //Listen for Deleted Orders
             socket.on("delete_order", (deletedOrderId)=>{
                 setOrders(prevOrders => prevOrders.filter(o=>o.order_id !== deletedOrderId));
-                toast('An order was voided',{icon: '🗑️' });
+                toast('An order was voided',{icon: '🗑️' },{ id: 'kitchen' });
             });
 
             return ()=>socket.disconnect();
