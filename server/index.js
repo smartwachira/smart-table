@@ -102,8 +102,15 @@ OrderItem.belongsTo(Order, {foreignKey: "order_id"});
 MenuItem.hasMany(OrderItem, {foreignKey: 'item_id'});
 OrderItem.belongsTo(MenuItem, {foreignKey: 'item_id'});
 
-Venue.hasMany(User, { foreignKey: 'venue_id'});
-User.belongsTo(Venue, {foreignKey: "venue_id"})
+Venue.hasMany(User, { 
+  foreignKey: 'venue_id',
+  onDelete: 'CASCADE',
+  as: 'staff'
+});
+User.belongsTo(Venue, {
+  foreignKey: "venue_id",
+  as: 'venue'
+})
 
 //Routes
 app.get('/', (req, res) =>{

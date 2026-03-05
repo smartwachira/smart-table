@@ -10,29 +10,45 @@ const User = sequelize.define("User", {
     username: {
         type: DataTypes.STRING,
         allowNull: false,
-        unique:true
 
     },
     email: {
         type: DataTypes.STRING,
-        allowNull: false,
-        unique: true, // No two staff members can have the same username
+        allowNull: true, // Wait/Kitchen staff do not require emails
         validate: { isEmail:true}
     },
     password: {
         type: DataTypes.STRING,
-        allowNull: false
+        allowNull: true, // For Web Dashboard (Owners/Managers)
 
     },
+    pin: {
+        type: DataTypes.STRING, 
+        allowNull: true, // For Mobile KDS login (Hashed 4-digit PIN)
+    },
     role: {
-        type: DataTypes.ENUM("manager","kitchen","waiter"),
-        defaultValue: 'waiter',
+        type: DataTypes.ENUM("OWNER", "MANAGER", "KITCHEN_STAFF", "WAIT_STAFF"),
+        defaultValue: 'WAIT_STAFF',
         allowNull: false
     },
     venue_id: {
         type: DataTypes.UUID,
         allowNull: false
     }
+},{
+    timestamps: true,
+    tableName: 'users',
+    indexes: [
+        //Multi-tenant isolation: Usernames and Emails are unique only within the specific venue
+        {
+            unique: true,
+            fields: ['venue_id', 'username']
+        },
+        {
+            unique: true,
+            fields: ['venue_id','email']
+        }
+    ]
 });
 
 // ✅ New

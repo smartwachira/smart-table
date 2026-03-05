@@ -91,12 +91,22 @@ const VenueRegistration = () => {
                             <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-2">1. Venue Details</h3>
                             <div className="relative">
                                 <Store className="absolute top-3.5 left-3.5 text-gray-400 w-5 h-5" />
-                                <input type="text" name="venueName" required onChange={handleChange} placeholder="Restaurant Name (e.g. The Grand Hotel)"
+                                <input 
+                                    type="text" 
+                                    name="venueName" 
+                                    required 
+                                    onChange={handleChange} 
+                                    placeholder="Restaurant Name (e.g. The Grand Hotel)"
                                     className="w-full pl-11 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all outline-none" />
                             </div>
                             <div className="relative">
                                 <MapPin className="absolute top-3.5 left-3.5 text-gray-400 w-5 h-5" />
-                                <input type="text" name="location" required onChange={handleChange} placeholder="Location (e.g. Westlands, Nairobi)"
+                                <input 
+                                    type="text" 
+                                    name="location" 
+                                    required 
+                                    onChange={handleChange} 
+                                    placeholder="Location (e.g. Westlands, Nairobi)"
                                     className="w-full pl-11 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all outline-none" />
                             </div>
                         </div>
@@ -106,7 +116,12 @@ const VenueRegistration = () => {
                             <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-2">2. Manager Account</h3>
                             <div className="relative">
                                 <User className="absolute top-3.5 left-3.5 text-gray-400 w-5 h-5" />
-                                <input type="text" name="managerName" required onChange={handleChange} placeholder="Your Full Name"
+                                <input 
+                                    type="text" 
+                                    name="managerName" 
+                                    required 
+                                    onChange={handleChange} 
+                                    placeholder="Your Full Name"
                                     className="w-full pl-11 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all outline-none" />
                             </div>
                             <div className="relative">

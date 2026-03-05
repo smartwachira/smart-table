@@ -1,36 +1,53 @@
 //This code is the Middleware (the "Bouncer") for your backend.
 import jwt from "jsonwebtoken";
 import dotenv from 'dotenv';
+dotenv.config(); //Ensure env vars are loaded
 const JWT_SECRET = process.env.JWT_SECRET || "YOUR_SECRET_KEY";
 
-dotenv.config(); //Ensure env vars are loaded
+// Authentication (Who are you? Which Venue are you in?)
 
-export const verifyToken = (req, res, next) => {
+export const protect = (req, res, next) => {
     try {
-        //1. Get the token from the header
-        const authHeader = req.header("Authorization");
+        let token;
+        const authHeader = req.headers.authorization;
 
-        //2. Check if token exists
-        if (!authHeader) {
-            console.log("❌ Middleware: No Authorization header found")
-            return res.status(401).json({ message: "No token, authorization denied"});
+        if (authHeader && authHeader.startsWith("Bearer")) {
+            token = authHeader.split(" ")[1];
         }
 
-    
-        // 3. Verify the token (Remove "Bearer" if present, through usually handled by client)
-        // If header is "Bearer eyJ...", this splits it and takes the second part
-        const token = authHeader.startsWith("Bearer ") 
-            ? authHeader.slice(7, authHeader.length).trimLeft() 
-            : authHeader;
-            
+        if (!token) {
+            return res.status(401).json({ message: "Not authorized, no token provided." });
+        }
+
+        // Verify token and extract payload
         const decoded = jwt.verify(token, JWT_SECRET);
 
-        //4. Add user info to the request object so routes can use it
-        req.user = decoded;
+        // Bind strict context to the request object
+        req.user = {
+            userId: decoded.userId,
+            role: decoded.role,
+            venueId: decoded.venueId // CRITICAL: Implicit Multi-tenant boundary
+        };
 
-        next(); // Allow the request to proceed
+        next();
     } catch (err) {
-        console.error("❌ Middleware Error:", err.message);
-        res.status(401).json({ message: 'Token is not valid'});
+        console.error("❌ Auth Middleware Error:", err.message);
+        res.status(401).json({ message: 'Not authorized, token failed validation.' });
     }
+};
+
+// Authorization (RBAC: Are you allowed to do this?)
+export const authorize = (...roles)=>{
+    return (req,res,next) =>{
+        if(!req.user){
+            return res.status(401).json({ message: "User not authenticated."});
+        }
+
+        if (!roles.includes(req.user.role)){
+            return res.status(403).json({
+                message: `Role (${req.user.role} is not authorized to access this resource.)`
+            });
+        }
+        next();
+    };
 };

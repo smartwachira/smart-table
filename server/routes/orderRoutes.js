@@ -1,6 +1,6 @@
 import express from 'express';
 import * as orderController from '../controllers/orderControllers.js';
-import { verifyToken} from "../middleware/authMiddleware.js" //Middleware
+import { protect} from "../middleware/authMiddleware.js" //Middleware
  
 const router = express.Router();
 
@@ -12,8 +12,8 @@ router.get("/track/:orderId",orderController.getOrderStatus);
 
 
 // Protected Routes (Staff Only)
-router.patch("/:orderId/status",verifyToken, orderController.updateOrderStatus);
-router.delete("/:orderId",verifyToken,orderController.deleteOrder)
+router.patch("/:orderId/status",protect, orderController.updateOrderStatus);
+router.delete("/:orderId",protect,orderController.deleteOrder)
 
 
 export default router;
