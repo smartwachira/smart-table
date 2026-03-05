@@ -3,7 +3,7 @@ import Menu from './components/Menu';
 import Checkout from "./components/Checkout";
 import Kitchen from "./components/Kitchen";
 import OrderStatus from "./components/OrderStatus";
-import Login from "./components/Login ";
+import Login from "./components/Login";
 import VenueRegistration from "./components/VenueRegistration";
 import PrivateRoute from "./components/PrivateRoute";
 import { Toaster } from 'react-hot-toast';
