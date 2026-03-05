@@ -1,23 +1,32 @@
-import { Navigate } from 'react-router-dom';
+import { Navigate, Outlet } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 //This component acts as a bouncer
-const PrivateRoute = ({ children, allowedRoles }) => {
-    const token = localStorage.getItem("token");
-    const userRole = localStorage.getItem("role");
+export default function PrivateRoute({ allowedRoles }){
+    const { user, isLoading } = useAuth();
 
-    //1. Check if logged in
-    if (!token){
-        return <Navigate to="/login"></Navigate>
+    if(isLoading){
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-black">
+                <div className="text-amber-500 tracking-[0.2em] uppercase font-light text-sm animate-pulse">
+                    Authenticating Workspace...
+                </div>
+            </div>
+        );
     }
 
-    //2. Check if the user has the right Rank 
-    if (allowedRoles && !allowedRoles.includes(userRole)){
-        alert("Access Denied: You do not have permission to view this page.");
-        return <Navigate to="/"></Navigate>
+    if (!user){
+        return <Navigate to="/login" replace />;
+
     }
 
-    //3. If all clear, render the page (children)
-    return children;
+    if(allowedRoles && !allowedRoles.includes(user.role) ){
+        if (['OWNER','MANAGER'].includes(user.role)){
+            return <Navigate to="/dashboard" replace />;
+        }
+        return <Navigate to="/kitchen" replace />;
+    }
+
+    return <Outlet/>
 };
 
-export default PrivateRoute;
