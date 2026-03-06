@@ -2,6 +2,7 @@
 
 import { createContext,useContext, useState, useEffect } from 'react';
 import { jwtDecode } from 'jwt-decode';
+import axios from 'axios';
 
 
 const AuthContext = createContext();
@@ -11,34 +12,6 @@ export const AuthProvider = ({ children }) =>{
     const [isLoading, setIsLoading] = useState(true);
     
    
-
-    useEffect(()=>{
-        const initializeAuth = () => {
-            const token = localStorage.getItem('token');
-            if (token){
-                try {
-                    const decoded = jwtDecode(token);
-                    // Check if the token has expired
-                    if (decoded.exp * 1000 < Date.now()){
-                        localStorage.removeItem('token');
-                    } else {
-                        setUser({ 
-                            userId: decoded.userId, 
-                            role: decoded.role, 
-                            venueId: decoded.venueId 
-                        });
-                    }
-                } catch (err){
-                    console.log("Invalid token format.",err);
-                    localStorage.removeItem('token');
-                }
-            }
-            setIsLoading(false);
-        };
-        
-        initializeAuth();
-    },[]);
-
     const login = (token) =>{
         localStorage.setItem('token',token);
         const decoded = jwtDecode(token);
@@ -52,6 +25,37 @@ export const AuthProvider = ({ children }) =>{
     localStorage.removeItem('token');
     setUser(null);
     };
+
+    useEffect(()=>{
+        const initializeWorkspace = () => {
+            const token = localStorage.getItem('token');
+            if (token){
+                try {
+                    const decoded = jwtDecode(token);
+                    // Check if the token has expired
+                    if (decoded.exp * 1000 < Date.now()){
+                        console.warn("Session expired.")
+                        logout();
+                    } else {
+                        //Globalise the token for all future axios request
+                        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+                        setUser({ 
+                            userId: decoded.userId, 
+                            role: decoded.role, 
+                            venueId: decoded.venueId 
+                        });
+                    }
+                } catch (err){
+                    console.log("Invalid token format.",err);
+                    logout();
+                }
+            }
+            setIsLoading(false);
+        
+        }
+        initializeWorkspace();
+    },[]);
+
 
     return (
         <AuthContext.Provider value={{ user, login, logout, isLoading }}>
