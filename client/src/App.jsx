@@ -30,7 +30,7 @@ function App(){
           <Route path="/checkout" element={<Checkout/>}></Route>
           <Route path="/orders" element={<OrderStatus/>}></Route>
           <Route path="/order-status/:orderId" element={<OrderStatus/>}></Route>
-          <Route path="/register" element={<VenueRegistration />} />
+          <Route path="/register" element={<VenueRegistration/>} />
           <Route path="/login" element={<Login/>}></Route>
           {/* Elite Management Boundary (Owners & Managers ONLY) */}
           <Route element={<PrivateRoute allowedRoles={['OWNER', 'MANAGER']} />}>

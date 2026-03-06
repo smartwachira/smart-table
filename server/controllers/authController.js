@@ -30,7 +30,7 @@ export const registerVenue = async ( req, res) =>{
          //1. Check if the email is already in use across the entire system
          const existingUser = await User.findOne({
             where: {email: managerEmail}
-         });
+         },{transaction:t});
          if (existingUser){
             return res.status(400).json({ message : "Email is already registered."})
          }
