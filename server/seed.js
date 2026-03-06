@@ -9,6 +9,9 @@ import OrderItem from './models/OrderItem.js';
 import User from './models/User.js';
 
 // Define associations to ensure DB schema is created correctly during sync
+Venue.hasMany(User, { foreignKey: 'venue_id', onDelete: 'CASCADE' });
+User.belongsTo(Venue, { foreignKey: 'venue_id' });
+
 Venue.hasMany(MenuCategory, { foreignKey: 'venue_id', onDelete: 'CASCADE' });
 MenuCategory.belongsTo(Venue, { foreignKey: 'venue_id' });
 
@@ -197,17 +200,18 @@ const seedDatabase = async () => {
     console.log(`✅ Created 100 Menu Items successfully mapped to their Categories`);
 
     // --- SETUP BASIC STAFF ACCOUNTS (Optional but helpful for testing) ---
-    const hashedPassword = await bcrypt.hash("password123", 10);
-    
+    const managerPassword = await bcrypt.hash("password123", 10);
+    const WaiterPin = await bcrypt.hash('1234',10)
     await User.bulkCreate([
-      { username: 'MANAGER',email:'manager001@gmail.com', password: hashedPassword, role: 'MANAGER', venue_id: venue.venue_id },
-      { username: 'WAIT_STAFF',pin:'chef001@gmail.com', password: hashedPassword, role: 'WAIT_STAFF', venue_id: venue.venue_id }
+      { username: 'JohnManager',email:'manager001@gmail.com', password: managerPassword, role: 'MANAGER', venue_id: venue.venue_id },
+      { username: 'SarahWaiter',email: null,pin: WaiterPin, password: null, role: 'WAITER', venue_id: venue.venue_id }
     ]);
-    console.log("✅ Created Staff: Manager & Chef (Password: password123)");
+    console.log("✅ Created Staff: ");
+    console.log("   👨‍💼 Manager (Email: manager@lounge.com | Pass: password123)");
+    console.log("   🏃‍♀️ Waiter (Username: SarahWaiter | PIN: 1234)");
 
     console.log('🌱 Database seeded successfully with SmartTable High-End Data!');
     process.exit(0);
-
   } catch (error) {
     console.error('❌ Seeding failed:', error);
     process.exit(1);

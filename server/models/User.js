@@ -27,9 +27,21 @@ const User = sequelize.define("User", {
         allowNull: true, // For Mobile KDS login (Hashed 4-digit PIN)
     },
     role: {
-        type: DataTypes.ENUM("OWNER", "MANAGER", "KITCHEN_STAFF", "WAIT_STAFF"),
-        defaultValue: 'WAIT_STAFF',
+        type: DataTypes.ENUM("OWNER", "MANAGER", "KITCHEN_STAFF", "WAITER"),
+        defaultValue: 'WAITER',
         allowNull: false
+    },
+    is_active: {
+        type: DataTypes.BOOLEAN, 
+        defaultValue: true, // For Mobile KDS login (Hashed 4-digit PIN)
+    },
+    last_login: {
+        type: DataTypes.DATE, // Maps to TIMESTAMP WITH TIME ZONE
+        allowNull: true
+    },
+    pin: {
+        type: DataTypes.STRING, 
+        allowNull: true, // For Mobile KDS login (Hashed 4-digit PIN)
     },
     venue_id: {
         type: DataTypes.UUID,
@@ -37,16 +49,18 @@ const User = sequelize.define("User", {
     }
 },{
     timestamps: true,
+    createdAt: 'created_at', // Telling Sequelize to use snake_case to match your SQL
+    updatedAt: 'updated_at',
     tableName: 'users',
     indexes: [
         //Multi-tenant isolation: Usernames and Emails are unique only within the specific venue
         {
-            unique: true,
-            fields: ['venue_id', 'username']
+            name: 'idx_users_venue_role',
+            fields: ['venue_id', 'role']
         },
         {
             unique: true,
-            fields: ['venue_id','email']
+            fields: ['venue_id','username']
         }
     ]
 });
