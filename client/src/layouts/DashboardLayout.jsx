@@ -125,7 +125,7 @@ export default function DashboardLayout() {
 
           <div className="flex items-center gap-4">
             <div className="hidden sm:flex flex-col items-end mr-2">
-              <span className="text-sm font-bold text-slate-700">{user.name}</span>
+              <span className="text-sm font-bold text-slate-700">{user.username}</span>
               <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 mt-0.5">
                 {user.role}
               </span>

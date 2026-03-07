@@ -10,6 +10,14 @@ const sequelize = new Sequelize(
     {
         //The Location & Language
         dialect: "postgres",
+
+        //Connection Pooling
+        pool: {
+            max: 5,        // Maximum number of connections in the pool
+            min: 0,        // Minimum number of connections in the pool
+            acquire: 30000,// Maximum time (in ms) Sequelize will try to get a connection before throwing an error
+            idle: 10000    // Maximum time (in ms) a connection can be idle before being released
+        },
         //The "Smart Switch"(Secure Sockets Layer(SSL) Configuration)
         dialectOptions: {
             ssl: process.env.NODE_ENV === 'production' ? {

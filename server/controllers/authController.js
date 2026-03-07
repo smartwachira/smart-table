@@ -84,7 +84,7 @@ export const registerStaff =  async(req, res)=>{
         const managerVenueId = req.user.venueId;
         const { username, pin, role } = req.body;
 
-        if (!['KITCHEN_STAFF', 'WAIT_STAFF'].includes(role)){
+        if (!['KITCHEN_STAFF', "WAITER"].includes(role)){
             return res.status(400).json({ message: 'Invalid staff role.'});
         }
 
@@ -181,6 +181,35 @@ export const staffLogin = async (req,res)=>{
 
 
     } catch (error) {
-        res.status(500).json({ message: "Server error" });
+        console.error("Staff Login Error:",error);
+        res.status(500).json({
+            message: "Failed to Login staff ."
+        })
+    }
+}
+
+
+//get staff
+export const getStaff = async (req, res) =>{
+    try {
+        //The venueId is securely extracted from the Manager's JWT token
+        const managerVenueId = req.user.venueId;
+
+        //Fetch all non-manager/owner staff for this specific venue
+        const staffList = await User.findAll({
+            where: {
+                venue_id: managerVenueId,
+                role:['WAITER','KITCHEN_STAFF']
+            },
+            attributes: ['user_id', 'username', 'role', 'is_active', 'last_login', 'created_at'],
+            order: [['created_at','DESC']]
+        });
+
+        res.status(200).json(staffList);
+    } catch(error){
+        console.error("Fetch Staff Error:",error);
+        res.status(500).json({
+            message: "Failed to retrive staff roaster."
+        })
     }
 }

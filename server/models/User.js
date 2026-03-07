@@ -39,10 +39,6 @@ const User = sequelize.define("User", {
         type: DataTypes.DATE, // Maps to TIMESTAMP WITH TIME ZONE
         allowNull: true
     },
-    pin: {
-        type: DataTypes.STRING, 
-        allowNull: true, // For Mobile KDS login (Hashed 4-digit PIN)
-    },
     venue_id: {
         type: DataTypes.UUID,
         allowNull: false

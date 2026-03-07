@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Mail, Lock, Building2, User, ArrowRight,Loader2,KeyRound} from 'lucide-react';
-import { toast, Toaster} from 'sonner';
+import { Mail, Lock, Building2, User, ArrowRight, Loader2, KeyRound } from 'lucide-react';
+import { toast, Toaster } from 'sonner';
 
 export default function Login() {
-    const [loginType, setLoginType] = useState('STAFF'); 
+    const [loginType, setLoginType] = useState('STAFF'); // 'STAFF' | 'MANAGER'
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [venueId, setVenueId] = useState('');
@@ -26,25 +26,26 @@ export default function Login() {
         const payload = loginType === 'MANAGER' ? { email, password } : { venue_id: venueId, username, pin };
 
         try {
-            const res = await axios.post(`${endpoint}`, payload);
+            const res = await axios.post(`http://localhost:5000${endpoint}`, payload);
             
-            localStorage.setItem('token', res.token);
-
-            toast.success('Authentication Verified',{
-                description: `Routing to ${loginType === 'MANAGER' ? 'Dashboard':'Terminal'}...`,
-                icon: <KeyRound className="text-amber-500"></KeyRound>
+            localStorage.setItem('token', res.data.token);
+            // 3. (Optional but recommended) Also save user data so the UI knows who is logged in
+            localStorage.setItem('user', JSON.stringify(res.data.user));
+            
+            toast.success('Authentication Verified', {
+                description: `Routing to ${loginType === 'MANAGER' ? 'Dashboard' : 'Terminal'}...`,
+                icon: <KeyRound className="text-amber-500" />
             });
 
-            setTimeout(()=>{
+            setTimeout(() => {
                 navigate(loginType === 'MANAGER' ? '/dashboard' : '/kitchen');
+            }, 1000);
 
-            },1000);
-            
         } catch (err) {
-            toast.error('Access Denied',{
+            toast.error('Access Denied', {
                 description: err.response?.data?.message || 'Invalid credentials provided.',
             });
-            if (loginType === 'STAFF') setPin('');
+            if (loginType === 'STAFF') setPin(''); // Instantly reset PIN on failure for fast retry
         } finally {
             setIsLoading(false);
         }
