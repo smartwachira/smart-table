@@ -14,6 +14,6 @@ router.post('/login/staff',authController.staffLogin);
 
 // Protected Routes (Requires a valid JWT + specific role)
 router.post('/register/staff', protect, authorize('OWNER', 'MANAGER'), authController.registerStaff);
-router.get('staff',protect,authController.getStaff);
+router.get('/staff',protect,authController.getStaff);
 
 export default router;

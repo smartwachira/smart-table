@@ -6,15 +6,21 @@ import {
   UtensilsCrossed, QrCode, Users, Settings, LogOut 
 } from 'lucide-react';
 
+import { useAuth } from '../context/AuthContext';
+
 export default function DashboardLayout() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
 
-  // Mock user data - in production, pull this from your AuthContext
-  const user = {
-    name: "Alex Mwangi",
-    role: "Manager",
-  };
+  const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+
+  const handleSignOut = ()=>{
+    logout();
+    toast.success('Successfully clocked out. Have a good rest!');
+    setTimeout(() => navigate('/login'), 1500);
+  }
+  
 
   const navLinks = [
     { name: 'Overview', path: '/dashboard', icon: LayoutDashboard },
@@ -25,11 +31,7 @@ export default function DashboardLayout() {
     { name: 'Settings', path: '/dashboard/settings', icon: Settings },
   ];
 
-  const handleClockOut = () => {
-    // Implement actual logout/clock-out logic here
-    toast.success('Successfully clocked out. Have a good rest!');
-    setTimeout(() => navigate('/login'), 1500);
-  };
+  
 
   const closeSidebar = () => setIsSidebarOpen(false);
 
@@ -94,10 +96,10 @@ export default function DashboardLayout() {
         <div className="p-4 bg-slate-950 border-t border-slate-800">
           <div className="flex items-center gap-3 px-2 py-2">
             <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-white font-bold uppercase">
-              {user.name.charAt(0)}
+              {storedUser.name.charAt(0) || 'A'}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-white truncate">{user.name}</p>
+              <p className="text-sm font-semibold text-white truncate">{storedUser.name || 'Admin'}</p>
               <p className="text-xs text-indigo-400 truncate">{user.role}</p>
             </div>
           </div>
@@ -125,13 +127,13 @@ export default function DashboardLayout() {
 
           <div className="flex items-center gap-4">
             <div className="hidden sm:flex flex-col items-end mr-2">
-              <span className="text-sm font-bold text-slate-700">{user.username}</span>
+              <span className="text-sm font-bold text-slate-700">{storedUser.name}</span>
               <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 mt-0.5">
                 {user.role}
               </span>
             </div>
             <button 
-              onClick={handleClockOut}
+              onClick={handleSignOut}
               className="flex items-center gap-2 px-4 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 rounded-lg transition-colors font-medium border border-red-100"
             >
               <LogOut size={20} />

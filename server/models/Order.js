@@ -35,7 +35,7 @@ const Order = sequelize.define ('Order', {
     phone_number: {
         type: DataTypes.STRING,
         
-    },
+    }
 
 });
 

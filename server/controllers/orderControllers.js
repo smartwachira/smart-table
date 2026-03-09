@@ -51,7 +51,7 @@ export const createOrder = async (req,res) => {
             phone_number,
             total_amount: trueTotalAmount,
             payment_method,
-            status: "pending"
+            status: 'PENDING'
         }, {transaction: t}); // pass the transaction object
 
         const orderItemsData = validatedItems.map(item => ({
@@ -91,13 +91,13 @@ export const createOrder = async (req,res) => {
 
 export const getOrders = async (req, res) => {
   try {
-    const { venueId } = req.params;
+    const { venueId } = req.user;
 
     const orders = await Order.findAll({
       where: { 
         venue_id: venueId,
         // Only show active orders in the kitchen (hide completed ones)
-        status: ['pending', 'preparing', 'ready','served'] 
+        status: ['PENDING', 'PREPARING', 'READY'] 
       },
       include: [
         {
@@ -108,7 +108,8 @@ export const getOrders = async (req, res) => {
       order: [['createdAt', 'ASC']] // Oldest orders first
     });
 
-    res.json(orders);
+    res.status(200).json(orders);
+    
   } catch (error) {
     console.error('❌ Get Orders Error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -118,24 +119,36 @@ export const getOrders = async (req, res) => {
 export const updateOrderStatus = async (req, res) =>{
     try {
         //collect data
-        const { orderId} = req.params;
-        const { status } = req.body;
+        
+        const { orderId,status, cancelReason } = req.body;
+        const { venueId } = req.user;
 
-        const validStatuses = ['pending', 'ready','served'];
+
+
+        const validStatuses = ['PENDING', 'PREPARING', 'READY'];
         if(!validStatuses.includes(status)){
             return res.status(400).json({message: 'Invalid status'});
         }
 
         //1. Find the order
-        const order = await Order.findByPk(orderId);
+        const order = await Order.findOne({ where: { order_id: orderId, venue_id: venueId}});
 
         if (!order){
             return res.status(404).json({ message: 'Order not found'});
 
         }
+
+        //Only Managers/Owners should cancel orders, Waiters/Kitchen can only move forward
+        if (status === 'CANCELLED' && !['MANAGER', 'OWNER'].includes(req.user.role)){
+          return res.status(403).json({ message: "Only managers can cancel active orders."});
+        }
         //2. Update the status
 
         order.status = status;
+        if (status === 'CANCELLED'){
+          order.notes = order.notes ? `${order.notes} | Cancelled: ${cancelReason}` : `Cancelled: ${cancelReason}`
+          // NOTE: In production, trigger M-Pesa reversal or Void Ledger entry here
+        };
         await order.save();
 
         const io = req.app.get('socketio')
@@ -170,35 +183,5 @@ export const getOrderStatus = async (req, res) => {
   }
 };
 
-//DELETE ORDER
-export const deleteOrder = async (req,res) => {
-  try{
-    //1. ID CHECK
-    const { orderId } = req.params;
 
-    // 2. SECURITY CHECK:Only Managers can delete
-    if(req.user.role !== 'manager'){
-      return res.status(403).json({message: "Access Denied: Managers Only"});
-    }
 
-    //3. VERIFICATION: Find and Destroy
-    const order = await Order.findByPk(orderId);
-    if(!order) return res.status(404).json({message: "Order not found"});
-    const venue_id = order.venueId;
-    //THE CLEANUP
-    //  Because of "Cascade" in our model, 
-    // deleting the Order *should* automatically delete the orderItems
-    await order.destroy();
-
-    //REAL-TIME NOTIFICATION
-    const io = req.app.get('socketio');
-
-    io.to(venue_id).emit('delete_order', orderId);
-
-    res.json({message: "Order deleted successfully"});
-  } catch (error) {
-    console.error("Delete Error:", error);
-    res.status(500).json({message: "Failed to delete order"});
-  }
-
-}

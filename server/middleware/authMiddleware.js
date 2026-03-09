@@ -28,7 +28,6 @@ export const protect = (req, res, next) => {
             role: decoded.role,
             venueId: decoded.venueId // CRITICAL: Implicit Multi-tenant boundary
         };
-
         next();
     } catch (err) {
         console.error("❌ Auth Middleware Error:", err.message);

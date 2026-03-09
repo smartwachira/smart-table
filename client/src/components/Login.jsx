@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Mail, Lock, Building2, User, ArrowRight, Loader2, KeyRound } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
+import { useAuth } from '../context/AuthContext';
 
 export default function Login() {
     const [loginType, setLoginType] = useState('STAFF'); // 'STAFF' | 'MANAGER'
@@ -14,6 +15,7 @@ export default function Login() {
     const [isLoading, setIsLoading] = useState(false);
     
     const navigate = useNavigate();
+    const {login} = useAuth();
 
     const handlePinPress = (num) => { if (pin.length < 4) setPin(prev => prev + num); };
     const handleBackspace = () => setPin(prev => prev.slice(0, -1));
@@ -28,7 +30,7 @@ export default function Login() {
         try {
             const res = await axios.post(`http://localhost:5000${endpoint}`, payload);
             
-            localStorage.setItem('token', res.data.token);
+            login(res.data.token);
             // 3. (Optional but recommended) Also save user data so the UI knows who is logged in
             localStorage.setItem('user', JSON.stringify(res.data.user));
             

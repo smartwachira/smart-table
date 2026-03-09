@@ -7,13 +7,15 @@ const router = express.Router();
 // POST /api/orders
 //public Routes(Customers)
 router.post('/', orderController.createOrder);
-router.get("/:venueId", orderController.getOrders);
+//router.get("/:venueId", orderController.getOrders);
 router.get("/track/:orderId",orderController.getOrderStatus);
 
 
 // Protected Routes (Staff Only)
 router.patch("/:orderId/status",protect, orderController.updateOrderStatus);
-router.delete("/:orderId",protect,orderController.deleteOrder)
+router.get("/live",protect, orderController.getOrders);
+
+
 
 
 export default router;

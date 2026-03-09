@@ -12,6 +12,7 @@ import "./index.css"
 import Mainlayout from "./layouts/MainLayout";
 import DashboardLayout from "./layouts/DashboardLayout";
 import StaffManagement from "./components/dashboard/StaffManagement";
+import LiveOrders from "./components/dashboard/LiveOrders";
 
 
 // Temporary mock component for the dashboard until we build it
@@ -42,7 +43,7 @@ function App(){
                 <Route path="staff" element={<StaffManagement/>} />
                 
                 {/* You can add placeholders for the others for now */}
-                <Route path="orders" element={<div>Live Orders Coming Soon</div>} />
+                <Route path="orders" element={<LiveOrders/>} />
                 <Route path="menu" element={<div>Menu Engineering Coming Soon</div>} />
               </Route>
               {/* Add /staff-provisioning, /analytics, etc. here */}
