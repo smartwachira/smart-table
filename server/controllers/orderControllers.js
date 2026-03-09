@@ -153,9 +153,9 @@ export const updateOrderStatus = async (req, res) =>{
 
         const io = req.app.get('socketio')
 
-        io.emit(`order_status_${orderId}`,{
-          status: status,
-          orderId: orderId
+        io.to(venueId).emit("update-order-status",{
+          newStatus: status,
+          orderId: order.orderId
         })
 
         res.json({message: 'Order updated', order});

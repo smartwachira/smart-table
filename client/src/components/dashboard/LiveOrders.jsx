@@ -121,6 +121,13 @@ export default function LiveOrders() {
                 playSound();
             });
 
+            //Listen to status update
+            socket.on('orderUpdated', (data)=>{
+                fetchOrders();
+                toast(`Order #${data.orderId.slice(0,4)} updated`, { position: 'bottom-center' })
+
+            })
+
             return ()=>socket.disconnect();
         });
 
@@ -190,7 +197,7 @@ export default function LiveOrders() {
                                         </div>
                                     ))}
                                 </div>
-
+                                
                                 {/* Card Footer (Actions) */}
                                 <div className="p-3 bg-gray-50 border-t border-gray-100 flex gap-2">
                                     {order.status === "PENDING" && (

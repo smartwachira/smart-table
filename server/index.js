@@ -30,6 +30,7 @@ const server = http.createServer(app); // Create HTTP Server
 const io = new Server(server, {
   cors: {
     origin: "*",
+    credentials:true,
     methods: ["GET", "PATCH","PUT","DELETE","POST"]
   }
 });
@@ -61,7 +62,7 @@ io.on('connection',(socket)=>{
 
   //Listen for "Order Update" event from Kitchen
   socket.on("update-order-status", (data)=>{
-    io.emit(`order_status_${data.orderId}`, data)
+    io.to(data.venueId).emit(`orderUpdated`, data)
   })
 
   socket.on('disconnect',()=>{
