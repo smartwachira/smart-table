@@ -5,8 +5,10 @@ import {
     Users, Plus, KeyRound, Shield, Clock, 
     MoreVertical, UserPlus, X, Loader2, Dices
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 export default function StaffManagement() {
+    const {user} = useAuth();
     const [staff, setStaff] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -25,10 +27,14 @@ export default function StaffManagement() {
     }, []);
 
     const fetchStaff = async () => {
+        const token = localStorage.getItem('token');
         setIsLoading(true);
         try {
             // Assuming Axios interceptors attach the Bearer token
-            const res = await axios.get('/api/auth/staff');
+            const res = await axios.get('/api/auth/staff',{
+                headers: {Authorization: `Bearer ${token}`},
+                venueId: user.venueId
+            });
             setStaff(res.data);
         } catch (error) {
             toast.error('Failed to load staff roster');
@@ -45,9 +51,13 @@ export default function StaffManagement() {
 
     const handleCreateStaff = async (e) => {
         e.preventDefault();
+        const token = localStorage.getItem('token');
         setIsSubmitting(true);
         try {
-            await axios.post('/api/auth/register/staff', formData);
+            await axios.post('/api/auth/register/staff', formData,{
+                headers: {Authorization: `Bearer ${token}`},
+                venueId: user.venueId
+            });
             toast.success(`${formData.role.replace('_', ' ')} provisioned successfully.`);
             setIsModalOpen(false);
             setFormData({ username: '', role: 'WAITER', pin: '' });

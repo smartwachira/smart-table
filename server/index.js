@@ -3,7 +3,15 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import sequelize from './config/db.js';
 import http from 'http';
-import { Server } from 'socket.io'
+import { Server } from 'socket.io';
+import path from "path";
+import { fileURLToPath } from "url";
+
+//Set up __dirname for ES Modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+
 
 //Import Models (This registers them with Sequelize)
 import Venue from './models/Venue.js';
@@ -38,6 +46,9 @@ const io = new Server(server, {
 //Middleware
 app.use(cors());
 app.use(express.json()); //Crucial for parsing JSON bodies
+
+//Serve static files from  the uploads directory
+app.use('/uploads',express.static(path.join(__dirname, 'uploads')));
 
 //Mount Routes
 app.use('/api/menu', menuRoutes);
