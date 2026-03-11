@@ -7,6 +7,7 @@ import { protect, authorize } from "../middleware/authMiddleware.js";
 
 //Public Routes
 
+
 router.post('/register/venue',authController.registerVenue);
 router.post('/login/manager',authController.managerLogin)
 router.post('/login/staff',authController.staffLogin);
@@ -15,5 +16,6 @@ router.post('/login/staff',authController.staffLogin);
 // Protected Routes (Requires a valid JWT + specific role)
 router.post('/register/staff', protect, authorize('OWNER', 'MANAGER'), authController.registerStaff);
 router.get('/staff',protect,authController.getStaff);
+router.patch('/staff/:staffId/status',protect,authorize,authController.toggleStaffStatus)
 
 export default router;

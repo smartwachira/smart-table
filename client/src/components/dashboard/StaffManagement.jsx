@@ -69,6 +69,21 @@ export default function StaffManagement() {
         }
     };
 
+    const handleToggleStatus = async (staffId) =>{
+        try {
+            const res = await axios.patch(`/api/auth/staff/${staffId}/status`);
+
+            //Update the local state to reflect the change instantly
+            setStaff(staff.map(member =>
+                member.user_id === staffId ? {...member,is_active: res.data.is_active} : member
+            ));
+
+            toast.success(res.data.message);
+        } catch (error){
+            toast.error(error.response?.data?.message || 'Failed to change status.')
+        }
+    }
+
     return (
         <div className="max-w-6xl mx-auto space-y-6">
             
@@ -142,12 +157,26 @@ export default function StaffManagement() {
                                         <td className="p-4">
                                             <div className="flex items-center gap-1.5 text-sm text-slate-500">
                                                 <Clock size={16} />
-                                                {member.last_login ? new Date(member.last_login).toLocaleDateString() : 'Never'}
+                                                {member.last_login 
+                                                    ? new Date(member.last_login).toLocaleDateString('en-US',{
+                                                        month: 'short',
+                                                        day: 'numeric',
+                                                        hour: '2-digit',
+                                                        minute: '2-digit'
+                                                    }) 
+                                                    : 'Never logged in'}
                                             </div>
                                         </td>
                                         <td className="p-4 text-right">
-                                            <button className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100">
-                                                <MoreVertical size={20} />
+                                            <button 
+                                                onClick={() => handleToggleStatus(member.user_id)}
+                                                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
+                                                    member.is_active 
+                                                    ? 'text-red-600 bg-red-50 hover:bg-red-100' 
+                                                    : 'text-emerald-600 bg-emerald-50 hover:bg-emerald-100'
+                                                }`}
+                                            >
+                                                {member.is_active ? 'suspend Access': 'Restore Access'}
                                             </button>
                                         </td>
                                     </tr>

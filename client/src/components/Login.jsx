@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Mail, Lock, Building2, User, ArrowRight, Loader2, KeyRound } from 'lucide-react';
+import { Mail, Lock, Building2, User, ArrowRight, Loader2, KeyRound, AlertCircle } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { useAuth } from '../context/AuthContext';
 
@@ -9,10 +9,10 @@ export default function Login() {
     const [loginType, setLoginType] = useState('STAFF'); // 'STAFF' | 'MANAGER'
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [venueId, setVenueId] = useState('');
     const [username, setUsername] = useState('');
     const [pin, setPin] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const storedVenueId = localStorage.getItem('terminal_venue_id');
     
     const navigate = useNavigate();
     const {login} = useAuth();
@@ -25,15 +25,17 @@ export default function Login() {
         setIsLoading(true);
         
         const endpoint = loginType === 'MANAGER' ? '/api/auth/login/manager' : '/api/auth/login/staff';
-        const payload = loginType === 'MANAGER' ? { email, password } : { venue_id: venueId, username, pin };
+        const payload = loginType === 'MANAGER' ? { email, password } : { venue_id: localStorage.getItem('terminal_venue_id'), username, pin };
 
         try {
             const res = await axios.post(`http://localhost:5000${endpoint}`, payload);
-            
             login(res.data.token);
-            // 3. (Optional but recommended) Also save user data so the UI knows who is logged in
-            localStorage.setItem('user', JSON.stringify(res.data.user));
-            
+
+            //PROVISION THE DEVICE: If a manager logs in, bond this device to their venue
+            if (loginType === 'MANAGER' && res.data.user?.venue_id){
+                localStorage.setItem('terminal_venue_id',res.data.user.venue_id);
+            }
+
             toast.success('Authentication Verified', {
                 description: `Routing to ${loginType === 'MANAGER' ? 'Dashboard' : 'Terminal'}...`,
                 icon: <KeyRound className="text-amber-500" />
@@ -120,16 +122,24 @@ export default function Login() {
                     {/* KDS STAFF TACTILE LOGIN */}
                     {loginType === 'STAFF' && (
                         <div className="space-y-6 animate-in fade-in slide-in-from-left-4 duration-500">
-                            <div className="flex gap-4">
-                                <div className="relative group w-1/3">
-                                    <Building2 size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-amber-500" />
-                                    <input type="text" placeholder="Venue ID" value={venueId} onChange={(e) => setVenueId(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-3 py-3.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-amber-500/50 transition-all" />
+                            {!storedVenueId ? (
+                                <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl text-amber-500 text-sm flex items-start gap-3">
+                                    <AlertCircle size={20} className="shrink-0 mt-0.5" />
+                                    <p><strong>Device Not Provisioned:</strong> A manager must log in on the Dashboard tab first to authorize this terminal for your venue.</p>
                                 </div>
+                                ) : (
                                 <div className="relative group w-2/3">
-                                    <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-amber-500" />
-                                    <input type="text" placeholder="Staff Username" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-3 py-3.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-amber-500/50 transition-all" />
+                                    <User size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-amber-500 transition-colors" />
+                                    <input 
+                                        type="text" 
+                                        placeholder="Staff Username" 
+                                        value={username} 
+                                        onChange={(e) => setUsername(e.target.value)} 
+                                        className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-3 py-3.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-amber-500/50 transition-all" />
                                 </div>
-                            </div>
+                                )
+                            }
+                           
                             
                             {/* Visual PIN Dots */}
                             <div className="flex justify-center gap-6 my-8">

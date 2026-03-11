@@ -163,8 +163,17 @@ export const staffLogin = async (req,res)=>{
         const user = await User.findOne({ where: { venue_id, username}});
         if (!user || !user.pin) return res.status(401).json({message: 'Invalid credentials'});
 
+        //Check if manager suspended them
+        if (!user.is_active){
+            return res.status(403).json({ message: 'Account is suspended. Contact your manager.'})
+        }
+
         const isMatch = await bcrypt.compare(pin, user.pin);
         if (!isMatch) return res.status(401).json({ message: 'Invalid credentials'});
+
+        //Update last Active Timestamp
+        user.last_login = new Date();
+        await user.save();
 
         res.json({
             token: generateToken(user),
@@ -211,5 +220,32 @@ export const getStaff = async (req, res) =>{
         res.status(500).json({
             message: "Failed to retrive staff roaster."
         })
+    }
+}
+
+// Change Staff Status
+export const toggleStaffStatus = async (req,res)=>{
+    try{
+        const managerVenueId = req.user.venueId;
+        const { staffId } = req.params;
+
+        const staff = await User.findOne({ where: {user_id: staffId, venue_id: managerVenueId}})
+        if (!staff) return res.status(404).json({ message: 'Staff member not found.'});
+
+        //Prevent managers from suspending themselves/owners via this route
+        if (['MANAGER','OWNER'].includes(staff.role)){
+            return res.status(403).json({ message: 'Cannot modify manager accounts here.'})
+        }
+
+        staff.is_active = !staff.is_active;
+        await staff.save();
+
+        res.status(200).json({
+            message: `Staff access ${staff.is_active ? 'restored':'suspended'}.`,
+            is_active: staff.is_active
+        })
+    } catch (error){
+        console.error("Toggle Status Error:", error);
+        res.status(500).json({ message: 'Failed to update staff status.'})
     }
 }
