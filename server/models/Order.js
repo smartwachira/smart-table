@@ -37,6 +37,9 @@ const Order = sequelize.define ('Order', {
         
     }
 
+}, {
+    timestamps: true, // Adds createdAt and updateAt automatically
+    tableName: 'Orders' 
 });
 
 // ✅ New

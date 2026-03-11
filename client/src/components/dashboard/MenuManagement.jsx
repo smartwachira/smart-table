@@ -7,20 +7,6 @@ import {
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 
-// --- MOCK DATA ---
-const MOCK_CATEGORIES = [
-  { category_id: 'c1', name: 'Starters' },
-  { category_id: 'c2', name: 'Main Courses' },
-  { category_id: 'c3', name: 'Signature Cocktails' },
-  { category_id: 'c4', name: 'Desserts' }
-];
-
-const MOCK_ITEMS = [
-  { item_id: 'i1', name: 'Truffle Fries', price: 650, description: 'Crispy fries tossed in white truffle oil and parmesan.', image_url: 'https://images.unsplash.com/photo-1530016555861-3d1f3f5fd94b?auto=format&fit=crop&q=80&w=300&h=200', is_available: true, category_id: 'c1' },
-  { item_id: 'i2', name: 'Wagyu Burger', price: 1800, description: '8oz Wagyu beef, brioche bun, aged cheddar, caramelized onions.', image_url: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&q=80&w=300&h=200', is_available: true, category_id: 'c2' },
-  { item_id: 'i3', name: 'Spicy Margarita', price: 1200, description: 'Tequila blanco, fresh lime, agave, jalapeño slices.', image_url: 'https://images.unsplash.com/photo-1551538827-9c037cb4f32a?auto=format&fit=crop&q=80&w=300&h=200', is_available: false, category_id: 'c3' },
-];
-
 export default function MenuManagement() {
   // --- STATE ---
   const [categories, setCategories] = useState([]);
@@ -28,7 +14,13 @@ export default function MenuManagement() {
   const [activeCategory, setActiveCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  
+  const token = localStorage.getItem('token');
   const {user} = useAuth();
+  const config = { headers: {
+      Authorization: `Bearer ${token}`},
+      venueId: user.venueId
+  }
 
   // Drawer & Form State
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -39,13 +31,27 @@ export default function MenuManagement() {
   const [newCategoryName, setNewCategoryName] = useState('');
 
   // --- LIFECYCLE ---
-  useEffect(() => {
-    // Simulate API Fetch
-    setTimeout(() => {
-      setCategories(MOCK_CATEGORIES);
-      setItems(MOCK_ITEMS);
+  const fetchMenuData = async ()=> {
+    setIsLoading(true);
+    try {
+      //Fetch both endpoints concurrently for maximum speed
+      const [categoriesRes,itemsRes] = await Promise.all([
+        axios.get('/api/menu/categories',config),
+        axios.get('/api/menu/items',config)
+      ]);
+
+      setCategories(categoriesRes.data);
+      setItems(itemsRes.data);
+    } catch (error){
+      console.error("Fetch Menu Data Error:",error);
+      toast.error("Failed to load menu data. Please check your connection.")
+    } finally {
       setIsLoading(false);
-    }, 600);
+    }
+  }
+
+  useEffect(() => {
+    fetchMenuData();
   }, []);
 
   // --- HANDLERS ---
@@ -56,8 +62,8 @@ export default function MenuManagement() {
     ));
     
     try {
-      // TODO: Replace with actual Axios PATCH request
-      // await axios.patch(`/api/menu/items/${itemId}/availability`, { is_available: !currentStatus });
+      
+      await axios.patch(`/api/menu/items/${itemId}`, { is_available: !currentStatus },config);
       toast.success(`Item marked as ${!currentStatus ? 'Available' : 'Unavailable'}`);
     } catch (error) {
       // Revert on failure
@@ -94,14 +100,13 @@ export default function MenuManagement() {
         }
       if (editingItem) {
         // Update existing
-        setItems(items.map(item => item.item_id === editingItem.item_id ? { ...item, ...formData } : item));
-        await axios.put(`/api/menu/items/${editingItem.item_id}`, payload, config);
+        const res = await axios.patch(`/api/menu/items/${editingItem.item_id}`, payload, config);
+        setItems(items.map(item => item.item_id === editingItem.item_id ? res.data : item));
         toast.success('Menu item updated.');
       } else {
         // Create new
-        const newItem = { ...formData, item_id: `i${Date.now()}` };
-        setItems([...items, newItem]);
-        await axios.post('/api/menu/items', payload, config);
+        const newItem = await axios.post('/api/menu/items', payload, config);
+        setItems([newItem.data, ...items]);
         toast.success('New menu item added.');
       }
       setIsDrawerOpen(false);
@@ -116,14 +121,13 @@ export default function MenuManagement() {
     if (!newCategoryName.trim()) return;
     
     try {
-      // TODO: Replace with actual Axios POST request
-      const newCat = { category_id: `c${Date.now()}`, name: newCategoryName };
-      setCategories([...categories, newCat]);
+      const newCat = await axios.post('/api/menu/categories', {name: newCategoryName}, config);
+      setCategories([...categories, newCat.data]);
       setNewCategoryName('');
       setIsAddingCategory(false);
       toast.success('Category created.');
     } catch (error) {
-      toast.error('Failed to create category.');
+      toast.error(error.response?.data?.message || 'Failed to create category.');
       console.error("Error creating menu category:", error);
     }
   };

@@ -8,7 +8,6 @@ import {
 import { useAuth } from '../../context/AuthContext';
 
 export default function StaffManagement() {
-    const {user} = useAuth();
     const [staff, setStaff] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -21,20 +20,20 @@ export default function StaffManagement() {
         pin: ''
     });
 
-    // Fetch Staff on Mount
-    useEffect(() => {
-        fetchStaff();
-    }, []);
+    const token = localStorage.getItem('token');
+    const {user} = useAuth();
+    const config = {headers: {
+        Authorization: `Bearer ${token}`},
+        venueId: user.venueId
+    }
+
+    
 
     const fetchStaff = async () => {
-        const token = localStorage.getItem('token');
         setIsLoading(true);
         try {
             // Assuming Axios interceptors attach the Bearer token
-            const res = await axios.get('/api/auth/staff',{
-                headers: {Authorization: `Bearer ${token}`},
-                venueId: user.venueId
-            });
+            const res = await axios.get('/api/auth/staff',config);
             setStaff(res.data);
         } catch (error) {
             toast.error('Failed to load staff roster');
@@ -44,6 +43,11 @@ export default function StaffManagement() {
         }
     };
 
+    // Fetch Staff on Mount
+    useEffect(() => {
+        fetchStaff();
+    },[]);
+
     const handleGeneratePin = () => {
         const randomPin = Math.floor(1000 + Math.random() * 9000).toString();
         setFormData(prev => ({ ...prev, pin: randomPin }));
@@ -51,13 +55,9 @@ export default function StaffManagement() {
 
     const handleCreateStaff = async (e) => {
         e.preventDefault();
-        const token = localStorage.getItem('token');
         setIsSubmitting(true);
         try {
-            await axios.post('/api/auth/register/staff', formData,{
-                headers: {Authorization: `Bearer ${token}`},
-                venueId: user.venueId
-            });
+            await axios.post('/api/auth/register/staff', formData,config);
             toast.success(`${formData.role.replace('_', ' ')} provisioned successfully.`);
             setIsModalOpen(false);
             setFormData({ username: '', role: 'WAITER', pin: '' });

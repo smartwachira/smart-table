@@ -24,6 +24,9 @@ const OrderItem = sequelize.define('OrderItem', {
     type: DataTypes.UUID,
     allowNull: false
   }
+}, {
+    timestamps: true, // Adds createdAt and updateAt automatically
+    tableName: 'order_items' 
 });
 
 // ✅ New
