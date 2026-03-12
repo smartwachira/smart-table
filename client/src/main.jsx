@@ -5,6 +5,16 @@ import App from './App.jsx'
 import './index.css'
 import axios from 'axios';
 
+axios.interceptors.request.use((config)=>{
+  const token = localStorage.getItem('token');
+  if (token){
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+}, (error)=>{
+  return Promise.reject(error);
+})
+
 //Set the Base URL dynamically
 //If we are in production (Vercel), use the Environment Variable
 //If we are in development (Localhost), use nothing (relies on proxy)

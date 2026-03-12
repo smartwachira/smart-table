@@ -203,11 +203,11 @@ const seedDatabase = async () => {
     const managerPassword = await bcrypt.hash("password123", 10);
     const WaiterPin = await bcrypt.hash('1234',10)
     await User.bulkCreate([
-      { username: 'JohnManager',email:'manager001@gmail.com', password: managerPassword, role: 'MANAGER', venue_id: venue.venue_id },
+      { username: 'JohnOwner',email:'owner001@gmail.com', password: managerPassword, role: 'OWNER', venue_id: venue.venue_id },
       { username: 'SarahWaiter',email: null,pin: WaiterPin, password: null, role: 'WAITER', venue_id: venue.venue_id }
     ]);
     console.log("✅ Created Staff: ");
-    console.log("   👨‍💼 Manager (Email: manager@lounge.com | Pass: password123)");
+    console.log("   👨‍💼 Owner (Email: owner001@gmail.com | Pass: password123)");
     console.log("   🏃‍♀️ Waiter (Username: SarahWaiter | PIN: 1234)");
 
     console.log('🌱 Database seeded successfully with SmartTable High-End Data!');

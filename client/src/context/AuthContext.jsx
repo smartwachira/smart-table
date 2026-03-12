@@ -3,6 +3,7 @@
 import { createContext,useContext, useState, useEffect } from 'react';
 import { jwtDecode } from 'jwt-decode';
 import axios from 'axios';
+import { toast } from 'sonner';
 
 
 const AuthContext = createContext();
@@ -11,15 +12,23 @@ export const AuthProvider = ({ children }) =>{
     const [user, setUser] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
     
+    
    
-    const login = (token) =>{
+    const login = async (token) =>{
         localStorage.setItem('token',token);
         const decoded = jwtDecode(token);
-        setUser({
+        try {
+
+            setUser({
             userId: decoded.userId,
             role: decoded.role,
             venueId: decoded.venueId
         });
+
+        } catch (error) {
+            toast.error('Failed to login staff');
+            console.error('Failed to login staff:',error)
+        } 
     }
     const logout = () => {
     localStorage.removeItem('token');
@@ -39,11 +48,7 @@ export const AuthProvider = ({ children }) =>{
                     } else {
                         //Globalise the token for all future axios request
                         axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-                        setUser({ 
-                            userId: decoded.userId, 
-                            role: decoded.role, 
-                            venueId: decoded.venueId 
-                        });
+                        login(token);
                     }
                 } catch (err){
                     console.log("Invalid token format.",err);

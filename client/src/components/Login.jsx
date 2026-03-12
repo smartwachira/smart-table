@@ -30,6 +30,8 @@ export default function Login() {
         try {
             const res = await axios.post(`http://localhost:5000${endpoint}`, payload);
             login(res.data.token);
+            
+            localStorage.setItem('user', JSON.stringify(res.data.user));
 
             //PROVISION THE DEVICE: If a manager logs in, bond this device to their venue
             if (loginType === 'MANAGER' && res.data.user?.venue_id){

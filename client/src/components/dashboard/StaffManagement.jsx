@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect,useRef } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { 
@@ -6,20 +6,12 @@ import {
     MoreVertical, UserPlus, X, Loader2, Dices
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { jwtDecode } from 'jwt-decode';
 
 export default function StaffManagement() {
     const [staff, setStaff] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
-    
-    // Form State
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [formData, setFormData] = useState({
-        username: '',
-        role: 'WAITER',
-        pin: ''
-    });
-
     const token = localStorage.getItem('token');
     const {user} = useAuth();
     const config = {headers: {
@@ -27,7 +19,21 @@ export default function StaffManagement() {
         venueId: user.venueId
     }
 
+    //Auth Context (Who is logged in right now?)
+    const [currentUser, setCurrentUser] = useState(null);
+    //Dropdown Action Menu
+    const [activeDropdown, setActiveDropdown] = useState(null);
+    const dropdownRef = useRef(null);
     
+    // Form State
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [formData, setFormData] = useState({
+        username: '',
+        role: 'WAITER',
+        pin: '',
+        email:'',
+        password: ''
+    });
 
     const fetchStaff = async () => {
         setIsLoading(true);
@@ -45,7 +51,20 @@ export default function StaffManagement() {
 
     // Fetch Staff on Mount
     useEffect(() => {
+        //Decode token to know our own role and ID for safeguard
+        const token  = localStorage.getItem('token');
+        if (token) setCurrentUser(jwtDecode(token));
+
         fetchStaff();
+
+        //Close dropdown if clicked outside
+        const handleClickOutside = (event)=>{
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target)){
+                setActiveDropdown(null);
+            }
+        };
+        document.addEventListener("mousedown",handleClickOutside);
+        return () => document.removeEventListener('mousedown',handleClickOutside)
     },[]);
 
     const handleGeneratePin = () => {
@@ -71,18 +90,34 @@ export default function StaffManagement() {
 
     const handleToggleStatus = async (staffId) =>{
         try {
+            setActiveDropdown(null);
             const res = await axios.patch(`/api/auth/staff/${staffId}/status`);
 
             //Update the local state to reflect the change instantly
             setStaff(staff.map(member =>
-                member.user_id === staffId ? {...member,is_active: res.data.is_active} : member
+                member.user_id === staffId ? {...member, is_active: res.data.is_active} : member
             ));
 
             toast.success(res.data.message);
         } catch (error){
             toast.error(error.response?.data?.message || 'Failed to change status.')
         }
-    }
+    };
+
+    const handleResetPin = (staffId) =>{
+        setActiveDropdown(null);
+        toast.info("PIN Reset feature coming soon.");
+    };
+
+    //Role styling helper
+    const getRoleBadge = (role)=>{
+        switch(role){
+            case 'OWNER': return  { icon: <Shield size={16}/>, color: 'text-purple-700 bg-purple-100 border-purple-200'};
+            case 'MANAGER': return {icon: <Shield size={16}/>, color: 'text-indigo-700 bg-indigo-100 border-indigo-200'};
+            case 'KITCHEN_STAFF': return {icon: <Shield size={16}/>, color: 'text-amber-700 bg-amber-100 border-amber-200'};
+            default: return {icon: <Shield size={16}/>, color: 'text-blue-700 bg-blue-100 border-blue-200'};
+        }
+    };
 
     return (
         <div className="max-w-6xl mx-auto space-y-6">
@@ -133,54 +168,17 @@ export default function StaffManagement() {
                                     </td>
                                 </tr>
                             ) : (
-                                staff.map((member) => (
-                                    <tr key={member.user_id} className="hover:bg-slate-50 transition-colors group">
-                                        <td className="p-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className="h-10 w-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-700 font-bold border border-slate-200">
-                                                    {member.username.charAt(0).toUpperCase()}
-                                                </div>
-                                                <span className="font-medium text-slate-900">{member.username}</span>
-                                            </div>
-                                        </td>
-                                        <td className="p-4">
-                                            <div className="flex items-center gap-1.5 text-sm font-medium text-slate-600">
-                                                <Shield size={16} className={member.role === 'KITCHEN_STAFF' ? 'text-amber-500' : 'text-blue-500'} />
-                                                {member.role.replace('_', ' ')}
-                                            </div>
-                                        </td>
-                                        <td className="p-4">
-                                            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${member.is_active ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-                                                {member.is_active ? 'Active' : 'Suspended'}
-                                            </span>
-                                        </td>
-                                        <td className="p-4">
-                                            <div className="flex items-center gap-1.5 text-sm text-slate-500">
-                                                <Clock size={16} />
-                                                {member.last_login 
-                                                    ? new Date(member.last_login).toLocaleDateString('en-US',{
-                                                        month: 'short',
-                                                        day: 'numeric',
-                                                        hour: '2-digit',
-                                                        minute: '2-digit'
-                                                    }) 
-                                                    : 'Never logged in'}
-                                            </div>
-                                        </td>
-                                        <td className="p-4 text-right">
-                                            <button 
-                                                onClick={() => handleToggleStatus(member.user_id)}
-                                                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
-                                                    member.is_active 
-                                                    ? 'text-red-600 bg-red-50 hover:bg-red-100' 
-                                                    : 'text-emerald-600 bg-emerald-50 hover:bg-emerald-100'
-                                                }`}
-                                            >
-                                                {member.is_active ? 'suspend Access': 'Restore Access'}
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))
+                                staff.map((member) => {
+                                    const roleStyle = getRoleBadge(member.role);
+                                    //Determine if the current logged-in user is allowed to modify this member
+                                    const isSelf = currentUser?.userId === member.user_id;
+                                    const isMasterOwner = member.role === 'OWNER';
+                                    const canModify = !isSelf && !isMasterOwner && (currentUser?.role === 'OWNER' || member.role !== 'MANAGER');
+
+                                    return (
+                                        
+                                    )
+                                })
                             )}
                         </tbody>
                     </table>
