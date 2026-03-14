@@ -2,8 +2,8 @@ import React, { useState, useEffect,useRef } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { 
-    Users, Plus, KeyRound, Shield, Clock, 
-    MoreVertical, UserPlus, X, Loader2, Dices,Mail
+    Users, Plus, KeyRound, Shield, Clock,RefreshCw,Lock, 
+    MoreVertical, UserPlus, X, Loader2, Dices,Mail,Ban
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { jwtDecode } from 'jwt-decode';
@@ -88,18 +88,20 @@ export default function StaffManagement() {
         }
     };
 
-    const handleToggleStatus = async (staffId) =>{
+    const handleToggleStatus = async (staffId,newStatus) =>{
         try {
-            setActiveDropdown(null);
-            const res = await axios.patch(`/api/auth/staff/${staffId}/status`);
+            
+            const res = await axios.patch(`/api/auth/staff/${staffId}/status`,{is_active: newStatus},config);
 
             //Update the local state to reflect the change instantly
             setStaff(staff.map(member =>
-                member.user_id === staffId ? {...member, is_active: res.data.is_active} : member
+                member.user_id === staffId ? {...member, is_active: newStatus} : member
             ));
 
             toast.success(res.data.message);
+            setActiveDropdown(null);
         } catch (error){
+            
             toast.error(error.response?.data?.message || 'Failed to change status.')
         }
     };
@@ -233,11 +235,12 @@ export default function StaffManagement() {
 
                                                             {/* Only show suspend/restore if authorized */}
                                                             {canModify ? (
-                                                                <button className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors text-left mt-1 ${
-                                                                    member.is_active ? 'text-red-600 hover:bg-red-50':'text-emerald-600 hover:bg-emerald-50'
+                                                                <button 
+                                                                    onClick={()=>handleToggleStatus(member.user_id,!member.is_active)}
+                                                                    className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors text-left mt-1 ${member.is_active ? 'text-red-600 hover:bg-red-50':'text-emerald-600 hover:bg-emerald-50'
                                                                 }`}
                                                                 >
-                                                                    {member.is_active? <><Ban size={16}/> Suspend Access</> : <><CheckCircle2 size={16}/></>}
+                                                                    {member.is_active ? <><Ban size={16} /> Suspend Access</> : <><CheckCircle2 size={16} /> Restore Access</>} 
                                                                 </button>
                                                             ) : (
                                                                 <div className="px-3 py-2 text-xs text-slate-400 text-center italic border-t border-slate-100 mt-1">
@@ -327,7 +330,7 @@ export default function StaffManagement() {
                                     <div className="flex gap-2">
                                         <div className="relative flex-1">
                                             <KeyRound size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                                            <input type="text" required maxLength="4" pattern="\d{4}" value={formData.pin} onChange={(e) => setFormData({...formData, pin: e.target.value.replace(/\D/g, '')})} placeholder="••••" className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-3 tracking-widest font-mono text-lg focus:ring-2 focus:ring-indigo-500/50 transition-all" />
+                                            <input type="text"  maxLength="4" pattern="\d{4}" value={formData.pin} onChange={(e) => setFormData({...formData, pin: e.target.value.replace(/\D/g, '')})} placeholder="••••" className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-3 tracking-widest font-mono text-lg focus:ring-2 focus:ring-indigo-500/50 transition-all" />
                                         </div>
                                         <button type="button" onClick={handleGeneratePin} className="bg-indigo-50 text-indigo-700 px-4 rounded-xl border border-indigo-100 hover:bg-indigo-100 flex items-center gap-2 font-medium transition-colors" title="Auto-generate secure PIN">
                                             <Dices size={20} />
@@ -348,7 +351,13 @@ export default function StaffManagement() {
                                 </button>
                                 <button 
                                     type="submit"
-                                    disabled={isSubmitting || formData.pin.length !== 4}
+                                    disabled={
+                                        isSubmitting || 
+                                        // If it's Floor Staff, enforce 4 digit PIN
+                                        (formData.role !== 'MANAGER' && formData.pin.length !== 4) || 
+                                        // If it's a Manager, enforce a 6 character password
+                                        (formData.role === 'MANAGER' && formData.password.length < 6)
+                                    }
                                     className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm shadow-indigo-200"
                                 >
                                     {isSubmitting ? <Loader2 className="animate-spin" size={20} /> : 'Save & Provision'}

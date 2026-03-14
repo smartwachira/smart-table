@@ -249,32 +249,39 @@ export const toggleStaffStatus = async (req, res) => {
         const managerVenueId = req.user.venueId;
         const executingUserId = req.user.userId;
         const { staffId } = req.params;       // The UUID from the URL
+        const { is_active } = req.body;       // 🌟 The new boolean sent from your React frontend
 
-        const staff = await User.findOne({ where: {user_id: staffId, venue_id:managerVenueId}});
-        if (!staff) return res.status(404).json({message: 'Staff member not found.'});
+        // 1. Find the user (FIXED: Changed 'user_id' to 'id' to match your DB)
+        const staff = await User.findOne({ 
+            where: { id: staffId, venue_id: managerVenueId } 
+        });
+        
+        if (!staff) return res.status(404).json({ message: 'Staff member not found.' });
 
-        //SAFEGUARD 1: Cannot suspend yourself
-        if (staff.user_id === executingUserId){
-            return res.status(403).json({message: 'You cannot suspend your own account.'})
+        // SAFEGUARD 1: Cannot suspend yourself (FIXED: staff.id)
+        if (staff.id === executingUserId){
+            return res.status(403).json({ message: 'You cannot suspend your own account.' })
         }
 
-        //SAFEGUARD 2: Nobody can suspend the Master Owner
-        if (staff.role === 'OWNER'){
-            return res.status(403).json({ message: 'The Master Owner account cannot be suspended.'});
+        // SAFEGUARD 2: Nobody can suspend the Master Owner (Added toUpperCase for safety)
+        if (staff.role.toUpperCase() === 'OWNER'){
+            return res.status(403).json({ message: 'The Master Owner account cannot be suspended.' });
         }
 
-        //SAFEGUARD 3: Managers cannot suspend other Managers (Only Owners can)
-        if(staff.role === 'MANAGER' && req.user.role !== 'OWNER'){
-            return res.status(403).json({ message: "Only Owners can suspend Manager accounts."});
+        // SAFEGUARD 3: Managers cannot suspend other Managers (Only Owners can)
+        if(staff.role.toUpperCase() === 'MANAGER' && req.user.role.toUpperCase() !== 'OWNER'){
+            return res.status(403).json({ message: "Only Owners can suspend Manager accounts." });
         }
         
+        // 2. Apply the targeted state (Fallback to simple toggle if frontend didn't send it)
+        staff.is_active = is_active !== undefined ? is_active : !staff.is_active;
         
-
-        staff.is_active = !staff.is_active;
-        await staffMember.save();
+        // 3. Save to database (FIXED: staff.save() instead of staffMember.save())
+        await staff.save();
 
         res.status(200).json({ 
-            message: `Staff member is now ${is_active ? 'Active' : 'Inactive'}`,
+            // 4. Formatted string (FIXED: using staff.is_active)
+            message: `Staff member is now ${staff.is_active ? 'Active' : 'Suspended'}`,
             is_active: staff.is_active
         });
 
