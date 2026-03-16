@@ -1,70 +1,93 @@
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { Toaster } from 'react-hot-toast';
+import "./index.css";
+
+// --- Context Providers ---
+import { AuthProvider } from './context/AuthContext';
+import { CartProvider } from './context/CartContext'; 
+
+// --- Public Customer Components ---
 import Menu from './components/Menu';
 import Checkout from "./components/Checkout";
-import Kitchen from "./components/Kitchen";
 import OrderStatus from "./components/OrderStatus";
-import { AuthProvider } from './context/AuthContext';
+
+// --- Auth & Onboarding Components ---
 import Login from "./components/Login";
 import VenueRegistration from "./components/VenueRegistration";
 import PrivateRoute from "./components/PrivateRoute";
-import { Toaster } from 'react-hot-toast';
-import "./index.css"
-import Mainlayout from "./layouts/MainLayout";
+
+// --- Layouts ---
 import DashboardLayout from "./layouts/DashboardLayout";
+
+// --- Dashboard Sub-Components ---
 import StaffManagement from "./components/dashboard/StaffManagement";
 import LiveOrders from "./components/dashboard/LiveOrders";
 import MenuManagement from "./components/dashboard/MenuManagement";
-import QRGenerator from "./components/dashboard/QRGenerator"
+import QRGenerator from "./components/dashboard/QRGenerator";
 
+// --- Terminal Components ---
+import Kitchen from "./components/Kitchen";
 
-// Temporary mock component for the dashboard until we build it
-//const Dashboard = () => <div className="min-h-screen bg-black text-white p-10 font-light">Management Dashboard [Protected]</div>;
-
-
-function App(){
-
+function App() {
   return (
-    <AuthProvider>
-      <Router>
-        <Toaster position="top-center" reverseOrder={false}/>
-        <Routes>
-          <Route element={<Mainlayout/>}>
+    <Router>
+      <AuthProvider>
+        <CartProvider>
+          <Toaster position="top-center" reverseOrder={false} />
+          
+          <Routes>
+            {/* ==========================================
+                PUBLIC CUSTOMER FLOW (Mobile First)
+            ========================================== */}
             <Route path="/menu/:venueId" element={<Menu />} />
-          </Route>
-          <Route path="/menu/:venueId" element={<Menu/>}></Route>
-          <Route path="/checkout" element={<Checkout/>}></Route>
-          <Route path="/orders" element={<OrderStatus/>}></Route>
-          <Route path="/order-status/:orderId" element={<OrderStatus/>}></Route>
-          <Route path="/register" element={<VenueRegistration/>} />
-          <Route path="/login" element={<Login/>}></Route>
-          {/* Elite Management Boundary (Owners & Managers ONLY) */}
-          <Route element={<PrivateRoute allowedRoles={['OWNER', 'MANAGER']} />}>
-              
-              <Route path="/dashboard" element={<DashboardLayout/>}>
-                {/* When a user visits /dashboard/staff, it renders inside the layout */}
-                <Route path="staff" element={<StaffManagement/>} />
-                
-                {/* You can add placeholders for the others for now */}
-                <Route path="orders" element={<LiveOrders/>} />
-                <Route path="menu" element={<MenuManagement/>} />
-                <Route path="qr" element={<QRGenerator/>} />
-              </Route>
-              {/* Add /staff-provisioning, /analytics, etc. here */}
-          </Route>
+            <Route path="/checkout/:venueId" element={<Checkout />} />
+            <Route path="/order-status/:orderId" element={<OrderStatus />} />
 
-          {/* Operational Terminal Boundary (Staff & Management) */}
-          <Route element={<PrivateRoute allowedRoles={['KITCHEN_STAFF', 'WAIT_STAFF', 'OWNER', 'MANAGER']} />}>
+            {/* ==========================================
+                AUTHENTICATION & ONBOARDING
+            ========================================== */}
+            <Route path="/register" element={<VenueRegistration />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/" element={<div className="min-h-screen flex items-center justify-center bg-slate-50"><h1 className="text-2xl font-bold text-slate-800">Welcome to SmartTable. Scan a QR Code.</h1></div>} />
+
+            {/* ==========================================
+                PROTECTED MANAGEMENT DASHBOARD
+            ========================================== */}
+            <Route element={<PrivateRoute allowedRoles={['OWNER', 'MANAGER']} />}>
+              <Route path="/dashboard" element={<DashboardLayout />}>
+                {/* Default Dashboard Route */}
+                <Route index element={<div className="p-8 text-slate-500 font-medium">Dashboard Overview Analytics (Coming Soon)</div>} />
+                
+                <Route path="staff" element={<StaffManagement />} />
+                <Route path="orders" element={<LiveOrders />} />
+                <Route path="menu" element={<MenuManagement />} />
+                <Route path="qr" element={<QRGenerator />} />
+              </Route>
+            </Route>
+
+            {/* ==========================================
+                OPERATIONAL TERMINALS (KDS / Floor)
+            ========================================== */}
+            {/* Note: Updated WAIT_STAFF to WAITER to match DB ENUM */}
+            <Route element={<PrivateRoute allowedRoles={['KITCHEN_STAFF', 'WAITER', 'OWNER', 'MANAGER']} />}>
               <Route path="/kitchen" element={<Kitchen />} />
-          </Route>
-          {/* The default Route */}
-          {/* (<h1>...</h1>) directly inline. This is fine for simple placeholders, 
-          but usually, you would replace this with a <LandingPage /> component later. */}
-          {/* <Route path="/" element={<h1>Welcome to SmartTable. Scan a QR Code.</h1>}></Route> */}
-          <Route path="*" element={<div>Page Not Found</div>}></Route>
-        </Routes>
-      </Router>
-    </AuthProvider>
-  )
+            </Route>
+
+            {/* ==========================================
+                CATCH-ALL (404)
+            ========================================== */}
+            <Route path="*" element={
+              <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-600">
+                <h2 className="text-4xl font-black mb-2">404</h2>
+                <p>Page Not Found</p>
+              </div>
+            } />
+
+          </Routes>
+        </CartProvider>
+      </AuthProvider>
+    </Router>
+  );
 }
 
 export default App;

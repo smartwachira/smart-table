@@ -1,113 +1,110 @@
-import {useCart} from '../context/CartContext';
-import { Link } from 'react-router-dom';
-import { X,Plus,Minus,Trash2,ShoppingBag, XLineTop} from 'lucide-react'
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { X, Minus, Plus, ShoppingBag, ArrowRight } from 'lucide-react';
+import { useCart } from '../context/CartContext';
 
-const FloatingCart = () =>{
-    const { 
-        cartItems,
-        isCartOpen,
-        setIsCartOpen,
-        removeFromCart,
-        addToCart,
-        cartTotal,
-        
-    } = useCart();
-    
+export default function FloatingCart({ tableNumber, venueId }) {
+    const { cart, updateQuantity, cartTotals, isCartOpen, setIsCartOpen } = useCart();
+    const navigate = useNavigate();
 
-    //Don't show if cart is not open
-    if (!isCartOpen) return null;
+    const cartItems = Object.values(cart);
+
+    const handleCheckout = () => {
+        setIsCartOpen(false);
+        // Navigate to checkout, passing the venue ID and table number
+        navigate(`/checkout/${venueId}?table=${encodeURIComponent(tableNumber)}`);
+    };
 
     return (
-    <>
-      {/* 1. BACKDROP OVERLAY (Darkens the rest of the screen) */}
-      <div 
-        className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 transition-opacity"
-        onClick={() => setIsCartOpen(false)}
-      />
+        <>
+            {/* Backdrop Overlay */}
+            {isCartOpen && (
+                <div 
+                    className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 transition-opacity duration-300"
+                    onClick={() => setIsCartOpen(false)}
+                />
+            )}
 
-      {/* 2. SLIDE-OVER DRAWER */}
-      <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[400px] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out flex flex-col">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-100 bg-surface-muted">
-          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-            <ShoppingBag className="w-5 h-5" /> Your Order
-          </h2>
-          <button 
-            onClick={() => setIsCartOpen(false)}
-            className="p-2 hover:bg-gray-200 rounded-full transition-colors"
-          >
-            <X size={20} />
-          </button>
-        </div>
-
-        {/* Scrollable Items Area */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {cartItems.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-gray-400">
-              <ShoppingBag size={48} className="mb-4 opacity-20" />
-              <p>Your cart is empty</p>
-            </div>
-          ) : (
-            cartItems.map((item) => (
-              <div key={item.id} className="flex gap-4 p-3 bg-surface-muted rounded-xl border border-gray-100">
-                {/* Item Image */}
-                <div className="w-20 h-20 rounded-lg overflow-hidden flex-shrink-0 bg-gray-200">
-                  <img src={item.image_url} alt={item.name} className="w-full h-full object-cover" />
-                </div>
-
-                {/* Details & Controls */}
-                <div className="flex-1 flex flex-col justify-between">
-                  <div>
-                    <h4 className="font-semibold text-gray-900 line-clamp-1">{item.name}</h4>
-                    <p className="text-sm text-brand-primary font-bold">
-                      {(item.price * item.quantity).toLocaleString()} KES
-                    </p>
-                  </div>
-
-                  <div className="flex items-center justify-between mt-2">
-                    {/* Quantity Controls */}
-                    <div className="flex items-center gap-3 bg-white rounded-lg px-2 py-1 border border-gray-200 shadow-sm">
-                      <button 
-                        onClick={() => removeFromCart(item.id)}
-                        className="p-1 hover:text-red-500 transition-colors"
-                      >
-                        {item.quantity === 1 ? <Trash2 size={14} /> : <Minus size={14} />}
-                      </button>
-                      <span className="text-sm font-bold w-4 text-center">{item.quantity}</span>
-                      <button 
-                        onClick={() => addToCart(item)}
-                        className="p-1 hover:text-green-600 transition-colors"
-                      >
-                        <Plus size={14} />
-                      </button>
+            {/* Slide-Up Drawer (Mobile) / Slide-Left Drawer (Desktop) */}
+            <div className={`fixed bottom-0 md:top-0 md:right-0 md:bottom-auto w-full md:w-[400px] h-[85vh] md:h-full bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-in-out flex flex-col rounded-t-3xl md:rounded-none md:rounded-l-3xl ${
+                isCartOpen ? 'translate-y-0 md:translate-x-0' : 'translate-y-full md:translate-x-full'
+            }`}>
+                
+                {/* Drawer Header */}
+                <div className="p-6 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white rounded-t-3xl md:rounded-none md:rounded-tl-3xl">
+                    <div>
+                        <h2 className="text-2xl font-black text-slate-900 flex items-center gap-2">
+                            <ShoppingBag className="text-indigo-600" size={24} />
+                            Your Order
+                        </h2>
+                        <p className="text-sm font-semibold text-slate-500 mt-1">{tableNumber}</p>
                     </div>
-                  </div>
+                    <button 
+                        onClick={() => setIsCartOpen(false)}
+                        className="w-10 h-10 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-full flex items-center justify-center transition-colors"
+                    >
+                        <X size={20} />
+                    </button>
                 </div>
-              </div>
-            ))
-          )}
-        </div>
 
-        {/* Footer (Checkout Button) */}
-        {cartItems.length > 0 && (
-          <div className="p-4 border-t border-gray-100 bg-white">
-            <div className="flex justify-between items-center mb-4">
-              <span className="text-gray-500">Total</span>
-              <span className="text-2xl font-bold text-gray-900">{cartTotal.toLocaleString()} KES</span>
+                {/* Cart Items List */}
+                <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                    {cartItems.length === 0 ? (
+                        <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-4">
+                            <ShoppingBag size={48} className="opacity-50" />
+                            <p className="font-medium">Your tray is empty.</p>
+                        </div>
+                    ) : (
+                        cartItems.map(item => (
+                            <div key={item.item_id} className="flex gap-4">
+                                <div className="w-20 h-20 bg-slate-100 rounded-2xl overflow-hidden shrink-0">
+                                    {item.image_url ? (
+                                        <img src={item.image_url} alt={item.name} className="w-full h-full object-cover" />
+                                    ) : (
+                                        <div className="w-full h-full flex items-center justify-center text-slate-300 bg-slate-100">
+                                            <ShoppingBag size={24} />
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex-1 flex flex-col justify-between py-0.5">
+                                    <div className="flex justify-between items-start gap-2">
+                                        <h4 className="font-bold text-slate-900 leading-tight">{item.name}</h4>
+                                        <span className="font-bold text-slate-900 whitespace-nowrap">
+                                            {(item.price * item.quantity).toLocaleString('en-KE')}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center gap-3 bg-slate-100 rounded-full p-1 border border-slate-200 w-fit">
+                                        <button onClick={() => updateQuantity(item, -1)} className="w-7 h-7 bg-white text-slate-700 rounded-full flex items-center justify-center shadow-sm active:scale-95">
+                                            <Minus size={16} />
+                                        </button>
+                                        <span className="font-bold text-slate-900 w-4 text-center text-sm">{item.quantity}</span>
+                                        <button onClick={() => updateQuantity(item, 1)} className="w-7 h-7 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-sm active:scale-95">
+                                            <Plus size={16} />
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+
+                {/* Drawer Footer (Checkout) */}
+                {cartItems.length > 0 && (
+                    <div className="p-6 border-t border-slate-100 bg-slate-50 shrink-0 space-y-4 rounded-b-3xl md:rounded-none">
+                        <div className="flex justify-between items-center text-slate-600 font-medium">
+                            <span>Subtotal</span>
+                            <span>{cartTotals.total.toLocaleString('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 })}</span>
+                        </div>
+                        <button 
+                            onClick={handleCheckout}
+                            className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-lg transition-all active:scale-[0.98] shadow-md shadow-indigo-200 flex items-center justify-center gap-2"
+                        >
+                            Checkout & Pay
+                            <ArrowRight size={20} />
+                        </button>
+                    </div>
+                )}
             </div>
-            <Link 
-              to="/checkout"
-              onClick={() => setIsCartOpen(false)}
-              className="w-full bg-brand-primary text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-600 active:scale-95 transition-all shadow-lg shadow-brand-primary/30"
-            >
-              Proceed to Checkout
-            </Link>
-          </div>
-        )}
-      </div>
-    </>
-  );
-};
-
-export default FloatingCart;
+        </>
+    );
+}

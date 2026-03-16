@@ -5,6 +5,9 @@ import { upload  } from '../middleware/uploadMiddleware.js';
 const router = express.Router();
 import * as menuController from '../controllers/menuController.js';
 
+//PUBLIC ROUTE: 
+router.get('/public/:venueId',menuController.getPublicMenu)
+
 // 1. Secure all menu routes - only logged-in staff/managers can access
 router.use(protect)
 

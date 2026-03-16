@@ -133,6 +133,35 @@ export const updatedMenuItem = async (req,res)=>{
     }
 }
 
+// ---PUBLIC CUSTOMER MENU ---
+export const getPublicMenu = async (req,res)=>{
+    try {
+        const { venueId } = req.params;
+
+        //1. Fetch Categories for this venue
+        const categories = await MenuCategory.findAll({
+            where: { venue_id:venueId},
+            order: [['createdAt','ASC']]
+        });
+
+        //2. Fetch ONLY Available Items for this venue
+        const items = await MenuItem.findAll({
+            where: {is_available: true},
+            include: [{
+                model: MenuCategory,
+                attributes: [],
+                where: { venue_id: venueId}
+            }],
+            order: [['category_id','ASC'],['name','ASC']]
+        });
+
+        res.status(200).json({ categories, items});
+    } catch (error){
+        console.error("Public Menu Fetch Error:",error);
+        res.status(500).json({ message: 'Failed to load menu.'})
+    }
+}
+
 
 
 

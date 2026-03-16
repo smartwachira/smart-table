@@ -1,6 +1,5 @@
 // "Global brain" of the Shopping cart
-import { createContext, useState, useEffect,useContext} from 'react';
-import toast from 'react-hot-toast';
+import React,{ createContext, useState, useMemo,useContext} from 'react';
 
 const CartContext = createContext();
 
@@ -8,99 +7,55 @@ const CartContext = createContext();
 export const useCart = () => useContext(CartContext);
 
 export const CartProvider = ({ children }) =>{
-    // 1. Load initial cart and VenueId from local storage if it exists
-    const [cartItems, setCartItems] = useState(()=>{
-        const localData = localStorage.getItem('smartTableCart');
-        return localData ? JSON.parse(localData) :[];
-    });
-
-    //Manage venue ID in State and Localstorage
-    const [venueId, setVenueId] = useState((()=>{
-        return localStorage.getItem("smartTableVenueId") || null;
-    }));
-
-    // Add Visibility state
+    // cart state is an object: { 'item_uuid': {...itemData,quantity:2}}
+    const [cart, setCart] = useState({});
     const [isCartOpen, setIsCartOpen] = useState(false);
 
-    const toggleCart = ()=> setIsCartOpen(prev=>!prev);
+    //Add or remove quantity. If quantity hits 0, remove item entirely.
+    const updateQuantity = (item, delta)=>{
+        setCart(prev=>{
+            const currentQty = prev[item.item_id]?.quantity || 0;
+            const newQty = currentQty + delta;
 
-    // const [venueId, setVenueId] = useState(()=>{
-    //     return localStorage.getItem("smartTableVenueId") || null;
-    // })
-
-    // 2. Save the cart and VenueId (Whenever cart changes, save it to local storage)
-    useEffect(()=>{
-        localStorage.setItem("smartTableCart", JSON.stringify(cartItems));
-    }, [cartItems]);
-    // useEffect(()=>{
-    //     localStorage.setItem("smartTableVenueId", venueId);
-    // }, [venueId]);
-
-    //3. Add item to cart
-    const addToCart = (item )=>{
-        setCartItems((prevItems) =>{
-            //check if item  is already in cart
-            const existingItem = prevItems.find((i)=> i.id === item.id);
-            //If yes just increase quantity
-            if (existingItem) {
-                // If yes, just increase quantity
-                toast.success(`Updated ${item.name}`);
-                return prevItems.map((i) =>
-                i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i
-                );
-            } else {
-                // If no, add new item with quantity 1
-                toast.success(`Added ${item.name} to order`);
-                return [...prevItems, { ...item, quantity: 1 }];
+            if (newQty <= 0){
+                const newCart = {...prev};
+                delete newCart[item.item_id];
+                return newCart;
             }
+
+            return {
+                ...prev,
+                [item.item_id]: {...item, quantity: newQty}
+            };
         });
     };
 
-    //Function: Remove item (or decrease quantity)
-    const removeFromCart = (itemId) => {
-        setCartItems((prevItems) =>
-            prevItems.reduce((acc, item) => {
-                // FIX: Use 'id', not 'item_id'
-                if (item.id === itemId) {
-                    // If quantity is 1, remove it (skip adding to acc)
-                    if (item.quantity === 1) {
-                        toast.error("Item removed");
-                        return acc;
-                    }
-                    // Otherwise, decrease quantity
-                    return [...acc, { ...item, quantity: item.quantity - 1 }];
-                }
-                // Keep other items
-                return [...acc, item];
-            }, [])
-        );
-    };
+    const clearCart   = ()=>setCart({});
 
-    //Function : Calculate Total count
-    const cartCount = cartItems.reduce((total, item) => total + item.quantity, 0);
-    //Function : Calculate Total Price
-    const cartTotal = cartItems.reduce((total, item) => total + (item.price * item.quantity), 0);
+    const toggleCart=()=>setIsCartOpen(!isCartOpen);
 
-    //Function : Clear the cart
-    const clearCart = () => setCartItems([]);
+    //Auto-calculate totals without triggering unnecessary re-renders
+    const cartTotals = useMemo(()=>{
+        return Object.values(cart).reduce((acc, item)=>({
+            count: acc.count + item.quantity,
+            total: acc.total +  (item.price * item.quantity)
+        }),{count:0,total: 0});
+    },[cart]);
 
     return (
         <CartContext.Provider value={{
-            cartItems, 
-            addToCart, 
-            removeFromCart, 
-            cartCount, 
-            cartTotal, 
+            cart,
+            updateQuantity,
             clearCart,
+            cartTotals,
             isCartOpen,
             setIsCartOpen,
-            toggleCart,
-            venueId,
-            setVenueId
-            }}>
+            toggleCart
+        }}
+        >
             {children}
         </CartContext.Provider>
-    );
+    )
 };
 
 export default CartProvider;
