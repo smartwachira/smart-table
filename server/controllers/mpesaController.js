@@ -1,9 +1,22 @@
 import axios from 'axios';
+import Order from '../models/Order.js';
 
 export const initiateSTK = async (req, res) =>{
     try{
-        //1. Extract Data from Frontend Request
-        const {phone, amount, orderId} = req.body;
+        const { order_id, phone } = req.body;
+        
+
+        // 1. Fetch the pre-created order
+        const order = await Order.findByPk(order_id);
+        if (!order) return res.status(404).json({ message: "Order not found." });
+        // 2. Format Phone
+        let formattedPhone = phone.replace(/\D/g, '');
+        if (formattedPhone.startsWith('0')) formattedPhone = '254' + formattedPhone.slice(1);
+        else if (formattedPhone.startsWith('+')) formattedPhone = formattedPhone.slice(1);
+
+        if (formattedPhone.length !== 12) {
+            return res.status(400).json({ message: "Invalid Safaricom phone format." });
+        }
 
         //2. Extract Credentials from Environment
         const shortCode = process.env.DARAJA_SHORTCODE;
@@ -30,16 +43,17 @@ export const initiateSTK = async (req, res) =>{
             : 'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest';
 
 
+        const pushAmount = process.env.NODE_ENV === 'production' ? order.total_amount : 1;
         //6. Construct the Strict Daraja Payload
         const payload = {
             "BusinessShortCode": shortCode,
             "Password": password,
             "Timestamp":timestamp,
             "TransactionType": "CustomerPayBillOnline", //Industry standard for testing
-            "Amount": Math.ceil(amount), //Safaricom strictly rejects decimals
-            "PartyA": phone, // The customer's phone number
+            "Amount":pushAmount, //Safaricom strictly rejects decimals
+            "PartyA": formattedPhone, // The customer's phone number
             "PartyB": shortCode, //The Paybill/Till number receiving the funds
-            "PhoneNumber":phone,
+            "PhoneNumber":formattedPhone,
             "CallBackURL": callbackUrl,
             "AccountReference": `ORD-${orderId.substring(0,5)}`, //Max 12 characters
             "TransactionDesc": "SmartTable Order Payment"

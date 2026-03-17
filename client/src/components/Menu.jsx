@@ -1,4 +1,4 @@
-import React, {useState, useEffect} from 'react';
+import React, {useState, useEffect, useCallback} from 'react';
 import { useParams, useSearchParams} from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -21,7 +21,7 @@ export default function Menu(){
   const [activeCategory, setActiveCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const fetchMenu = async ()=>{
+  const fetchMenu = useCallback(async ()=>{
     if (!venueId){
       setError("No venue specified. Please scan a valid QR code.");
       setIsLoading(false);
@@ -37,11 +37,11 @@ export default function Menu(){
     } finally {
       setIsLoading(false);
     }
-  }
+  },[venueId])
 
   useEffect(()=>{
     fetchMenu();
-  },[]);
+  },[fetchMenu]);
 
   const filteredItems = items.filter(item =>{
     const matchesCat = activeCategory === 'all' || item.category_id === activeCategory;

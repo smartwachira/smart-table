@@ -35,7 +35,20 @@ const Order = sequelize.define ('Order', {
     phone_number: {
         type: DataTypes.STRING,
         
+    },
+    payment_status: {
+        type: DataTypes.ENUM('PENDING','PAID','FAILED'),
+        defaultValue: 'PENDING'
+    },
+    checkout_request_id:{
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    mpesa_receipt: {
+        type: DataTypes.STRING, 
+        allowNull:true
     }
+
 
 }, {
     timestamps: true, // Adds createdAt and updateAt automatically

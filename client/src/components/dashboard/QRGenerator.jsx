@@ -89,7 +89,7 @@ export default function QRGenerator() {
     };
 
     return (
-        <div className="flex flex-col md:flex-row h-full min-h-[85vh] bg-slate-50 relative overflow-hidden">
+        <div className="flex flex-col md:flex-row h-full  min-h-[85vh] bg-slate-50 relative overflow-hidden">
             
             {/* --- LEFT COLUMN: CONTROLS (Hidden when printing) --- */}
             <aside className="w-full md:w-80 bg-white border-r border-slate-200 flex-shrink-0 flex flex-col z-10 print:hidden overflow-y-auto">

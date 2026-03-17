@@ -38,7 +38,7 @@ export default function LiveOrders() {
     },[]);
 
     //The "Fetcher"
-    const fetchOrders = async ()=>{
+    const fetchOrders = useCallback(async ()=>{
         try{
             const token = localStorage.getItem('token');
             if (!token) return navigate('/login');
@@ -56,7 +56,7 @@ export default function LiveOrders() {
         } finally {
             setIsLoading(false)
         }
-    };
+    },[navigate,user.venueId]);
 
 
     //Function: Update order status
@@ -129,7 +129,7 @@ export default function LiveOrders() {
             })
 
             return ()=>socket.disconnect();
-        });
+    },[fetchOrders,playSound,user.venueId]);
 
         if (loading){
             return (
@@ -179,7 +179,7 @@ export default function LiveOrders() {
                                         <span className="text-xs font-bold uppercase tracking-wider opacity-70">Time</span>
                                         <div className="flex items-center justify-end gap-1 text-sm font-bold opacity-90 mb-1">
                                             <Clock size={14}></Clock>
-                                            {getElapsedTime(order.created_at)}
+                                            {getElapsedTime(order.createdAt)}
                                         </div>
                                     </div>
                                 </div>

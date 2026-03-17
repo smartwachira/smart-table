@@ -1,260 +1,246 @@
-import { useState } from 'react';
-import {useNavigate} from 'react-router-dom';
-import { useCart } from '../context/CartContext';
-import { Smartphone, MapPin, ShieldCheck, Loader2, User,Banknote} from 'lucide-react';
-import toast from 'react-hot-toast';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
+import { toast } from 'sonner';
+import { 
+    ArrowLeft, ShieldCheck, Smartphone, 
+    Receipt, Loader2, CheckCircle2, User, Banknote
+} from 'lucide-react';
+import { useCart } from '../context/CartContext';
 
-
-const Checkout = ()=>{
-    const { cartItems, cartTotal, clearCart,venueId} = useCart();
+export default function Checkout() {
+    const { venueId } = useParams();
+    const [searchParams] = useSearchParams();
+    const tableNumber = searchParams.get('table') || 'Takeaway';
     const navigate = useNavigate();
     
+    const { cart, cartTotals, clearCart } = useCart();
+    const cartItems = Object.values(cart);
 
-    //Form  State
-
-    const [tableNumber, setTableNumber] = useState('');
+    // Form State
     const [customerName, setCustomerName] = useState('');
-    const [paymentMethod, setPaymentMethod] = useState('mpesa');
+    const [paymentMethod, setPaymentMethod] = useState('M-PESA'); // 'M-PESA' or 'CASH'
     const [phone, setPhone] = useState('');
+    
+    // Process State
     const [isProcessing, setIsProcessing] = useState(false);
+    const [paymentStatus, setPaymentStatus] = useState('idle'); // idle, pending, success
 
-    const handleCheckout = async (e) =>{
+    useEffect(() => {
+        if (cartItems.length === 0 && paymentStatus === 'idle') {
+            navigate(`/menu/${venueId}?table=${tableNumber}`);
+        }
+    }, [cartItems, navigate, venueId, tableNumber, paymentStatus]);
+
+    const handlePhoneChange = (e) => {
+        setPhone(e.target.value.replace(/\D/g, ''));
+    };
+
+    const handleCheckoutSubmit = async (e) => {
         e.preventDefault();
+        if (!customerName.trim()) return toast.error("Please enter your name for the order.");
         
-        //1. Basic Validation
-        
-        if (!tableNumber || !customerName){
-            return toast.error("Please provide your name and table number");
+        if (paymentMethod === 'M-PESA' && (phone.length < 9 || phone.length > 12)) {
+            return toast.error("Please enter a valid Safaricom phone number.");
         }
-
-
-        //Format the phone number for safaricom Daraja (Convert 07xx to 2547xx)
-        let formattedPhone = phone.replace(/\s+/g,''); //remove spaces
-        if (formattedPhone.startsWith('0')){
-            formattedPhone = '254' + formattedPhone.substring(1);
-
-        } else if (formattedPhone.startsWith('+')){
-            formattedPhone = formattedPhone.substring(1);
-        }
-
-        //Only validate phone if M-Pesa is selected
-        if (paymentMethod === 'mpesa' && !/^(2547|2541)\d{8}$/.test(formattedPhone)){
-            return toast.error("Please enter a valid Safaricom number (e.g., 07XX or 2547XX");
-        }
-
 
         setIsProcessing(true);
-        toast.loading( paymentMethod === 'mpesa'? "Initiating M-Pesa STK Push..." : "Sending order to kitchen...", { id: 'checkout' });
 
         try {
-            //2. Data Transformation (Mapping Frontend State to Backend Schema)
-            const orderPayLoad = {
-                venue_id: venueId ,
+            // STEP 1: CREATE THE ORDER FIRST
+            const orderPayload = {
+                venue_id: venueId,
                 table_number: tableNumber,
                 customer_name: customerName,
-                payment_method:paymentMethod,
-                phone_number: paymentMethod ==='mpesa'? formattedPhone : null,
-                total_amount: cartTotal,
-                items: cartItems.map(item=>({
-                    item_id: item.id,
-                    quantity: item.quantity,
-                    price: item.price
-
+                payment_method: paymentMethod,
+                phone_number: paymentMethod === 'M-PESA' ? phone : null,
+                amount: cartTotals.total,
+                items: cartItems.map(item => ({ 
+                    item_id: item.item_id, 
+                    quantity: item.quantity, 
+                    price: item.price,
+                    name: item.name
                 }))
             };
+            
+            const orderRes = await axios.post('/api/orders', orderPayload);
+            const orderId = orderRes.data.orderId;
 
-            //3. Create Order in Database
-            const response = await axios.post('/api/orders',orderPayLoad);
-            const newOrderId = response.data.orderId; //Capture the generated UUID
-            const trueTotalAmount = response.data.amount
+            // STEP 2: HANDLE PAYMENT ROUTING
+            if (paymentMethod === 'CASH') {
+                // Cash Flow: Done immediately
+                setPaymentStatus('success');
+                toast.success("Order sent to kitchen! Please pay your waiter.");
+                
+                setTimeout(() => {
+                    clearCart();
+                    navigate(`/order-status/${orderId}?venue=${venueId}`);
+                }, 2000);
 
-            // Trigger M-Pesa STK Push (If selected)
-            if (paymentMethod === 'mpesa'){
-                //Update the loading text to guide the user
-                toast.loading("Check your phone! Waiting for M-Pesa PIN...",{id: 'checkout'});
-
-                //Call Daraja Endpoint
-                await axios.post('/api/mpesa/stkpush',{
-                    phone: formattedPhone, 
-                    amount: trueTotalAmount,
-                    orderId: newOrderId
-
-                });
-
-                toast.success('M-pesa prompt sent!',{id: 'checkout'});
             } else {
-                //Cash payment success message
-                toast.success("Order placed successfully!",{id:'checkout'})
+                // M-Pesa Flow: Trigger STK Push
+                setPaymentStatus('pending');
+                await axios.post('/api/mpesa/stkpush', { orderId, phone });
+                
+                // Wait briefly for user to interact with phone prompt
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                
+                setPaymentStatus('success');
+                setTimeout(() => {
+                    clearCart();
+                    navigate(`/order-status/${orderId}?venue=${venueId}`);
+                }, 2000);
             }
 
-
-            //Cleanup
-            clearCart();
-            
-
-            //Navigate to orders page (In the future, we can pass the specific order ID)
-            navigate(`/orders/${newOrderId}`);
-
-        } catch (error){
-            //5. Error Handling
-            console.error("Checkout Error:",error);
-
-            const errorMessage = error.response?.data?.message || "Checkout failed. Please try again.";
-            toast.error(errorMessage, {id: 'checkout'});
-        } finally {
-            //6. Cleanup (Always runs)
+        } catch (error) {
+            console.error("Checkout Error:", error);
+            toast.error(error.response?.data?.message || "Checkout failed. Please try again.");
+            setPaymentStatus('idle');
             setIsProcessing(false);
         }
+    };
 
-
-    }
-
-    //Prevent checkout if cart is empty
-    if (cartItems.length ===0){
-        return (
-            <div className="flex flex-col items-center justify-center h-96 text-center px-4">
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">Your cart is empty</h2>
-                <p className="text-gray-500 mb-6">Add some delicious items before Checking out.</p>
-                <button className="bg-brand-primary text-white px-6 py-2 rounded-lg font-medium">
-                    Back to Menu
-                </button>
-            </div>
-        )
-    }
+    if (cartItems.length === 0 && paymentStatus === 'idle') return null;
 
     return (
-        <div className="max-w-3xl mx-auto animate-fadeIn">
-            <h1 className="text-2xl font-bold text-gray-900 mb-6">Checkout</h1>
+        <div className="min-h-screen bg-slate-50 font-sans pb-12 relative overflow-hidden">
+            
+            {/* Header */}
+            <header className="bg-white px-4 pt-6 pb-4 border-b border-slate-200 sticky top-0 z-10 flex items-center justify-between">
+                <button onClick={() => navigate(-1)} disabled={isProcessing} className="w-10 h-10 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center text-slate-600 transition-colors disabled:opacity-50">
+                    <ArrowLeft size={20} />
+                </button>
+                <div className="text-center">
+                    <h1 className="text-lg font-black text-slate-900 tracking-tight">Checkout</h1>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">{tableNumber}</p>
+                </div>
+                <div className="w-10 h-10 flex items-center justify-center text-indigo-600">
+                    <ShieldCheck size={24} />
+                </div>
+            </header>
 
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden md:flex">
-
-                {/**Left Column: Order Summary */}
-                <div className="bg-surface-muted p-6 md:w-5/12 border-b md:border-b-0 md:border-r border-gray-100">
-                    <h3 className="font-semibold text-gray-900 mb-4">Order Summary</h3>
-                    <div className="space-y-3 mb-6 max-h-60 overflow-y-auto pr-2">
-                        {cartItems.map(item =>(
-                            <div key={item.id} className="flex justify-between text-sm">
-                                <span className="text-gray-600">{item.quantity}x{item.name}</span>
-                                <span className='font-medium text-gray-900'>{(item.price * item.quantity).toLocaleString()}</span>
+            <main className="px-4 py-6 space-y-6 max-w-lg mx-auto">
+                
+                {/* Order Summary */}
+                <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
+                    <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                        <Receipt size={16} /> Order Summary
+                    </h2>
+                    <div className="space-y-3 mb-4">
+                        {cartItems.map(item => (
+                            <div key={item.item_id} className="flex justify-between items-start text-slate-700">
+                                <div className="flex gap-2">
+                                    <span className="font-bold text-slate-900">{item.quantity}x</span>
+                                    <span>{item.name}</span>
+                                </div>
+                                <span className="font-semibold">{(item.price * item.quantity).toLocaleString('en-KE')}</span>
                             </div>
                         ))}
                     </div>
-                    <div className="pt-4 border-t border-gray-200 flex justify-between items-center">
-                        <span className="font-bold text-gray-900 text-lg">Total</span>
-                        <span className="font-bold text-brand-primary text-xl">{cartTotal.toLocaleString()} KES</span>
+                    <div className="pt-4 border-t border-slate-100 flex justify-between items-center text-slate-900">
+                        <span className="text-lg font-black">Total</span>
+                        <span className="text-2xl font-black text-indigo-600">
+                            {cartTotals.total.toLocaleString('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 })}
+                        </span>
                     </div>
                 </div>
 
-                {/* Right Column: Payment Form */}
-                <div className="p-6 md:w-7/12">
-                    <form onSubmit={handleCheckout} className="space-y-5">
+                {/* Checkout Form */}
+                <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm relative overflow-hidden">
+                    
+                    {/* Processing Overlays */}
+                    {paymentStatus === 'pending' && (
+                        <div className="absolute inset-0 z-20 bg-white/95 backdrop-blur-sm flex flex-col items-center justify-center animate-in fade-in duration-300">
+                            <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mb-4 relative">
+                                <Loader2 size={32} className="animate-spin absolute" />
+                                <Smartphone size={20} className="animate-pulse" />
+                            </div>
+                            <h3 className="text-lg font-black text-slate-900">Check your phone!</h3>
+                            <p className="text-sm text-slate-500 text-center px-6 mt-2">Enter your M-Pesa PIN on the prompt sent to <br/><span className="font-bold text-slate-800 tracking-wider">{phone}</span></p>
+                        </div>
+                    )}
 
-                        {/* Customer Name Input */}
-                        <div>
-                            <label  className="block text-sm font-medium text-gray-700 mb-1">Customer Name</label>
+                    {paymentStatus === 'success' && (
+                        <div className="absolute inset-0 z-30 bg-emerald-500 flex flex-col items-center justify-center text-white animate-in slide-in-from-bottom-8 duration-500">
+                            <CheckCircle2 size={64} className="mb-4" />
+                            <h3 className="text-2xl font-black">Order Confirmed!</h3>
+                            <p className="opacity-90 font-medium mt-1">Routing to kitchen...</p>
+                        </div>
+                    )}
+
+                    <form onSubmit={handleCheckoutSubmit} className="space-y-6">
+                        
+                        {/* Customer Details */}
+                        <div className="space-y-2">
+                            <label className="text-sm font-bold text-slate-700 ml-1">Your Name</label>
                             <div className="relative">
-                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    <User className="h-5 w-5 text-gray-400"></User>
-                                </div>
+                                <User size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
                                 <input 
                                     type="text" 
                                     required
+                                    placeholder="What should we call you?"
                                     value={customerName}
-                                    onChange={(e)=> setCustomerName(e.target.value)}
-                                    placeholder='John Doe'
-                                    className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl focus:ring-brand-primary focus:border-brand-primary transition-colors" />
+                                    onChange={(e) => setCustomerName(e.target.value)}
+                                    disabled={isProcessing}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-11 pr-4 py-4 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:bg-white transition-all disabled:opacity-50"
+                                />
                             </div>
                         </div>
 
-                        {/* Table Number Input */}
-                        <div>
-                            <label  className="block text-sm font-medium text-gray-700 mb-1">Table Number</label>
-                            <div className="relative">
-                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    <MapPin className="h-5 w-5 text-gray-400"></MapPin>
-                                </div>
+                        {/* Payment Method Toggle */}
+                        <div className="space-y-2">
+                            <label className="text-sm font-bold text-slate-700 ml-1">Payment Method</label>
+                            <div className="grid grid-cols-2 gap-3">
+                                <button 
+                                    type="button"
+                                    onClick={() => setPaymentMethod('M-PESA')}
+                                    className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 transition-all ${paymentMethod === 'M-PESA' ? 'border-[#52B44B] bg-[#52B44B]/5 text-[#52B44B]' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
+                                >
+                                    <Smartphone size={24} />
+                                    <span className="font-bold text-sm">M-Pesa</span>
+                                </button>
+                                <button 
+                                    type="button"
+                                    onClick={() => setPaymentMethod('CASH')}
+                                    className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 transition-all ${paymentMethod === 'CASH' ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
+                                >
+                                    <Banknote size={24} />
+                                    <span className="font-bold text-sm">Pay Waiter</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Conditional Phone Input */}
+                        {paymentMethod === 'M-PESA' && (
+                            <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                                <label className="text-sm font-bold text-slate-700 ml-1">M-Pesa Number</label>
                                 <input 
-                                    type="number" 
+                                    type="tel" 
                                     required
-                                    value={tableNumber}
-                                    onChange={(e)=> setTableNumber(e.target.value)}
-                                    placeholder='e.g. 12'
-                                    className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl focus:ring-brand-primary focus:border-brand-primary transition-colors" />
-                            </div>
-                        </div>
-
-                        {/* Payment Method Selection */}
-                        <div>
-                            <label  className="block text-sm font-medium text-gray-700 mb-2">Payment Method</label>
-                            <div className="grid grid-cols-2 gap-4">
-                                <button
-                                    type='button'
-                                    onClick={()=>setPaymentMethod('mpesa')}
-                                    className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
-                                        paymentMethod === 'mpesa' ? 'border-[#52B520 bg-[#52B520]/5' : 'border-gray-200 hover:border-gray-300'
-                                    }`}
-                                >
-                                    <Smartphone className={paymentMethod==='mpesa'? 'text-[#52B520]': 'text-gray-400'} size={24}></Smartphone>
-                                    <span className={`mt-2 font-medium ${paymentMethod==='mpesa'? 'text-[#52B520]': 'text-gray-600'}`}>M-pesa</span>
-                                </button>
-                                <button
-                                    type='button'
-                                    onClick={()=>setPaymentMethod('cash')}
-                                    className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
-                                        paymentMethod === 'cash' ? 'border-brand-primary bg-brand-primary/5' : 'border-gray-200 hover:border-gray-300'
-                                    }`}
-                                >
-                                    <Banknote className={paymentMethod === 'cash' ? 'text-brand-primary': 'text-gray-400'} size={24}></Banknote>
-                                    <span className={`mt-2 font-medium ${paymentMethod === 'cash'? 'text-brand-primary' : 'text-gray-400'}`}>Pay Cash</span>
-                                </button>
-                            </div>
-                        </div>
-                        
-
-                        {/* Phone Number Input (Mpesa Styling) */}
-                        {paymentMethod === 'mpesa' && (
-                            <div className='animate-fadeIn'>
-                                <label  className="block text-sm font-medium text-gray-700 mb-1">M-Pesa Mobile Number</label>
-                                <div className="relative">
-                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                        <Smartphone className="h-5 w-5 text-[#52B520]"/>
-                                    </div>
-                                    <input 
-                                        placeholder='07XX XXX XXX'
-                                        type="tel"
-                                        value={phone} 
-                                        required
-                                        onChange={(e)=>setPhone(e.target.value)}
-                                        className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl focus:ring-[#52B520] focus:border-[#52B520] transition-colors font-medium" />
-                                </div>
-                                <p className="mt-2 text-xs text-gray-500 flex items-center gap-1">
-                                    <ShieldCheck size={14} className='text-[#52B520]'></ShieldCheck>
-                                    Keep your phone unlocked. A prompt will appear shortly.
-                                </p>
+                                    placeholder="07XX XXX XXX"
+                                    value={phone}
+                                    onChange={handlePhoneChange}
+                                    disabled={isProcessing}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4 text-slate-900 font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-[#52B44B]/50 focus:bg-white transition-all disabled:opacity-50"
+                                />
                             </div>
                         )}
 
-                        {/* Submit Button */}
+                        {/* Dynamic Submit Button */}
                         <button 
-                            type='submit'
-                            disabled={isProcessing}
-                            className={`w-full mt-6 py-4 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all shadow-lg
-                                ${isProcessing ? 'bg-gray-400 cursor-not-allowed' : paymentMethod === 'mpesa'? 'bg-[#52B520] hover:bg-[#459e1a] active:scale-95 shadow-[#52B520]/30 ': 'bg-brand-primary hover:bg-emerald-600 shadow-brand-primary/30'}`}
+                            type="submit"
+                            disabled={isProcessing ||!phone}
+                            className={`w-full py-4 rounded-2xl font-black text-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed ${
+                                paymentMethod === 'M-PESA' 
+                                ? 'bg-[#52B44B] hover:bg-[#459e3f] shadow-[#52B44B]/30' 
+                                : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/30'
+                            }`}
                         >
-                            {isProcessing ? (
-                                <><Loader2 className='animate-spin' size={20}/> Processing...</>
-
-                            ):(
-                                paymentMethod === 'mpesa' ?`Pay ${cartTotal.toLocaleString()} Kes with Mpesa` : `Place Order (${cartTotal.toLocaleString()} KES)`
-                            )}
+                            {paymentMethod === 'M-PESA' ? `Pay ${cartTotals.total.toLocaleString('en-KE')}` : 'Send Order to Kitchen'}
                         </button>
-                        
                     </form>
                 </div>
-            </div>
+            </main>
         </div>
-    )
-};
-
-export default Checkout;
+    );
+}
