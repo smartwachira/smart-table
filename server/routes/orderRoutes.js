@@ -9,6 +9,7 @@ const router = express.Router();
 router.post('/', orderController.createOrder);
 //router.get("/:venueId", orderController.getOrders);
 router.get("/track/:orderId",orderController.getOrderStatus);
+router.get('/:orderId/status',orderController.getOrderStatus);
 
 
 // Protected Routes (Staff Only)

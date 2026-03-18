@@ -11,8 +11,8 @@ const BEEP_URL = 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.
 
 // Mock Data for UI testing before backend is fully populated
 const mockOrders = [
-    { order_id: '1', table_number: 'T-12', status: 'PENDING', created_at: new Date(Date.now() - 5 * 60000).toISOString(), items: [{ quantity: 2, name: 'Tusker Lager' }, { quantity: 1, name: 'Nyama Choma', description: 'Well done, extra kachumbari' }] },
-    { order_id: '2', table_number: 'VIP-1', status: 'PREPARING', created_at: new Date(Date.now() - 15 * 60000).toISOString(), items: [{ quantity: 1, name: 'Glenfiddich 18yr Bottle' }] }
+    { order_id: '1', table_number: 'T-12', status: 'PENDING', created_at: new Date(Date.now() - 5 * 60000).toISOString(), OrderItems: [{ quantity: 2, name: 'Tusker Lager' }, { quantity: 1, name: 'Nyama Choma', description: 'Well done, extra kachumbari' }] },
+    { order_id: '2', table_number: 'VIP-1', status: 'PREPARING', created_at: new Date(Date.now() - 15 * 60000).toISOString(), OrderItems: [{ quantity: 1, name: 'Glenfiddich 18yr Bottle' }] }
 ];
 
 export default function LiveOrders() {
@@ -183,15 +183,29 @@ export default function LiveOrders() {
                                         </div>
                                     </div>
                                 </div>
+                                {/* PAYMENT STATUS BADGE */}
+                                {order.payment_method === 'CASH' && order.payment_status === 'PENDING' ? (
+                                    <span className="px-3 py-1 bg-amber-100 text-amber-800 border border-amber-200 rounded-full text-xs font-black uppercase tracking-wider animate-pulse">
+                                        Collect Cash: {order.total_amount.toLocaleString('en-KE')}
+                                    </span>
+                                ) : (
+                                    <span className="px-3 py-1 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-full text-xs font-black uppercase tracking-wider">
+                                        Paid ({order.payment_method})
+                                    </span>
+                                )}
+                                <div>
+
+                                </div>
                                 {/* Ticket Items */}
                                 <div className="p-4 flex-1 bg-white/30 space-y-3">
-                                    {order.items?.map((item, idx) => (
+                                
+                                    {order.OrderItems?.map((item, idx) => (
                                         <div key={idx} className="flex justify-between items-start text-sm font-medium">
                                             <div className="flex gap-2">
                                                 <span className="font-bold border-b-2 border-inherit px-1">{item.quantity}x</span>
                                                 <span>
-                                                    {item.name}
-                                                    {item.description && <p className="text-xs font-normal opacity-75 mt-0.5 ml-1">↳ {item.notes}</p>}
+                                                    {item.MenuItem?.name || 'Unknown Item'}
+                                                    {item.MenuItem?.description && <p className="text-xs font-normal opacity-75 mt-0.5 ml-1">↳ {item.MenuItem?.description}</p>}
                                                 </span>
                                             </div>
                                         </div>

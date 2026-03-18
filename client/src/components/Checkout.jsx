@@ -4,7 +4,7 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { 
     ArrowLeft, ShieldCheck, Smartphone, 
-    Receipt, Loader2, CheckCircle2, User, Banknote
+    Receipt, Loader2, CheckCircle2, User, Banknote,XCircle
 } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 
@@ -24,13 +24,58 @@ export default function Checkout() {
     
     // Process State
     const [isProcessing, setIsProcessing] = useState(false);
-    const [paymentStatus, setPaymentStatus] = useState('idle'); // idle, pending, success
+    const [paymentStatus, setPaymentStatus] = useState('idle'); // idle, pending, success,failed
+    const [pollingOrderId, setPollingOrderId] = useState(null);
 
     useEffect(() => {
         if (cartItems.length === 0 && paymentStatus === 'idle') {
             navigate(`/menu/${venueId}?table=${tableNumber}`);
         }
     }, [cartItems, navigate, venueId, tableNumber, paymentStatus]);
+
+
+    // --- ⚡ THE SHORT POLLING ENGINE ⚡ ---
+    useEffect(()=>{
+        let pollInterval;
+
+        // Only run the poller if we are waiting for an M-Pesa response
+        if (paymentStatus === 'pending' && pollingOrderId){
+            pollInterval = setInterval(async ()=>{
+                try {
+                    // Ping the database
+                    const res = await axios.get(`/api/orders/${pollingOrderId}/status`);
+                    const currentStatus = res.data.payment_status;
+
+                    if (currentStatus === "PAID"){
+                        //Success! Stop polling and transition UI
+                        clearInterval(pollInterval);
+                        setPaymentStatus('success');
+                        toast.success("Payment confirmed!");
+
+                        setTimeout(()=>{
+                            clearCart();
+                            navigate(`/order-status/${pollingOrderId}?venue=${venueId}`)
+                        }, 2000)
+                    } else if (currentStatus === 'FAILED' || res.data.status === 'CANCELLED'){
+                        // Failure! Stop polling, reset UI and alert user
+                        clearInterval(pollInterval);
+                        setPaymentStatus('failed');
+                        setIsProcessing(false);
+                        toast.error("Payment failed, timed out, or was cancelled.");
+
+                        //Let them try again after 3 seconds
+                        setTimeout(()=> setPaymentStatus('idle'),3000);
+                    }
+                } catch (error){
+                    console.error("Polling error:", error);
+                }
+            }, 3000)
+        }
+        // Cleanup function to prevent memory leaks if component unmounts
+        return () => {
+            if (pollInterval) clearInterval(pollInterval);
+        };
+    },[paymentStatus,pollingOrderId,navigate,clearCart,venueId])
 
     const handlePhoneChange = (e) => {
         setPhone(e.target.value.replace(/\D/g, ''));
@@ -82,14 +127,9 @@ export default function Checkout() {
                 setPaymentStatus('pending');
                 await axios.post('/api/mpesa/stkpush', { orderId, phone });
                 
-                // Wait briefly for user to interact with phone prompt
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                
-                setPaymentStatus('success');
-                setTimeout(() => {
-                    clearCart();
-                    navigate(`/order-status/${orderId}?venue=${venueId}`);
-                }, 2000);
+                //⚡ Start the Polling Engine!
+                setPollingOrderId(orderId);
+                setPaymentStatus('pending');
             }
 
         } catch (error) {
@@ -157,6 +197,14 @@ export default function Checkout() {
                             </div>
                             <h3 className="text-lg font-black text-slate-900">Check your phone!</h3>
                             <p className="text-sm text-slate-500 text-center px-6 mt-2">Enter your M-Pesa PIN on the prompt sent to <br/><span className="font-bold text-slate-800 tracking-wider">{phone}</span></p>
+                        </div>
+                    )}
+
+                    {paymentStatus === 'failed' && (
+                        <div className="absolute inset-0 z-30 bg-red-500 flex flex-col items-center justify-center text-white animate-in slide-in-from-bottom-8 duration-300">
+                            <XCircle size={64} className="mb-4" />
+                            <h3 className="text-2xl font-black">Payment Failed</h3>
+                            <p className="opacity-90 font-medium mt-1">Please try again.</p>
                         </div>
                     )}
 

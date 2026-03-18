@@ -3,6 +3,7 @@ import OrderItem from '../models/OrderItem.js';
 import MenuItem from '../models/MenuItem.js';
 import sequelize from '../config/db.js';
 import { request } from 'express';
+import { Op } from 'sequelize';
 ;
 
 
@@ -51,7 +52,8 @@ export const createOrder = async (req,res) => {
             phone_number,
             total_amount: trueTotalAmount,
             payment_method,
-            status: 'PENDING'
+            status: 'PENDING',
+            payment_status: 'PENDING'
         }, {transaction: t}); // pass the transaction object
 
         const orderItemsData = validatedItems.map(item => ({
@@ -97,7 +99,12 @@ export const getOrders = async (req, res) => {
       where: { 
         venue_id: venueId,
         // Only show active orders in the kitchen (hide completed ones)
-        status: ['PENDING', 'PREPARING', 'READY'] 
+        status:{ [Op.notIn]:['COMPLETED','CANCELLED']},
+
+        [Op.or]: [
+          {payment_status: 'PAID'},
+          { payment_method: 'CASH'}
+        ]
       },
       include: [
         {
@@ -176,10 +183,10 @@ export const getOrderStatus = async (req, res) => {
     });
 
     if (!order) return res.status(404).json({ message: 'Order not found' });
-    res.json(order);
+    res.status(200).json(order);
   } catch (error) {
     console.error('❌ Track Order Error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Failed to check order status.' });
   }
 };
 

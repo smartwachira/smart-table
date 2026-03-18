@@ -47,6 +47,10 @@ const Order = sequelize.define ('Order', {
     mpesa_receipt: {
         type: DataTypes.STRING, 
         allowNull:true
+    },
+    notes: {
+        type: DataTypes.TEXT,
+        allowNull: true,
     }
 
 

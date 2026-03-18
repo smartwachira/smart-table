@@ -3,11 +3,12 @@ import Order from '../models/Order.js';
 
 export const initiateSTK = async (req, res) =>{
     try{
-        const { order_id, phone } = req.body;
+        console.log("🔥 HIT STK PUSH ENDPOINT! Payload:", req.body);
+        const { orderId, phone } = req.body;
         
 
         // 1. Fetch the pre-created order
-        const order = await Order.findByPk(order_id);
+        const order = await Order.findByPk(orderId);
         if (!order) return res.status(404).json({ message: "Order not found." });
         // 2. Format Phone
         let formattedPhone = phone.replace(/\D/g, '');
@@ -87,52 +88,94 @@ export const mpesaCallBack = async (req, res)=>{
         console.log("🔔 Safaricom Webhook Triggered!");
 
         //1. Extract the callback data
-        const callbackData = req.body.Body.stkCallback;
+        const callbackData = req.body?.Body?.stkCallback;
+        if (!callbackData){
+            console.error("❌ Malformed payload received from Safaricom");
+            return res.status(200).send("Acknowledged");// Always return 200 so they stop retrying
+        }
+        const checkoutRequestId = callbackData.CheckoutRequestID;
         const resultCode = callbackData.ResultCode; // a number indicating success(0)and failure
+        const resultDesc = callbackData.ResultDesc;
         const merchantRequestID = callbackData.MerchantRequestID;
 
-        //Safaricom expects a quick response acknowledging receipt, otherwise the keep retrying.
-        res.status(200).json({ ResultCode: 0, ResultDesc: 'Callback Received Successfully'});
+        console.log(`🔍 Request ID: ${checkoutRequestId}`);
+        console.log(`📊 Result Code: ${resultCode} - ${resultDesc}`)
 
-        //2. Check if the transaction failed (e.g user cancelled, insufficient funds)
-        if (resultCode !== 0){
-            console.log(`❌ M-Pesa Payment Failed: ${callbackData.ResultDesc}`)
-            //You could update your DB here to mark the order as "failed", but for MVP we just log it.
-            return;
+
+        // 2. Locate the exact order in PostgreSQl
+        const order = await Order.findOne({ where: {checkout_request_id:checkoutRequestId}});
+
+        if (!order){
+            console.error("🚨 CRITICAL: Received webhook for untracked CheckoutRequestID!");
+            return res.status(200).json({ ResultCode: 0,ResultDesc: 'Accepted'});
         }
 
-        //3. Payment Success! Extract thee Receipt Number and Amount
-        const meta = callbackData.CallbackMetadata.Item;
-        const receiptNumber = meta.find(item => item.Name === 'MpesaReceiptNumber')?.Value;
-        const amountPaid = meta.find(item => item.Name === 'Amount')?.Value;
+        // 3. Process the Result Code
 
-        console.log(`✅ Payment Success! Receipt: ${receiptNumber} for KES ${amountPaid}`);
-        // 4. In a production system, you would:
-        // A. Look up the Order in your database using a tracking ID linked to MerchantRequestID.
-        // B. Update the Order status from 'pending' to 'preparing'.
-        // C. Fire a WebSocket event to the Kitchen Display System.
-        
-        // Example logic (if we had saved MerchantRequestID during the STK Push):
-        /*
-        const order = await Order.findOne({ where: { mpesa_request_id: merchantRequestID } });
-        if (order) {
-            order.status = 'preparing'; // Send it to the kitchen!
+        if (resultCode === 0){
+            // ✅ SCENARIO A: SUCCESSFUL PAYMENT
+            console.log("✅ Payment Successful!");
+
+
+            // Extract the precise receipt number from Safaricom's metadata array
+            const callbackMetadata = callbackData.CallbackMetadata?.Item || [];
+            const receiptObj = callbackMetadata.find(item=> item.Name === 'MpesaReceiptNumber');
+            const receiptNumber = receiptObj ? receiptObj.Value : 'UNKNOWN_RECEIPT';
+
+            //Update Database
+            order.payment_status = 'PAID';
+            order.mpesa_receipt = receiptNumber;
             await order.save();
-            
-            const io = req.app.get('socketio');
-            if (io) {
-                // Notify the specific customer's tracking page
-                io.emit(`order_status_${order.order_id}`, { status: 'preparing' });
-                // Notify the kitchen
-                io.to(order.venue_id).emit('refresh_kds'); 
+
+            console.log(`📝 Order ${order.order_id} marked as PAID. Receipt: ${receiptNumber} for KES ${amountPaid}`);
+
+            //⚡REAL-TIME ALERT: Fire to the Kitchen Terminal
+            const io = req.app.get('socketio'); // Matches the global pack in your index.js
+            if (io){
+                io.to(order.venue_id).emit('orderUpdated',{
+                    message: `New Paid Order: Table ${order.table_number} (${order.customer_name})`,
+                    orderId: order.order_id,
+                    status: 'PAID'
+                });
             }
+            
+        } else {
+            // ❌ SCENARIO B: PAYMENT FAILED OR CANCELLED
+            // Map Safaricom's vague codes to operational realities
+            let failureReason = "Payment Failed";
+
+            switch (resultCode){
+                case 1032:
+                    failureReason = "Cancelled by Customer";
+                    break;
+                case 1037:
+                    failureReason = "Timeout (Customer didn't enter PIN)";
+                    break;
+                case 1:
+                    failureReason = "Insufficient Funds";
+                    break;
+                default:
+                    failureReason = resultDesc;
+            }
+
+            console.log(`⚠️ Payment Failed: ${failureReason}`);
+
+            //Update Database: Mark as failed and auto-cancel the order so the kitchen ignores it
+            order.payment_status = 'FAILED';
+            order.status = 'CANCELLED';
+            order.notes = failureReason;
+
+            await order.save();
+
+            console.log(`🗑️ Order ${order.order_id} auto-cancelled due to payment failure.`)
         }
-        */
 
-
+        //4. Always acknowledge Safaricom gracefully
+        res.status(200).json({ ResultCode: 0, ResultDesc: "Accepted"});
     } catch (error){
-        console.error("Callback Error.", error.message);
-        // Do not return a 500 to Safaricom unless you want them to infinitely retry the webhook
+        console.error("🔥 M-Pesa Webhook Execution Error:", error);
+        // Even on our internal errors, tell Safaricom 200 OK so they don't DDOS us with retries
+        res.status(200).send("Acknowledged with internal errors");
     }
 };
 
