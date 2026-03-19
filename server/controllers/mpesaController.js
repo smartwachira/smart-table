@@ -57,7 +57,7 @@ export const initiateSTK = async (req, res) =>{
             "PhoneNumber":formattedPhone,
             "CallBackURL": callbackUrl,
             "AccountReference": `ORD-${orderId.substring(0,5)}`, //Max 12 characters
-            "TransactionDesc": "SmartTable Order Payment"
+            "TransactionDesc": `Tab ${order.table_number}`
         };
 
         //7. Execute the Request
@@ -67,6 +67,17 @@ export const initiateSTK = async (req, res) =>{
             }
         });
 
+        // ⚡ THE CRITICAL FIX: Explicitly log and save the ID
+        console.log("📥 Safaricom STK Response:",response.data);
+
+        if (response.data && response.data.CheckoutRequestID){
+            order.checkout_request_id = response.data.CheckoutRequestID;
+            await order.save();
+            console.log(`✅ Order updated with CheckoutRequestID: ${order.checkout_request_id}`)
+
+        } else {
+            throw new Error("Safaricom did not return a CheckoutRequestID");
+        }
         res.status(200).json({
             message: 'STK Push initiated successfully',
             darajaResponse: response.data
@@ -96,11 +107,6 @@ export const mpesaCallBack = async (req, res)=>{
         const checkoutRequestId = callbackData.CheckoutRequestID;
         const resultCode = callbackData.ResultCode; // a number indicating success(0)and failure
         const resultDesc = callbackData.ResultDesc;
-        const merchantRequestID = callbackData.MerchantRequestID;
-
-        console.log(`🔍 Request ID: ${checkoutRequestId}`);
-        console.log(`📊 Result Code: ${resultCode} - ${resultDesc}`)
-
 
         // 2. Locate the exact order in PostgreSQl
         const order = await Order.findOne({ where: {checkout_request_id:checkoutRequestId}});
@@ -122,6 +128,10 @@ export const mpesaCallBack = async (req, res)=>{
             const receiptObj = callbackMetadata.find(item=> item.Name === 'MpesaReceiptNumber');
             const receiptNumber = receiptObj ? receiptObj.Value : 'UNKNOWN_RECEIPT';
 
+            // Extract Amount Paid (THIS FIXES YOUR ERROR)
+            const amountObj = callbackMetadata.find(item => item.Name === 'Amount');
+            const amountPaid = amountObj ? amountObj.Value : order.total_amount;
+            
             //Update Database
             order.payment_status = 'PAID';
             order.mpesa_receipt = receiptNumber;
