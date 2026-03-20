@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback,useState, useEffect, } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { jwtDecode } from 'jwt-decode';
 import { toast } from 'sonner';
@@ -17,9 +17,10 @@ export default function QRGenerator() {
     const [qrColor, setQrColor] = useState('#0f172a'); // Slate 900
     const [includeLogo, setIncludeLogo] = useState(false);
 
+
     // Get the venue ID on mount
     useEffect(() => {
-        const token = localStorage.getItem('token');
+       const token = localStorage.getItem('token');
         if (token) {
             try {
                 const decoded = jwtDecode(token);

@@ -28,8 +28,8 @@ export const registerVenue = async ( req, res) =>{
          const{ venueName,location,managerName,managerEmail, managerPassword} = req.body;
 
          //1. Check if the email is already in use across the entire system
-         const existingUser = await User.findOne({
-            where: {email: managerEmail}
+         const existingVenue = await Venue.findOne({
+            where: {contact_email: managerEmail}
          });
          if (existingUser){
             return res.status(400).json({ message : "Email is already registered."})
@@ -38,7 +38,8 @@ export const registerVenue = async ( req, res) =>{
          //2. Create the venue
          const newVenue = await Venue.create({
             name: venueName,
-            location: location
+            location: location,
+            contact_email:managerEmail
          },{transaction:t});
 
          //3. Hash the Manager's Password securely

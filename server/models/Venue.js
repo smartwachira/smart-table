@@ -25,7 +25,7 @@ const Venue = sequelize.define('Venue',{
     },
     contact_email:{
         type:DataTypes.STRING,
-        allowNull: true,
+        allowNull: false,
         unique: true
     },
     phone_number: {

@@ -24,6 +24,7 @@ import StaffManagement from "./components/dashboard/StaffManagement";
 import LiveOrders from "./components/dashboard/LiveOrders";
 import MenuManagement from "./components/dashboard/MenuManagement";
 import QRGenerator from "./components/dashboard/QRGenerator";
+import Settings from "./components/dashboard/Settings"
 
 // --- Terminal Components ---
 import Kitchen from "./components/Kitchen";
@@ -62,6 +63,7 @@ function App() {
                 <Route path="orders" element={<LiveOrders />} />
                 <Route path="menu" element={<MenuManagement />} />
                 <Route path="qr" element={<QRGenerator />} />
+                <Route path="settings" element={<Settings/>}/>
               </Route>
             </Route>
 

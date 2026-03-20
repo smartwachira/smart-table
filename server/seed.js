@@ -40,7 +40,8 @@ const seedDatabase = async () => {
       venue_id: TARGET_VENUE_ID, // Exact ID requested
       name: 'SmartTable Exclusive Lounge',
       location: "Westlands, Nairobi",
-      image_url: "https://images.unsplash.com/photo-1514933651103-005eec06c04b?auto=format&fit=crop&w=800&q=80"
+      image_url: "https://images.unsplash.com/photo-1514933651103-005eec06c04b?auto=format&fit=crop&w=800&q=80",
+      contact_email: "owner001@gmail.com"
     });
     console.log(`✅ Created Venue: ${venue.name} (${venue.venue_id})`);
 
