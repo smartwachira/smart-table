@@ -2,7 +2,7 @@ import React, {useState, useEffect, useCallback} from 'react';
 import { useParams, useSearchParams} from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
-import { Search, ShoppingBag,Plus,Minus,Info,UtensilsCrossed, AlertCircle} from  'lucide-react';
+import { Search, ShoppingBag,Plus,Minus,Info,UtensilsCrossed, AlertCircle,Moon} from  'lucide-react';
 import { useCart} from '../context/CartContext'
 import FloatingCart  from './FloatingCart.jsx';
 
@@ -11,7 +11,7 @@ export default function Menu(){
   const [searchParams] = useSearchParams();
   const tableNumber = searchParams.get('table') || 'Takeaway';
 
-  const {cart,updateQuantity,cartTotals,setIsCartOpen} = useCart();
+  const {cart,updateQuantity,cartTotals,setIsCartOpen, venueConfig, setVenueConfig} = useCart();
 
   const [categories, setCategories] = useState([]);
   const [items, setItems] = useState([]);
@@ -31,13 +31,14 @@ export default function Menu(){
       const res = await axios.get(`/api/menu/public/${venueId}`);
       setCategories(res.data.categories);
       setItems(res.data.items);
+      setVenueConfig(res.data.venue)
     } catch (err){
       setError("Failed to load the menu. The venue might be offline.");
       console.log("Error  loading the menu",err)
     } finally {
       setIsLoading(false);
     }
-  },[venueId])
+  },[venueId,setVenueConfig])
 
   useEffect(()=>{
     fetchMenu();
@@ -60,6 +61,19 @@ export default function Menu(){
   }
 
   if (isLoading) return <MenuSkeleton></MenuSkeleton>;
+
+  // ⚡ THE MASTER LOCK: Check if venue is accepting orders
+    if (venueConfig && !venueConfig.is_accepting_orders) {
+        return (
+            <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-500">
+                <div className="w-24 h-24 bg-slate-800 rounded-full flex items-center justify-center mb-6 shadow-2xl">
+                    <Moon size={40} className="text-indigo-400" />
+                </div>
+                <h2 className="text-2xl font-black text-white mb-2">{venueConfig.name} is Closed</h2>
+                <p className="text-slate-400 max-w-xs">We are not accepting digital orders right now. Please check back later or speak to a waiter.</p>
+            </div>
+        );
+    }
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-32">

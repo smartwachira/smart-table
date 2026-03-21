@@ -4,7 +4,8 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { 
     ArrowLeft, ShieldCheck, Smartphone, 
-    Receipt, Loader2, CheckCircle2, User, Banknote,XCircle
+    Receipt, Loader2, CheckCircle2, User, Banknote,XCircle,
+    Currency
 } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 
@@ -14,7 +15,7 @@ export default function Checkout() {
     const tableNumber = searchParams.get('table') || 'Takeaway';
     const navigate = useNavigate();
     
-    const { cart, cartTotals, clearCart } = useCart();
+    const { cart, cartTotals, clearCart,venueConfig } = useCart();
     const cartItems = Object.values(cart);
 
     // Form State
@@ -177,11 +178,24 @@ export default function Checkout() {
                             </div>
                         ))}
                     </div>
-                    <div className="pt-4 border-t border-slate-100 flex justify-between items-center text-slate-900">
-                        <span className="text-lg font-black">Total</span>
-                        <span className="text-2xl font-black text-indigo-600">
-                            {cartTotals.total.toLocaleString('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 })}
-                        </span>
+                    <div className="pt-4 border-t border-slate-100 space-y-2">
+                       <div className="flex justify-between text-slate-500 font-medium text-sm">
+                            <span>Subtotal</span>
+                            <span>{cartTotals.subtotal.toLocaleString('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 })}</span>
+                        </div>
+                        {/* NEW: Only show tax row if tax is greater than 0  */}
+                        {cartTotals.taxAmount > 0 && (
+                            <div className="flex justify-between text-slate-500 font-medium text-sm">
+                                <span>Taxes & Fees</span>
+                                <span>{cartTotals.taxAmount.toLocaleString('en-KE',{ style: 'currency', currency: 'KES', minimumFractionDigits: 0 })}</span>
+                            </div>
+                        )}
+                        <div className="flex justify-between items-center text-slate-900 pt-2 border-t border-slate-100 mt-2">
+                            <span className="text-lg font-black">Total</span>
+                            <span className="text-2xl font-black text-indigo-600">
+                                {cartTotals.total.toLocaleString('en-KE',{ style: 'currency', currency: 'KES', minimumFractionDigits: 0 })}
+                            </span>
+                        </div>
                     </div>
                 </div>
 
@@ -238,23 +252,26 @@ export default function Checkout() {
                         {/* Payment Method Toggle */}
                         <div className="space-y-2">
                             <label className="text-sm font-bold text-slate-700 ml-1">Payment Method</label>
-                            <div className="grid grid-cols-2 gap-3">
+                            <div className={`grid gap-3 ${venueConfig?.allow_cash_payments ? 'grid-cols-2' : 'grid-cols-1'}`}>
                                 <button 
                                     type="button"
                                     onClick={() => setPaymentMethod('M-PESA')}
                                     className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 transition-all ${paymentMethod === 'M-PESA' ? 'border-[#52B44B] bg-[#52B44B]/5 text-[#52B44B]' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
                                 >
-                                    <Smartphone size={24} />
+                                    <Smartphone size={24}/>
                                     <span className="font-bold text-sm">M-Pesa</span>
                                 </button>
-                                <button 
+
+                                {/* Only render this button if the venue allows it */}
+
+                                {venueConfig?.allow_cash_payments && (<button 
                                     type="button"
                                     onClick={() => setPaymentMethod('CASH')}
                                     className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 transition-all ${paymentMethod === 'CASH' ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
                                 >
                                     <Banknote size={24} />
                                     <span className="font-bold text-sm">Pay Waiter</span>
-                                </button>
+                                </button>)}
                             </div>
                         </div>
 
@@ -277,7 +294,7 @@ export default function Checkout() {
                         {/* Dynamic Submit Button */}
                         <button 
                             type="submit"
-                            disabled={isProcessing ||!phone}
+                            disabled={isProcessing }
                             className={`w-full py-4 rounded-2xl font-black text-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed ${
                                 paymentMethod === 'M-PESA' 
                                 ? 'bg-[#52B44B] hover:bg-[#459e3f] shadow-[#52B44B]/30' 

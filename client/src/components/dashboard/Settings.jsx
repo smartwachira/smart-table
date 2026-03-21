@@ -19,7 +19,7 @@ export default function Settings(){
     //Form State
     const [formData, setFormData] = useState({
         name: '',
-        address:'',
+        location:'',
         contact_email:'',
         phone_number: '',
         tax_rate: 0,
@@ -126,8 +126,8 @@ export default function Settings(){
                                         <input type="email" value={formData.contact_email} disabled className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-slate-500 cursor-not-allowed" />
                                     </div>
                                     <div className="space-y-2 md:col-span-2">
-                                        <label  className="text-sm font-bold text-slate-700">Physical Address</label>
-                                        <input type="text" name="address" value={formData.address} onChange={handleChange} required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 outline-none"/>
+                                        <label  className="text-sm font-bold text-slate-700">Physical Location</label>
+                                        <input type="text" name="location" value={formData.location} onChange={handleChange} required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 outline-none"/>
                                     </div>
                                     <div className="space-y-2">
                                         <label  className="text-sm font-bold text-slate-700">Phone Number</label>

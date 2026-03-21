@@ -1,5 +1,6 @@
 import MenuCategory from '../models/MenuCategory.js';
 import MenuItem from '../models/MenuItem.js';
+import Venue from '../models/Venue.js'
 import { v4 as uuidv4 } from 'uuid';
 
 // --- CATEGORY MANAGEMENT ---
@@ -138,7 +139,16 @@ export const getPublicMenu = async (req,res)=>{
     try {
         const { venueId } = req.params;
 
-        //1. Fetch Categories for this venue
+        //1. Fetch Venue Setting  FIRST
+        const venue = await Venue.findByPk(venueId, {
+            attributes: ['name','is_accepting_orders','tax_rate','allow_cash_payments']
+        });
+
+        if (!venue){
+            return res.status(404).json({ message: "Venue not found or inactive."});
+        }
+
+        //2. Fetch Categories for this venue
         const categories = await MenuCategory.findAll({
             where: { venue_id:venueId},
             order: [['createdAt','ASC']]
@@ -155,7 +165,7 @@ export const getPublicMenu = async (req,res)=>{
             order: [['category_id','ASC'],['name','ASC']]
         });
 
-        res.status(200).json({ categories, items});
+        res.status(200).json({ categories, items,venue});
     } catch (error){
         console.error("Public Menu Fetch Error:",error);
         res.status(500).json({ message: 'Failed to load menu.'})

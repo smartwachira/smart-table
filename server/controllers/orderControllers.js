@@ -4,7 +4,8 @@ import MenuItem from '../models/MenuItem.js';
 import sequelize from '../config/db.js';
 import { request } from 'express';
 import { Op } from 'sequelize';
-;
+import Venue from '../models/Venue.js';
+
 
 
 
@@ -15,6 +16,18 @@ export const createOrder = async (req,res) => {
 
         // Collect data from request
         const {venue_id,table_number, items, payment_method, customer_name,phone_number } = req.body;
+
+        //STRICT VALIDATION AGAINST VENUE SETTINGS
+        const venue = await Venue.findByPk(venue_id);
+        if (!venue) return res.status(404).json({ message: "Venue not found."});
+
+        if (!venue.is_accepting_orders){
+          return res.status(403).json({ message: 'This venue is currently not accepting orders.'})
+        }
+
+        if (payment_method === 'CASH' && !venue.allow_cash_payments){
+          return res.status(400).json({ message: 'Cash payments are disabled for this venue.'});
+        }
 
         if (!items || items.length === 0){
             return res.status(400).json({ message: "Cannot place empty order"});
