@@ -39,3 +39,31 @@ export const updateVenueSettings = async (req, res) =>{
         res.status(500).json({ message: 'Failed to update settings.'})
     }
 }
+
+// --- UPLOAD VENUE LOGO ---
+export const uploadVenueLogo = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: "No image file provided." });
+        }
+
+        const venueId = req.user.venueId;
+        const venue = await Venue.findByPk(venueId);
+        
+        if (!venue) return res.status(404).json({ message: "Venue not found" });
+
+        // Construct the image URL based on your static folder setup
+        const imageUrl = `/uploads/${req.file.filename}`;
+        
+        venue.logo_url = imageUrl;
+        await venue.save();
+
+        res.status(200).json({ 
+            message: "Logo updated successfully", 
+            logo_url: imageUrl 
+        });
+    } catch (error) {
+        console.error("Upload Logo Error:", error);
+        res.status(500).json({ message: "Failed to upload logo." });
+    }
+};

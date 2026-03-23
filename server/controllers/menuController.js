@@ -141,7 +141,7 @@ export const getPublicMenu = async (req,res)=>{
 
         //1. Fetch Venue Setting  FIRST
         const venue = await Venue.findByPk(venueId, {
-            attributes: ['name','is_accepting_orders','tax_rate','allow_cash_payments']
+            attributes: ['name','is_accepting_orders','tax_rate','allow_cash_payments','logo_url']
         });
 
         if (!venue){

@@ -1,7 +1,7 @@
 import React, { useCallback,useState, useEffect} from "react";
 import axios from 'axios';
 import { toast } from 'sonner'
-import { Store, CreditCard,Sliders,Save,Loader2,Power} from 'lucide-react';
+import { Store, CreditCard,Sliders,Save,Loader2,Power,ImagePlus} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 
@@ -11,6 +11,8 @@ export default function Settings(){
     const [activeTab, setActiveTab] = useState('profile');
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
+    const [logoPreview, setLogoPreview] = useState(null);
+    const [isUploadingLogo, setIsUploadingLogo] = useState(false)
 
 
     const token = localStorage.getItem('token');
@@ -34,6 +36,7 @@ export default function Settings(){
                 venueId: user.venueId
             });
             setFormData(res.data);
+            setLogoPreview(res.data.logo_url);
         } catch (error){
             toast.error("Failed to load venue settings.");
             console.error("Error loading venue settings",error)
@@ -67,6 +70,34 @@ export default function Settings(){
             toast.error(error.response?.data?.message || "Failed to save settings.")
         } finally{
             setIsSaving(false)
+        }
+    };
+
+    // 3. Add this upload handler function:
+    const handleLogoUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // Show instant local preview
+        setLogoPreview(URL.createObjectURL(file));
+        setIsUploadingLogo(true);
+
+        const formData = new FormData();
+        formData.append('image', file);
+
+        try {
+            const res = await axios.post('/api/settings/venue/logo', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+            toast.success("Logo uploaded successfully!");
+            // Update form data so it saves correctly if they hit the main "Save" button later
+            setFormData(prev => ({ ...prev, logo_url: res.data.logo_url }));
+        } catch (error) {
+            console.error("Error uploading logo.",error)
+            toast.error("Failed to upload logo.");
+            setLogoPreview(formData.logo_url); // Revert on failure
+        } finally {
+            setIsUploadingLogo(false);
         }
     };
 
@@ -117,6 +148,37 @@ export default function Settings(){
                                 <h2 className="text-xl font-black text-slate-900 border-b border-slate-100 pb-4">Basic Information</h2>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="flex items-center gap-6 pb-6 border-b border-slate-100">
+                                        <div className="relative group">
+                                            {logoPreview ? (
+                                                <img 
+                                                    src={`http://localhost:5000${logoPreview}`} 
+                                                    alt="Venue Logo"
+                                                    className="w-full h-full object-cover"
+                                                    onError={(e)=>{ e.target.onerror = null; e.target.src = logoPreview; }}
+                                                />
+                                            ) : (
+                                                <Store size={32} className="text-slate-300"/>
+                                            )}
+
+                                            {/* Hover Overlay */}
+                                            <label  className="absolute inset-0 bg-slate-900/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white cursor-pointer backdrop-blur-sm">
+                                                {isUploadingLogo ? <Loader2 size={24} className="animate-spin"/> : <ImagePlus size={24}/>}
+                                                <span className="text-[10px] font-bold uppercase tracking-wider mt-1 border-b border-white/50">Change</span>
+                                                <input 
+                                                    type="file" 
+                                                    accept="image/*"
+                                                    className="hidden"
+                                                    onChange={handleLogoUpload}
+                                                    disabled={isUploadingLogo}
+                                                />
+                                            </label>
+                                        </div>
+                                        <div>
+                                            <h3 className="font-black text-lg text-slate-900">Brand Logo</h3>
+                                            <p className="text-sm text-slate-500">This will appear at the top of your digital menu.</p>
+                                        </div>
+                                    </div>
                                     <div className="space-y-2">
                                         <label  className="text-sm font-bold text-slate-700">Venue Name</label>
                                         <input type="text" name="name" value={formData.name} onChange={handleChange} required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 outline-none"/>

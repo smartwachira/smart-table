@@ -19,7 +19,7 @@ const Venue = sequelize.define('Venue',{
         type: DataTypes.STRING,
         allowNull: false,
     },
-    image_url: {
+    logo_url: {
         type: DataTypes.STRING,
         allowNull: true, // Logo is optional initially
     },

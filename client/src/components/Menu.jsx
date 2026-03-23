@@ -2,7 +2,7 @@ import React, {useState, useEffect, useCallback} from 'react';
 import { useParams, useSearchParams} from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
-import { Search, ShoppingBag,Plus,Minus,Info,UtensilsCrossed, AlertCircle,Moon} from  'lucide-react';
+import { Search, ShoppingBag,Plus,Minus,Info,UtensilsCrossed, AlertCircle,Moon,Smartphone} from  'lucide-react';
 import { useCart} from '../context/CartContext'
 import FloatingCart  from './FloatingCart.jsx';
 
@@ -82,33 +82,60 @@ export default function Menu(){
       <FloatingCart tableNumber={tableNumber} venueId={venueId}></FloatingCart>
 
       {/* HERO HEADER */}
-      <header className="bg-white px-4 pt-8 pb-6 rounded-b-[2.5rem] shadow-sm relative z-10">
-        <div className="flex justify-between items-center mb-6">
-          <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 font-bold">
-            {/* Placeholder for venue logo */}
-            ST
-          </div>
-          <div className="text-center">
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight">Smart Table</h1>
-            <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest bg-indigo-50 inline-block px-3 py-1 rounded-full mt-1">
-              {tableNumber}
-            </p>
-          </div>
-          <button className='w-10 h-10 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center text-slate-600 transition-colors'>
-            <Info size={20}/>
-          </button>
-        </div>
+      <header className="bg-white px-4 md:px-8 pt-8 pb-6 md:pb-8 rounded-b-[2.5rem] shadow-sm relative z-10">
+          <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-end justify-between gap-6 md:gap-12">
+              
+              {/* LEFT ZONE: Identity (Logo, Name, Table) */}
+              <div className="flex flex-col items-center md:items-start text-center md:text-left gap-4 md:flex-row md:gap-6">
+                  
+                  {/* Logo */}
+                  <div className="shrink-0">
+                      {venueConfig?.logo_url ? (
+                          <img 
+                              src={`http://localhost:5000${venueConfig.logo_url}`} 
+                              alt={venueConfig.name} 
+                              className="w-24 h-24 md:w-28 md:h-28 rounded-3xl shadow-lg object-cover border-4 border-slate-50 animate-in zoom-in duration-500"
+                          />
+                      ) : (
+                          <div className="w-24 h-24 md:w-28 md:h-28 bg-indigo-600 rounded-3xl flex items-center justify-center text-white shadow-lg border-4 border-slate-50">
+                              <UtensilsCrossed size={40} />
+                          </div>
+                      )}
+                  </div>
 
-        <div className="relative">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20}></Search>
-          <input 
-            type="text"
-            placeholder='Search for dishes, drinks...'
-            value={searchQuery}
-            onChange={(e)=>setSearchQuery(e.target.value)} 
-            className='w-full bg-slate-50 border border-slate-200 rounded-2xl pl-12 pr-4 py-4 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all shadow-inner'
-          />
-        </div>
+                  {/* Typography */}
+                  <div className="flex flex-col justify-center space-y-1">
+                      <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight leading-none">
+                          {venueConfig?.name}
+                      </h1>
+                      
+                      <div className="flex items-center justify-center md:justify-start gap-3 mt-2">
+                          <span className="inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-sm font-bold border border-emerald-200">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                              Table {tableNumber}
+                          </span>
+                          
+                          {/* Info Button (Moved to sit next to the Table Number) */}
+                          <button className="w-8 h-8 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center text-slate-600 transition-colors" aria-label="Venue Information">
+                              <Info size={16}/>
+                          </button>
+                      </div>
+                  </div>
+              </div>
+
+              {/* RIGHT ZONE: Actions (Search) */}
+              <div className="w-full md:max-w-md md:shrink-0 relative">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                  <input 
+                      type="text"
+                      placeholder="Search for dishes, drinks..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)} 
+                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-12 pr-4 py-4 md:py-3 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all shadow-inner"
+                  />
+              </div>
+              
+          </div>
       </header>
 
       {/* STICKY CATEGORY NAV */}
@@ -203,6 +230,12 @@ export default function Menu(){
           })
         )}
       </main>
+      {/* Footer Branding */}
+      <div className="py-12 mt-8 flex flex-col items-center justify-center text-slate-300 opacity-60">
+          <Smartphone size={24} className="mb-2" />
+          <span className="text-[10px] font-black uppercase tracking-widest">Powered by</span>
+          <span className="text-sm font-black tracking-tight text-slate-400">Smart Table</span>
+      </div>
 
       {/* FLOATING ACTION  BAR */}
       {cartTotals.count > 0 && (
