@@ -65,7 +65,7 @@ export default function DashboardLayout() {
                 />
             )}
 
-            {/* Left Sidebar (Now Responsive) */}
+            {/*Left Sidebar (Now Responsive)*/}
             <aside className={`fixed inset-y-0 left-0 z-40 w-64 bg-slate-900 text-slate-300 flex flex-col transition-transform duration-300 ease-in-out shadow-xl lg:translate-x-0 lg:static ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
                 
                 {/* ⚡ CO-BRANDED VENUE HEADER + CLOSE BUTTON ⚡ */}
