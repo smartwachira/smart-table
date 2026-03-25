@@ -10,8 +10,9 @@ import {
     LogOut,
     Store,
     Smartphone,
-    Menu,   // ⚡ Import Menu Icon
-    X       // ⚡ Import X Icon
+    Menu,   
+    X,
+    ChefHat // ⚡ Imported ChefHat for the Live Orders tab
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -21,9 +22,8 @@ export default function DashboardLayout() {
     const { logout } = useAuth();
     
     const [venue, setVenue] = useState(null);
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false); // ⚡ State for sidebar toggle
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
 
-    // Fetch Venue Data on Mount
     useEffect(() => {
         const fetchVenueForSidebar = async () => {
             try {
@@ -36,7 +36,6 @@ export default function DashboardLayout() {
         fetchVenueForSidebar();
     }, []);
 
-    // ⚡ Auto-close sidebar when clicking a link on mobile screens
     useEffect(() => {
         setIsSidebarOpen(false);
     }, [location.pathname]);
@@ -48,6 +47,8 @@ export default function DashboardLayout() {
 
     const navItems = [
         { path: '/dashboard', icon: LayoutDashboard, label: 'Overview' },
+        // ⚡ Fixed Label and Icon for Live Orders
+        { path: '/dashboard/orders', icon: ChefHat, label: 'Live Orders' }, 
         { path: '/dashboard/menu', icon: MenuSquare, label: 'Menu Engineering' },
         { path: '/dashboard/staff', icon: Users, label: 'Staff' },
         { path: '/dashboard/qr', icon: QrCode, label: 'QR Codes' },
@@ -57,7 +58,6 @@ export default function DashboardLayout() {
     return (
         <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
             
-            {/* ⚡ Mobile Dark Overlay (Click to close) */}
             {isSidebarOpen && (
                 <div 
                     className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-30 lg:hidden"
@@ -65,10 +65,8 @@ export default function DashboardLayout() {
                 />
             )}
 
-            {/*Left Sidebar (Now Responsive)*/}
             <aside className={`fixed inset-y-0 left-0 z-40 w-64 bg-slate-900 text-slate-300 flex flex-col transition-transform duration-300 ease-in-out shadow-xl lg:translate-x-0 lg:static ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
                 
-                {/* ⚡ CO-BRANDED VENUE HEADER + CLOSE BUTTON ⚡ */}
                 <div className="p-6 pb-4 border-b border-slate-800 mb-6 bg-slate-950/30 flex justify-between items-start">
                     <div className="flex items-center gap-3 overflow-hidden">
                         <div className="w-12 h-12 rounded-xl bg-slate-800 flex items-center justify-center overflow-hidden shrink-0 border border-slate-700 shadow-inner">
@@ -91,7 +89,6 @@ export default function DashboardLayout() {
                         </div>
                     </div>
 
-                    {/* ⚡ The Return of the Close Button! (Mobile Only) */}
                     <button 
                         onClick={() => setIsSidebarOpen(false)} 
                         className="lg:hidden text-slate-400 hover:text-white p-1 -mr-2 bg-slate-800 rounded-lg transition-colors"
@@ -100,7 +97,6 @@ export default function DashboardLayout() {
                     </button>
                 </div>
 
-                {/* Navigation Links */}
                 <nav className="flex-1 px-4 space-y-1 overflow-y-auto custom-scrollbar">
                     {navItems.map((item) => {
                         const Icon = item.icon;
@@ -123,7 +119,6 @@ export default function DashboardLayout() {
                     })}
                 </nav>
 
-                {/* Bottom Actions & Watermark */}
                 <div className="p-4 mt-auto border-t border-slate-800 bg-slate-950/20">
                     <button 
                         onClick={handleLogout}
@@ -133,7 +128,6 @@ export default function DashboardLayout() {
                         Sign Out
                     </button>
 
-                    {/* SMART TABLE FACILITATOR WATERMARK */}
                     <div className="text-center pb-2 opacity-60 hover:opacity-100 transition-opacity cursor-default">
                         <p className="text-[9px] font-bold text-slate-500 uppercase tracking-[0.2em] mb-1">Software Platform</p>
                         <div className="text-slate-400 font-black tracking-tight flex items-center justify-center gap-1.5">
@@ -143,10 +137,7 @@ export default function DashboardLayout() {
                 </div>
             </aside>
 
-            {/* Main Content Area */}
             <main className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-50 relative">
-                
-                {/* ⚡ Mobile Top Bar with Hamburger Toggle ⚡ */}
                 <header className="lg:hidden bg-white border-b border-slate-200 p-4 flex items-center gap-4 sticky top-0 z-10 shadow-sm">
                     <button 
                         onClick={() => setIsSidebarOpen(true)}
@@ -159,7 +150,6 @@ export default function DashboardLayout() {
                     </div>
                 </header>
 
-                {/* Dashboard Pages Render Here */}
                 <div className="flex-1 overflow-y-auto custom-scrollbar">
                     <Outlet />
                 </div>

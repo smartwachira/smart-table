@@ -20,6 +20,7 @@ import PrivateRoute from "./components/PrivateRoute";
 import DashboardLayout from "./layouts/DashboardLayout";
 
 // --- Dashboard Sub-Components ---
+import DashboardOverview from "./components/dashboard/DashboardOverview";
 import StaffManagement from "./components/dashboard/StaffManagement";
 import LiveOrders from "./components/dashboard/LiveOrders";
 import MenuManagement from "./components/dashboard/MenuManagement";
@@ -57,7 +58,7 @@ function App() {
             <Route element={<PrivateRoute allowedRoles={['OWNER', 'MANAGER']} />}>
               <Route path="/dashboard" element={<DashboardLayout />}>
                 {/* Default Dashboard Route */}
-                <Route index element={<div className="p-8 text-slate-500 font-medium">Dashboard Overview Analytics (Coming Soon)</div>} />
+                <Route index element={<DashboardOverview/>}/>
                 
                 <Route path="staff" element={<StaffManagement />} />
                 <Route path="orders" element={<LiveOrders />} />
