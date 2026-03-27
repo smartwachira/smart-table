@@ -4,30 +4,41 @@ import OrderItem from '../models/OrderItem.js';
 import MenuItem from '../models/MenuItem.js';
 import MenuCategory from '../models/MenuCategory.js';
 
-// Helper to calculate date ranges
-const getDataRanges = (range) => {
-    const now = new Date();
-    const currentStart = new Date(now);
-    const prevStart = new Date(now);
-    const prevEnd = new Date(now);
+// ⚡ ENTERPRISE UPGRADE: Dynamic Temporal Calculator
+const calculateDynamicDataRanges = (startDateQuery,endDateQuery) => {
+    let startDate, endDate
 
-    if (range === 'week') {
-        currentStart.setDate(now.getDate() - 7);
-        prevStart.setDate(now.getDate() - 14);
-        prevEnd.setDate(now.getDate() - 7);
-    } else if (range === 'month') {
-        currentStart.setDate(now.getDate() - 30);
-        prevStart.setDate(now.getDate() - 60);
-        prevEnd.setDate(now.getDate() - 30);
+    // 1. Parse or Default to 'Today'
+    if (startDateQuery,endDateQuery){
+        startDate = startDateQuery;
+        endDate = endDateQuery
     } else {
-        currentStart.setHours(0, 0, 0, 0); 
-        prevStart.setDate(now.getDate() - 1);
-        prevStart.setHours(0, 0, 0, 0); 
-        prevEnd.setDate(now.getDate() - 1);
-        prevEnd.setHours(23, 59, 59, 999); 
+        const now = new Date();
+        startDate = new Date(now);
+        startDate.setHours(0,0,0,0); //Start of today
+        endDate = now; //Right now
     }
+
+    // 2. Calculate Exact Duration for True 1:1 Comparative Analysis
+    const durationMs = endDate.getTime() - startDate.getTime();
+
+    // Previous period is the exact identical duration immediately preceding the start date
+    const previousStartDate = new Date(startDate.getTime() - durationMs);
+    const previousEndDate = new Date(startDateDate.getTime());
+
+    // 3. Determine Granularity for PostgreSQL DATE_TRUNC
+    const durationDays = durationMs / (1000 * 60 * 60 * 24);
+    let granuality = 'hour';
+
+    if (durationDays > 60){
+        granuality = 'month';
+    } else if (durationDays > 2){
+        granuality = 'day'
+    }
+
     
-    return { currentStart, prevStart, prevEnd, now };
+    
+    return { startDate, endDate,previousEndDate,previousStartDate,durationMs,granuality};
 };
 
 // Calculate percentage change
@@ -39,20 +50,28 @@ const calculateTrend = (current, previous) => {
 export const getDashboardOverview = async (req, res) => {
     try {
         const venueId = req.user.venueId;
-        const { range = 'today' } = req.query;
-        const { currentStart, prevStart, prevEnd, now } = getDataRanges(range);
+        const { startDate: queryStart, endDate: queryEnd } = req.query;
+        const { startDate, endDate, previousStartDate,previousEndDate,durationMs,granuality } = calculateDynamicDataRanges(queryStart,queryEnd);
 
         // Common where clause for current period active orders (SECURE)
         const currentWhere = {
             venue_id: venueId,
             status: { [Op.notIn]: ['CANCELLED'] },
-            createdAt: { [Op.between]: [currentStart, now] }
+            createdAt: { [Op.between]: [startDate, endDate] }
+        };
+
+        const previousWhere = {
+            venue_id: venueId,
+            status: { [Op.notIn]: ["CANCELED"]},
+            createdAt: { [Op.between]: [previousStartDate,previousEndDate]}
         };
 
         // ⚡ ENTERPRISE UPGRADE: All queries executed in parallel
         const [
             currentOrders, 
             prevOrders,
+            currentSalesTrendRaw,
+            previousSalesTrendRaw,
             topItems,
             liveActiveOrders,
             fulfillmentData,
@@ -67,26 +86,48 @@ export const getDashboardOverview = async (req, res) => {
             
             // 2. Fetch Previous Period Orders
             Order.findAll({
-                where: {
-                    venue_id: venueId,
-                    status: { [Op.notIn]: ['CANCELLED'] },
-                    createdAt: { [Op.between]: [prevStart, prevEnd] }
-                },
+                where: previousWhere,
                 attributes: ['total_amount'],
                 raw: true
             }),
             
-            // 3. Top 5 Menu Items (IRONCLAD FIX)
+            // 3. ⚡ PostgreSQL Native Aggregation: Current Period Trend
+            Order.findAll({
+                where: currentWhere,
+                attributes: [
+                    [fn('DATE_TRUNC',granuality, col('createdAt')),'timeLabel'],
+                    [fn('SUM',col('total_amount')),'revenue'],
+                    [fn('COUNT',col('order_id')),'orders']
+                ],
+                group: [fn("DATE_TRUNC",granuality,col('createdAt'))],
+                order: [fn("DATE_TRUNC",granuality,col('createdAt'))],
+                raw: true
+            })
+            ,
+            // 4. ⚡ PostgreSQL Native Aggregation: Previous Period Trend
+            Order.findAll({
+                where: previousWhere,
+                attributes: [
+                    [fn('DATE_TRUNC',granuality, col('createdAt')),'timeLabel'],
+                    [fn('SUM',col('total_amount')),'revenue'],
+                    [fn('COUNT',col('order_id')),'orders']
+                ],
+                group: [fn("DATE_TRUNC",granuality,col('createdAt'))],
+                order: [fn("DATE_TRUNC",granuality,col('createdAt'))],
+                raw: true
+            }),
+            // 5. Top 5 Menu Items
             OrderItem.findAll({
+                include: [
+                    { model: Order, attributes: [], where: currentWhere },
+                    { model: MenuItem, attributes: [] }
+                ],
                 attributes: [
                     [col('MenuItem.name'), 'name'], 
                     [fn('SUM', col('OrderItem.quantity')), 'total_sold'],
                     [fn('SUM', literal('"OrderItem"."quantity" * "OrderItem"."price_at_time"')), 'total_revenue']
                 ],
-                include: [
-                    { model: Order, attributes: [], where: currentWhere },
-                    { model: MenuItem, attributes: [] }
-                ],
+                
                 // ⚡ THE FIX: Wrap grouping targets in col() to bypass Sequelize's auto-scoping
                 group: [col('MenuItem.item_id'), col('MenuItem.name')], 
                 // ⚡ THE FIX: Explicitly qualify the order target
@@ -95,7 +136,7 @@ export const getDashboardOverview = async (req, res) => {
                 raw: true
             }),
             
-            // 4. Live Pulse Metrics
+            // 6. Live Pulse Metrics
             Order.count({
                 where: {
                     venue_id: venueId,
@@ -104,12 +145,10 @@ export const getDashboardOverview = async (req, res) => {
                 }
             }),
             
-            // 5. Kitchen Fulfillment Metric
+            // 7. Kitchen Fulfillment Metric
             Order.findOne({
                 where: {
-                    venue_id: venueId, 
-                    status: 'COMPLETED',
-                    createdAt: { [Op.between]: [currentStart, now] } 
+                    ...currentWhere, status: 'COMPLETED' 
                 },
                 attributes: [
                     [fn('AVG', literal('EXTRACT(EPOCH FROM ("updatedAt" - "createdAt")) / 60')), 'avg_minutes']
@@ -117,13 +156,8 @@ export const getDashboardOverview = async (req, res) => {
                 raw: true
             }),
             
-            // 6. Sales by Category (Menu Engineering)
+            // 8. Sales by Category (Menu Engineering)
             OrderItem.findAll({
-                attributes: [
-                    [col('MenuItem.MenuCategory.name'), 'category'],
-                    [fn('SUM', col('OrderItem.quantity')), 'total_sold'],
-                    [fn('SUM', literal('"OrderItem"."quantity" * "OrderItem"."price_at_time"')), 'revenue'] 
-                ],
                 include: [
                     { model: Order, attributes: [], where: currentWhere },
                     {
@@ -132,6 +166,12 @@ export const getDashboardOverview = async (req, res) => {
                         include: [{ model: MenuCategory, attributes: [] }]
                     }
                 ],
+                attributes: [
+                    [col('MenuItem.MenuCategory.name'), 'category'],
+                    [fn('SUM', col('OrderItem.quantity')), 'total_sold'],
+                    [fn('SUM', literal('"OrderItem"."quantity" * "OrderItem"."price_at_time"')), 'revenue'] 
+                ],
+                
                 // ⚡ THE FIX: Apply col() wrapping here as well (Using category_id from your schema)
                 group: [col('MenuItem.category_id'), col('MenuItem.MenuCategory.name')],
                 order: [[fn('SUM', literal('"OrderItem"."quantity" * "OrderItem"."price_at_time"')), 'DESC']],
