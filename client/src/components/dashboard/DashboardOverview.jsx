@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { 
@@ -7,7 +7,8 @@ import {
 } from 'recharts';
 import { 
     TrendingUp, TrendingDown, DollarSign, ShoppingBag, 
-    CreditCard, Activity, QrCode, PlusCircle, Clock, Flame
+    CreditCard, Activity, QrCode, PlusCircle, Clock, Flame,
+    Calendar,ChevronDown,Download
 } from 'lucide-react';
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
@@ -18,9 +19,20 @@ const formatCurrency = (val) => new Intl.NumberFormat('en-KE', {
     minimumFractionDigits: 0 
 }).format(val || 0); // Added safe fallback
 
-const StatCard = ({ title, value, trend, icon: Icon }) => {
+const formatTimeLabel = (isoString, granularity) => {
+    const date = new Date(isoString);
+    if (granularity === 'hour'){
+        return date.toLocaleTimeString('en-US',{ hour: 'numeric', minute: '2-digit'})
+    } else if (granularity === 'day'){
+        return date.toLocaleDateString('en-US', {weekday: 'short',month: 'short',day: 'numeric'});
+    } else {
+        return date.toLocaleDateString('en-US',{month: 'short', year: 'numeric'});
+    }
+}
+
+const StatCard = ({ title, value, trend, icon: Icon, LinkTo }) => {
     const isPositive = Number(trend) >= 0;
-    return (
+    const CardContent = (
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col transition-all hover:shadow-md">
             <div className="flex justify-between items-start mb-4">
                 <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
@@ -35,8 +47,49 @@ const StatCard = ({ title, value, trend, icon: Icon }) => {
             <p className="text-3xl font-black text-slate-900 mt-1">{value}</p>
         </div>
     );
+
+    return LinkTo ? <Link to={LinkTo} className="block">{CardContent}</Link> : CardContent;
 };
 
+
+// ⚡ Custom Tooltip for the Dual-Line Comparative Chart
+const ComparativeTooltip = ({  active, payload, label, granularity}) =>{
+    if (active &&  payload && payload.length){
+        const current = payload.find(p => p.dataKey === 'currentRevenue')?.value || 0;
+        const previous =  payload.find(p => p.dataKey === 'previousRevenue')?.value || 0;
+        const diff = current - previous;
+        const  isPositive = diff >= 0;
+
+        return (
+            <div className="bg-white p-4 rounded-xl shadow-xl border border-slate-100 min-w-[200px]">
+                <p className="font-bold text-slate-500 text-sm mb-3 pb-2 border-b border-slate-100">
+                    {formatTimeLabel(label, granularity)}
+                </p>
+                <div className="space-y-2">
+                    <div className="flex justify-between items-center text-sm">
+                        <span className="flex items-center gap-2 font-bold text-indigo-600">
+                            <div className="w-2 h-2 rounded-full bg-indigo-600"></div>
+                        </span>
+                        <span className="font-black text-slate-900">{formatCurrency(current)}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm">
+                        <span className="flex items-center gap-2 font-bold text-slate-400">
+                            <div className="w-2 h-2 rounded-full bg-slate-300"></div> Previous
+                        </span>
+                        <span className="font-bold text-slate-500">{formatCurrency(previous)}</span>
+                    </div>
+                    <div className="pt-2 mt-2 border-t border-slate-50 flex justify-between items-center text-xs font-bold">
+                        <span className="text-slate-400">Difference</span>
+                        <span className={isPositive ? 'text-emerald-500': 'text-red-500'}>
+                            {isPositive ? '+' : ''}{formatCurrency(diff)}
+                        </span>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+    return null;
+}
 const SkeletonLoader = () => (
     <div className="space-y-6 animate-pulse p-4 md:p-8 max-w-7xl mx-auto">
         <div className="flex justify-between h-10 bg-slate-200 rounded-xl w-1/4"></div>
@@ -52,10 +105,34 @@ const SkeletonLoader = () => (
 );
 
 export default function DashboardOverview() {
-    const [timeRange, setTimeRange] = useState('today');
+    const [dateRange, setDateRange] = useState({
+        label: 'Today',
+        preset: 'today'
+    });
+    const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+    const datePickerRef = useRef(null);
+
     const [data, setData] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
     const [errorMsg, setErrorMsg] = useState(null);
+
+    // Click outside handler for Date Picker
+
+    useEffect(() => {
+        const handleClickOutside = (event) =>{
+            if (datePickerRef.current && !datePickerRef.current.contains(event.target)){
+                setIsDatePickerOpen(false);
+            }
+        };
+        document.addEventListener('mousedown',handleClickOutside);
+        return () => document.removeEventListener('mousedown',handleClickOutside)
+    },[]);
+
+    // Date Preset Logic
+    const handleDateSelect = (label, preset) =>{
+        setDateRange({ label, preset});
+        setIsDatePickerOpen(false);
+    };
 
     const fetchDashboardData = useCallback(async () => {
         const token = localStorage.getItem('token');
@@ -63,8 +140,40 @@ export default function DashboardOverview() {
         setErrorMsg(null);
         
         try {
-            const res = await axios.get(`/api/dashboard/overview?range=${timeRange}`, {
-                headers: { Authorization: `Bearer ${token}` }
+            // Calculate ISO strings based on preset
+            const now = new Date();
+            let startDate = new Date();
+            let endDate = new Date(now);
+
+            switch (dateRange.preset) {
+                case 'yesterday':
+                    startDate.setDate(now.getDate() - 1);
+                    startDate.setHours(0,0,0,0);
+                    endDate = new Date(startDate);
+                    endDate.setHours(23,59,59,999);
+                    break;
+                case '7days':
+                    startDate.setDate(now.getDate() - 7);
+                    break;
+                case 'thisMonth':
+                    startDate = new Date(now.getFullYear(), now.getMonth(),1);
+                    break;
+                case 'lastMonth':
+                    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+                    break;
+                case 'ytd':
+                    startDate = new Date(now.getFullYear(), 0,1);
+                    break;
+                default: // today
+                    startDate.setHours(0,0,0,0);
+            }
+            const res = await axios.get(`/api/dashboard/overview`, {
+                headers: { Authorization: `Bearer ${token}` },
+                params: {
+                    startDate: startDate.toISOString(),
+                    endDate: endDate.toISOString()
+                }
             });
 
             // ⚡ DEFENSIVE GUARD: Catch 404 HTML fallbacks masquerading as 200 OK
@@ -79,7 +188,7 @@ export default function DashboardOverview() {
         } finally {
             setIsLoading(false);
         }
-    }, [timeRange]);
+    }, [dateRange]);
 
     useEffect(() => {
         fetchDashboardData();
@@ -100,7 +209,7 @@ export default function DashboardOverview() {
         );
     }
 
-    const { kpis, livePulse, salesTrends, paymentBreakdown, topItems, categoryBreakdown } = data;
+    const { granularity, kpis, livePulse, salesTrends, paymentBreakdown, topItems, categoryBreakdown } = data;
     const hasOrders = kpis.orders?.value > 0;
 
     // ⚡ DEFENSIVE GUARD: Parse PostgreSQL strings to Numbers so Recharts doesn't crash
@@ -118,15 +227,43 @@ export default function DashboardOverview() {
                     <h1 className="text-3xl font-black text-slate-900 tracking-tight">Dashboard Overview</h1>
                     <p className="text-slate-500 font-medium mt-1">Track your venue's real-time performance.</p>
                 </div>
-                <select 
-                    value={timeRange} 
-                    onChange={(e) => setTimeRange(e.target.value)}
-                    className="bg-white border border-slate-200 text-slate-700 font-bold rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer"
-                >
-                    <option value="today">Today</option>
-                    <option value="week">Past 7 Days</option>
-                    <option value="month">Past 30 Days</option>
-                </select>
+                <div className="flex items-center gap-3 w-full md:w-auto">
+                    {/* Export CSV Placeholder */}
+                    <button className="hidden md:flex items-center gap-2 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl px-4 py-3 hover:bg-slate-50 hover:text-indigo-600 transition-colors shadow-sm">
+                        <Download size={18}></Download> Export
+                    </button>
+
+                    {/* Custom Date Range Picker */}
+                    <div className="relative w-full md:w-56" ref={datePickerRef}>
+                        <button 
+                            onClick={()=> setIsDatePickerOpen(!isDatePickerOpen)}
+                            className="w-full flex items-center justify-between bg-white border border-slate-200 text-slate-700 font-bold rounded-xl px-4 py-3 shadow-sm hover:border-indigo-300 transition-colors"
+                        >
+                            <span className="flex items-center gap-2"><Calendar size={18} className="text-indigo-500"></Calendar>{dateRange.label}</span>
+                            <ChevronDown size={18} className={`text-slate-400 transition-transform ${isDatePickerOpen ? 'rotate-180' : ''}`}></ChevronDown>
+
+                        </button>
+
+                        {isDatePickerOpen && (
+                            <div className="absolute top-full right-0 mt-2 w-full md:w-56 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2">
+                                {[
+                                    { label: 'Today', preset: 'today'},
+                                    { label: 'Yesterday', preset: 'yesterday'},
+                                    { label: 'Last 7 Days', preset: '7days'},
+                                    { label: 'This Month', preset: 'thisMonth'},
+                                    { label: 'Last Month', preset: 'lastMonth'},
+                                    { label: 'Year to Date', preset: 'ytd'}
+                                ].map(item => (
+                                    <button
+                                        key={item.preset}
+                                        onClick={() => handleDateSelect(item.label, item.preset)}
+                                        className={`w-full text-left px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${dateRange.preset === item.preset ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
+                                    >{item.label}</button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
             </div>
 
             {/* LIVE PULSE BANNER */}
@@ -187,45 +324,80 @@ export default function DashboardOverview() {
                     {/* KPI Grid */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <StatCard title="Gross Revenue" value={formatCurrency(kpis.revenue?.value)} trend={kpis.revenue?.trend} icon={DollarSign} />
-                        <StatCard title="Total Orders" value={kpis.orders?.value || 0} trend={kpis.orders?.trend} icon={ShoppingBag} />
+                        <StatCard title="Total Orders" value={kpis.orders?.value || 0} trend={kpis.orders?.trend} icon={ShoppingBag} LinkTo="/dashboard/orders" />
                         <StatCard title="Avg Order Value" value={formatCurrency(kpis.aov?.value)} trend={kpis.aov?.trend} icon={CreditCard} />
                     </div>
 
-                    {/* Charts Row 1 */}
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-2 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-                            <h3 className="text-lg font-black text-slate-900 mb-6 tracking-tight">Revenue Trend</h3>
-                            <div className="h-72 w-full">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <LineChart data={salesTrends || []}>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                        <XAxis dataKey="time" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} dy={10} />
-                                        <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `KSh ${val}`} dx={-10} />
-                                        <RechartsTooltip 
-                                            contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                                            formatter={(value) => [formatCurrency(value), 'Revenue']}
-                                        />
-                                        <Line type="monotone" dataKey="revenue" stroke="#4f46e5" strokeWidth={4} dot={false} activeDot={{ r: 8, strokeWidth: 0, fill: '#4f46e5' }} />
-                                    </LineChart>
-                                </ResponsiveContainer>
+                    {/* Comparative Line Chart */}
+                    <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-lg font-black text-slate-900 tracking-tight">Revenue Trend</h3>
+                                <div className="flex gap-4">
+                                    <span className="flex items-center gap-2 text-xs font-bold text-slate-600">
+                                        <div className="w-3 h-1 rounded-full bg-indigo-600"></div>
+                                        Current Period
+                                    </span>
+                                    <span className="flex items-center gap-2 text-xs font-bold text-slate-400">
+                                        <div className="w-3 h-1 rounded-full bg-slate-400"></div>
+                                        Previous Period
+                                    </span>
+                                </div>
+                                
                             </div>
-                        </div>
+                            <div className="w-full h-[400px]">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <LineChart data={salesTrends || []} margin={{ top: 10, right: 10, left: -20, bottom: 0}} >
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke='#f1f5f9'></CartesianGrid>
+                                            <XAxis
+                                                dataKey="timeLabel"
+                                                stroke="#94a3b8"
+                                                fontSize={12}
+                                                tickLine={false}
+                                                axisLine={false}
+                                                dy={10}
+                                                tickFormatter={(val)=>formatTimeLabel(val, granularity)}
+                                                minTickGap={30}
+                                            ></XAxis>
+                                            <YAxis
+                                                
+                                                stroke="#94a3b8"
+                                                fontSize={12}
+                                                tickLine={false}
+                                                axisLine={false}
+                                                dy={10}
+                                                tickFormatter={(val)=>`Ksh ${val}`}
+                                            ></YAxis>
+                                            <RechartsTooltip content={<ComparativeTooltip granularity={granularity}/>}></RechartsTooltip>
 
+                                            {/* Dual Axes: Previous Period (Faded/Dashed) and Current Period (solid) */}
+                                            <Line type="monotone" dataKey="previousRevenue" stroke="#cbd5e1" strokeWidth={3} strokeDasharray="5 5" dot={false} activeDot={false}></Line>
+                                            <Line type="monotone" dataKey="currentRevenue" stroke="#4f46e5" strokeWidth={4}   dot={false} activeDot={{r:8,strokeWidth: 0, fill: '#4f46e5'}}></Line>
+                                            
+                                            
+                                        </LineChart>
+                                    </ResponsiveContainer>
+                                </div>
+                        </div>
+                    </div>
+
+                    {/* Bottom Row Charts */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                        {/* Doughnut Chart */}
                         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col">
                             <h3 className="text-lg font-black text-slate-900 mb-2 tracking-tight">Payment Gateways</h3>
                             <div className="flex-1 w-full relative min-h-[250px]">
                                 <ResponsiveContainer width="100%" height="100%">
                                     <PieChart>
                                         <Pie data={paymentBreakdown || []} innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
-                                            {(paymentBreakdown || []).map((entry, index) => (
-                                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                            ))}
+                                            {(paymentBreakdown || []).map((entry, index)=> <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]}/>)}
                                         </Pie>
-                                        <RechartsTooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                        <RechartsTooltip contentStyle={{ borderRadius: '12px', border: 'none',boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}></RechartsTooltip>
                                     </PieChart>
                                 </ResponsiveContainer>
                             </div>
-                            <div className="flex flex-wrap justify-center gap-4 mt-2">
+                            <div className="flex flex-wrap justify-center gap-4 mt-4">
                                 {(paymentBreakdown || []).map((entry, index) => (
                                     <div key={entry.name} className="flex items-center gap-2 text-sm font-bold text-slate-600">
                                         <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }}></div>
@@ -234,10 +406,8 @@ export default function DashboardOverview() {
                                 ))}
                             </div>
                         </div>
-                    </div>
 
-                    {/* Charts Row 2 */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Category Breakdown Bar Chart */}
                         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
                             <h3 className="text-lg font-black text-slate-900 mb-6 tracking-tight">Sales by Category</h3>
                             <div className="h-72 w-full">

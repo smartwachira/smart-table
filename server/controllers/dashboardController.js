@@ -10,8 +10,8 @@ const calculateDynamicDataRanges = (startDateQuery,endDateQuery) => {
 
     // 1. Parse or Default to 'Today'
     if (startDateQuery,endDateQuery){
-        startDate = startDateQuery;
-        endDate = endDateQuery
+        startDate = new Date(startDateQuery);
+        endDate = new Date(endDateQuery)
     } else {
         const now = new Date();
         startDate = new Date(now);
@@ -24,7 +24,7 @@ const calculateDynamicDataRanges = (startDateQuery,endDateQuery) => {
 
     // Previous period is the exact identical duration immediately preceding the start date
     const previousStartDate = new Date(startDate.getTime() - durationMs);
-    const previousEndDate = new Date(startDateDate.getTime());
+    const previousEndDate = new Date(endDate.getTime() - durationMs);
 
     // 3. Determine Granularity for PostgreSQL DATE_TRUNC
     const durationDays = durationMs / (1000 * 60 * 60 * 24);
@@ -188,35 +188,63 @@ export const getDashboardOverview = async (req, res) => {
         const prevTotalOrders = prevOrders.length;
         const prevAov = prevTotalOrders > 0 ? (prevRevenue / prevTotalOrders) : 0;
 
-        // Process Time-series & Breakdown (In-memory)
-        const salesTrendsMap = {};
+        // Payment Breakdown
         const paymentBreakdownMap = {};
         
         currentOrders.forEach(order => {
-            // Time Trends
-            const date = new Date(order.createdAt);
-            const timeKey = range === 'today' 
-                ? `${date.getHours()}:00` 
-                : date.toISOString().split('T')[0];
-
-            if (!salesTrendsMap[timeKey]) {
-                salesTrendsMap[timeKey] = { time: timeKey, revenue: 0, orders: 0 };
-            }
-            salesTrendsMap[timeKey].revenue += Number(order.total_amount);
-            salesTrendsMap[timeKey].orders += 1;
-
-            // Payments
             const method = order.payment_method || 'OTHER';
             paymentBreakdownMap[method] = (paymentBreakdownMap[method] || 0) + 1;
         });
         
-        const salesTrends = Object.values(salesTrendsMap).sort((a, b) => a.time.localeCompare(b.time));
         const paymentBreakdown = Object.keys(paymentBreakdownMap).map(key => ({
             name: key, value: paymentBreakdownMap[key]
         }));
 
+        // ⚡ TEMPORAL ALIGNMENT ENGINE FOR REACT RECHARTS
+        const unifiedTrendsMap = {};
+
+        //process current Data
+        currentSalesTrendRaw.forEach(row =>{
+            // Convert to ISO string to ensure consistency across timezones
+            const timeKey = new Date(row.timeLabel).toISOString();
+            unifiedTrendsMap[timeKey]={
+                timeLabel: timeKey,
+                currentRevenue: parseFloat(row.revenue || 0),
+                currentOrders: parseInt(row.orders || 0, 10),
+                previousRevenue: 0,
+                previousOrders: 0
+            };
+        });
+
+        // Process Previous Data & Shift Time Forward
+        previousSalesTrendRaw.forEach(row =>{
+            const originalTime = new Date(row.timeLabel);
+            // Shift the past date forward by the exact duration of the selected range
+            const shiftedTime = new Date(originalTime.getTime() + durationMs);
+            const timeKey = shiftedTime.toISOString();
+
+            if (!unifiedTrendsMap[timeKey]){
+                unifiedTrendsMap[timeKey]={
+                    timeLabel: timeKey,
+                    currentRevenue: 0,
+                    currentOrders:0,
+                    previousRevenue: 0,
+                    previousOrders: 0
+                };
+
+            }
+            unifiedTrendsMap[timeKey].previousRevenue = parseFloat(row.revenue || 0);
+            unifiedTrendsMap[timeKey].previousOrders = parseInt(row.orders || 0, 10);
+            
+        });
+
+        // Sort the map chronologically
+        const salesTrends = Object.values(unifiedTrendsMap).sort((a,b) => new Date(a.timeLabel) - new Date(b.timeLabel));
+
+
         // Send unified JSON response
         res.status(200).json({
+            granuality,
             kpis: {
                 revenue: { value: totalRevenue, trend: calculateTrend(totalRevenue, prevRevenue) },
                 orders: { value: totalOrders, trend: calculateTrend(totalOrders, prevTotalOrders) },
