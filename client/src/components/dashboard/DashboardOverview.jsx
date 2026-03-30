@@ -22,13 +22,57 @@ const formatCurrency = (val) => new Intl.NumberFormat('en-KE', {
 const formatTimeLabel = (isoString, granularity) => {
     const date = new Date(isoString);
     if (granularity === 'hour'){
-        return date.toLocaleTimeString('en-US',{ hour: 'numeric', minute: '2-digit'})
+        return `${date.toLocaleTimeString('en-US',{ hour: '2-digit', minute: '2-digit',hour12: false})},${date.toLocaleTimeString('en-US',{ weekday: 'short'})}`
     } else if (granularity === 'day'){
-        return date.toLocaleDateString('en-US', {weekday: 'short',month: 'short',day: 'numeric'});
+        return `${date.toLocaleDateString('en-US', {month: 'short',day: 'numeric'})},${date.toLocaleDateString('en-US',{weekday: 'short'})}`;
     } else {
         return date.toLocaleDateString('en-US',{month: 'short', year: 'numeric'});
     }
-}
+};
+
+// --- CLIENT-SIDE CSV EXPORT ENGINE ---
+const generateCSV = (data,dataRangeLabel) => {
+    if (!data) return;
+    const { kpis, livePulse, SalesTrends, categoryBreakdown, topItems} = data;
+
+    let csv = `Smart Table Analytical Report - ${dataRangeLabel}\n\n`;
+
+    // Section 1: KPIs & Live Pulse
+    csv += "--- EXECUTIVE SUMMARY ---\n";
+    csv += 'Metric,Value,Trend';
+    csv += `Gross Revenue,${kpis.revenue?.value || 0},${kpis.revenue?.trend || 0}%\n`;
+    csv += `Total Orders,${kpis.orders?.value || 0},${kpis.orders?.trend || 0}%\n `;
+    csv += `Avg Order Value,${kpis.aov.value || 0},${kpis.aov?.trend || 0}%\n`;
+    csv += `Live Active Orders,${livePulse?.activeOrders || 0},N/A\n`;
+    csv += `Avg Kitchen Time (min),${livePulse?.averageFulfillmentTime || 0},N/A\n\n`;
+
+    //Section 3: Category Breakdown
+    csv += "--- CATEGORY PERFORMANCE ---\n";
+    csv += "Category,Units Sold,Revenue\n";
+    (categoryBreakdown || []).forEach(row => {
+        csv += `${row.category},${row.total_sold},${row.revenue}\n`
+    });
+    csv += "\n";
+
+    //Section 4: Top Items
+    csv += "Item Name,Units Sold,Revenue\n";
+    csv += "Item Name, Units Sold,Revenue\n";
+    (topItems || []).forEach(row =>{
+        csv += `${row.name},${row.total_sold},${row.total_revenue}\n`
+    });
+
+    //Trigger Download
+    const blob = new Blob([csv],{ type: 'text/csv;charset=utf-8;'});
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href',url);
+    link.setAttribute("download",`SmartTable_Report_${dateRangeLabel.replace(/\s+/g,'_')}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+};
+
 
 const StatCard = ({ title, value, trend, icon: Icon, LinkTo }) => {
     const isPositive = Number(trend) >= 0;
@@ -89,7 +133,9 @@ const ComparativeTooltip = ({  active, payload, label, granularity}) =>{
         );
     }
     return null;
-}
+};
+
+// --- MAIN COMPONENT ---
 const SkeletonLoader = () => (
     <div className="space-y-6 animate-pulse p-4 md:p-8 max-w-7xl mx-auto">
         <div className="flex justify-between h-10 bg-slate-200 rounded-xl w-1/4"></div>
@@ -107,8 +153,12 @@ const SkeletonLoader = () => (
 export default function DashboardOverview() {
     const [dateRange, setDateRange] = useState({
         label: 'Today',
-        preset: 'today'
+        preset: 'today',
+        start: '',
+        end: ''
     });
+    const [customStart, setCustomStart] = useState('');
+    const [customEnd, setCustomEnd] = useState('');
     const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
     const datePickerRef = useRef(null);
 
@@ -128,51 +178,59 @@ export default function DashboardOverview() {
         return () => document.removeEventListener('mousedown',handleClickOutside)
     },[]);
 
-    // Date Preset Logic
-    const handleDateSelect = (label, preset) =>{
-        setDateRange({ label, preset});
-        setIsDatePickerOpen(false);
-    };
-
-    const fetchDashboardData = useCallback(async () => {
+    // ⚡ Silent Polling & Data Fetching Engine
+    const fetchDashboardData = useCallback(async (isSilent = false) => {
         const token = localStorage.getItem('token');
-        setIsLoading(true);
+        if (!isSilent) setIsLoading(true);
         setErrorMsg(null);
         
         try {
             // Calculate ISO strings based on preset
             const now = new Date();
-            let startDate = new Date();
-            let endDate = new Date(now);
+            let startDateStr = new Date();
+            let endDateStr = new Date(now);
 
-            switch (dateRange.preset) {
-                case 'yesterday':
-                    startDate.setDate(now.getDate() - 1);
-                    startDate.setHours(0,0,0,0);
-                    endDate = new Date(startDate);
-                    endDate.setHours(23,59,59,999);
-                    break;
-                case '7days':
-                    startDate.setDate(now.getDate() - 7);
-                    break;
-                case 'thisMonth':
-                    startDate = new Date(now.getFullYear(), now.getMonth(),1);
-                    break;
-                case 'lastMonth':
-                    startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                    endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-                    break;
-                case 'ytd':
-                    startDate = new Date(now.getFullYear(), 0,1);
-                    break;
-                default: // today
-                    startDate.setHours(0,0,0,0);
+
+            // Handle Logic based on Preset or Custom dates
+            if (dateRange.preset === 'custom'){
+                const startObj = new Date(dateRange.start);
+                startObj.setHours(0,0,0,0);
+                startDateStr = startObj;
+
+                const endObj = new Date(dateRange.end);
+                endObj.setHours(23,59,59,999);
+                endDateStr = startObj; 
+            } else {
+                switch (dateRange.preset) {
+                    case 'yesterday':
+                        startDateStr.setDate(now.getDate() - 1);
+                        startDateStr.setHours(0,0,0,0);
+                        endDateStr = new Date(startDateStr);
+                        endDateStr.setHours(23,59,59,999);
+                        break;
+                    case '7days':
+                        startDateStr.setDate(now.getDate() - 7);
+                        break;
+                    case 'thisMonth':
+                        startDateStr = new Date(now.getFullYear(), now.getMonth(), 1);
+                        break;
+                    case 'lastMonth':
+                        startDateStr = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                        endDateStr = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+                        break;
+                    case 'ytd':
+                        startDateStr = new Date(now.getFullYear(), 0, 1);
+                        break;
+                    default: // 'today'
+                        startDateStr.setHours(0,0,0,0);
+                }
             }
+            
             const res = await axios.get(`/api/dashboard/overview`, {
                 headers: { Authorization: `Bearer ${token}` },
                 params: {
-                    startDate: startDate.toISOString(),
-                    endDate: endDate.toISOString()
+                    startDate: startDateStr.toISOString(),
+                    endDate: endDateStr.toISOString()
                 }
             });
 
@@ -191,10 +249,21 @@ export default function DashboardOverview() {
     }, [dateRange]);
 
     useEffect(() => {
-        fetchDashboardData();
-        const interval = setInterval(fetchDashboardData, 60000);
+        fetchDashboardData(false);
+        const interval = setInterval(fetchDashboardData(true), 60000);
         return () => clearInterval(interval);
     }, [fetchDashboardData]);
+
+    const applyCustomDate = () =>{
+        if (!customStart || !customEnd) return;
+        setDateRange({
+             label: `${customStart} to ${customEnd}`, 
+             preset: 'custom',
+             start:customStart,
+             end: customEnd
+        });
+        setIsDatePickerOpen(false);
+    };
 
     if (isLoading && !data) return <SkeletonLoader />;
 
@@ -222,14 +291,15 @@ export default function DashboardOverview() {
         <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6 bg-slate-50 min-h-screen animate-in fade-in duration-500">
             
             {/* Header & Filters */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
+            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-4">
                 <div>
                     <h1 className="text-3xl font-black text-slate-900 tracking-tight">Dashboard Overview</h1>
                     <p className="text-slate-500 font-medium mt-1">Track your venue's real-time performance.</p>
                 </div>
-                <div className="flex items-center gap-3 w-full md:w-auto">
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
                     {/* Export CSV Placeholder */}
-                    <button className="hidden md:flex items-center gap-2 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl px-4 py-3 hover:bg-slate-50 hover:text-indigo-600 transition-colors shadow-sm">
+                    <button onClick={()=>generateCSV(data, dateRange.label)} className="hidden md:flex items-center gap-2 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl px-4 py-3 hover:bg-slate-50 hover:text-indigo-600 transition-colors shadow-sm">
                         <Download size={18}></Download> Export
                     </button>
 
@@ -239,27 +309,46 @@ export default function DashboardOverview() {
                             onClick={()=> setIsDatePickerOpen(!isDatePickerOpen)}
                             className="w-full flex items-center justify-between bg-white border border-slate-200 text-slate-700 font-bold rounded-xl px-4 py-3 shadow-sm hover:border-indigo-300 transition-colors"
                         >
-                            <span className="flex items-center gap-2"><Calendar size={18} className="text-indigo-500"></Calendar>{dateRange.label}</span>
-                            <ChevronDown size={18} className={`text-slate-400 transition-transform ${isDatePickerOpen ? 'rotate-180' : ''}`}></ChevronDown>
+                            <span className="flex items-center gap-2 truncate"><Calendar size={18} className="text-indigo-500"></Calendar> <span className="truncate">{dateRange.label}</span></span>
+                            <ChevronDown size={18} className={`text-slate-400 transition-transform shrink-0 ${isDatePickerOpen ? 'rotate-180' : ''}`}></ChevronDown>
 
                         </button>
 
                         {isDatePickerOpen && (
-                            <div className="absolute top-full right-0 mt-2 w-full md:w-56 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2">
-                                {[
-                                    { label: 'Today', preset: 'today'},
-                                    { label: 'Yesterday', preset: 'yesterday'},
-                                    { label: 'Last 7 Days', preset: '7days'},
-                                    { label: 'This Month', preset: 'thisMonth'},
-                                    { label: 'Last Month', preset: 'lastMonth'},
-                                    { label: 'Year to Date', preset: 'ytd'}
-                                ].map(item => (
-                                    <button
-                                        key={item.preset}
-                                        onClick={() => handleDateSelect(item.label, item.preset)}
-                                        className={`w-full text-left px-4 py-2.5 rounded-xl text-sm font-bold transition-colors ${dateRange.preset === item.preset ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
-                                    >{item.label}</button>
-                                ))}
+                            <div className="absolute top-full right-0 mt-2 w-full sm:w-80 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2">
+                                <div className="p-2 border-b border-slate-100 grid grid-cols-2 gap-1">
+                                    {[
+                                        { label: 'Today', preset: 'today' },
+                                        { label: 'Yesterday', preset: 'yesterday' },
+                                        { label: 'Last 7 Days', preset: '7days' },
+                                        { label: 'This Month', preset: 'thisMonth' },
+                                        { label: 'Last Month', preset: 'lastMonth' },
+                                        { label: 'Year to Date', preset: 'ytd' }
+                                    ].map(item => (
+                                        <button 
+                                            key={item.preset}
+                                            onClick={() => { setDateRange({ label: item.label, preset: item.preset }); setIsDatePickerOpen(false); }}
+                                            className={`text-left px-3 py-2 rounded-xl text-xs font-bold transition-colors ${dateRange.preset === item.preset ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
+                                        >
+                                            {item.label}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="p-4 space-y-3 bg-slate-50/50">
+                                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Custom Range</p>
+                                    <div className="flex items-center gap-2">
+                                        <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="w-full text-sm border border-slate-200 rounded-lg p-2 outline-none focus:border-indigo-500" />
+                                        <span className="text-slate-400 font-bold text-xs">TO</span>
+                                        <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="w-full text-sm border border-slate-200 rounded-lg p-2 outline-none focus:border-indigo-500" />
+                                    </div>
+                                    <button 
+                                        onClick={applyCustomDate}
+                                        disabled={!customStart || !customEnd}
+                                        className="w-full bg-indigo-600 text-white font-bold py-2 rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                                    >
+                                        Apply Custom Dates
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -326,6 +415,12 @@ export default function DashboardOverview() {
                         <StatCard title="Gross Revenue" value={formatCurrency(kpis.revenue?.value)} trend={kpis.revenue?.trend} icon={DollarSign} />
                         <StatCard title="Total Orders" value={kpis.orders?.value || 0} trend={kpis.orders?.trend} icon={ShoppingBag} LinkTo="/dashboard/orders" />
                         <StatCard title="Avg Order Value" value={formatCurrency(kpis.aov?.value)} trend={kpis.aov?.trend} icon={CreditCard} />
+                        {/* 4th Card to complete the 4-column layout gracefully */}
+                        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center items-center text-center transition-all hover:border-indigo-200 group">
+                             <div className="w-12 h-12 rounded-xl bg-slate-50 text-slate-400 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform"><QrCode size={24} /></div>
+                             <h3 className="text-slate-500 font-bold text-sm uppercase tracking-wider mb-1">Floor Plan</h3>
+                             <Link to="/dashboard/qr" className="text-indigo-600 font-bold hover:underline text-sm">Manage Tables &rarr;</Link>
+                        </div>
                     </div>
 
                     {/* Comparative Line Chart */}
@@ -345,119 +440,110 @@ export default function DashboardOverview() {
                                 </div>
                                 
                             </div>
-                            <div className="w-full h-[400px]">
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <LineChart data={salesTrends || []} margin={{ top: 10, right: 10, left: -20, bottom: 0}} >
-                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke='#f1f5f9'></CartesianGrid>
-                                            <XAxis
-                                                dataKey="timeLabel"
-                                                stroke="#94a3b8"
-                                                fontSize={12}
-                                                tickLine={false}
-                                                axisLine={false}
-                                                dy={10}
-                                                tickFormatter={(val)=>formatTimeLabel(val, granularity)}
-                                                minTickGap={30}
-                                            ></XAxis>
-                                            <YAxis
-                                                
-                                                stroke="#94a3b8"
-                                                fontSize={12}
-                                                tickLine={false}
-                                                axisLine={false}
-                                                dy={10}
-                                                tickFormatter={(val)=>`Ksh ${val}`}
-                                            ></YAxis>
-                                            <RechartsTooltip content={<ComparativeTooltip granularity={granularity}/>}></RechartsTooltip>
 
-                                            {/* Dual Axes: Previous Period (Faded/Dashed) and Current Period (solid) */}
-                                            <Line type="monotone" dataKey="previousRevenue" stroke="#cbd5e1" strokeWidth={3} strokeDasharray="5 5" dot={false} activeDot={false}></Line>
-                                            <Line type="monotone" dataKey="currentRevenue" stroke="#4f46e5" strokeWidth={4}   dot={false} activeDot={{r:8,strokeWidth: 0, fill: '#4f46e5'}}></Line>
-                                            
-                                            
-                                        </LineChart>
+                            <div className="h-[300px] md:h-[400px] w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <LineChart data={salesTrends || []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                        <XAxis 
+                                            dataKey="timeLabel" 
+                                            stroke="#94a3b8" 
+                                            fontSize={12} 
+                                            tickLine={false} 
+                                            axisLine={false} 
+                                            dy={10} 
+                                            tickFormatter={(val) => formatXAxisTick(val, granularity)}
+                                            minTickGap={30}
+                                        />
+                                        <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `KSh ${val}`} />
+                                        <RechartsTooltip content={<ComparativeTooltip granularity={granularity} />} />
+                                        <Line type="monotone" dataKey="previousRevenue" stroke="#cbd5e1" strokeWidth={3} strokeDasharray="5 5" dot={false} activeDot={false} />
+                                        <Line type="monotone" dataKey="currentRevenue" stroke="#4f46e5" strokeWidth={4} dot={false} activeDot={{ r: 8, strokeWidth: 0, fill: '#4f46e5' }} />
+                                    </LineChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+
+                        {/* Bottom Row Charts */}
+                        <div className="flex flex-col lg:flex-row gap-6">
+
+                            {/* Doughnut Chart */}
+                            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col">
+                                <h3 className="text-lg font-black text-slate-900 mb-2 tracking-tight">Payment Gateways</h3>
+                                <div className="flex-1 w-full relative min-h-[250px]">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <PieChart>
+                                            <Pie data={paymentBreakdown || []} innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
+                                                {(paymentBreakdown || []).map((entry, index)=> <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]}/>)}
+                                            </Pie>
+                                            <RechartsTooltip contentStyle={{ borderRadius: '12px', border: 'none',boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}></RechartsTooltip>
+                                        </PieChart>
                                     </ResponsiveContainer>
                                 </div>
-                        </div>
-                    </div>
-
-                    {/* Bottom Row Charts */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-                        {/* Doughnut Chart */}
-                        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col">
-                            <h3 className="text-lg font-black text-slate-900 mb-2 tracking-tight">Payment Gateways</h3>
-                            <div className="flex-1 w-full relative min-h-[250px]">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <PieChart>
-                                        <Pie data={paymentBreakdown || []} innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
-                                            {(paymentBreakdown || []).map((entry, index)=> <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]}/>)}
-                                        </Pie>
-                                        <RechartsTooltip contentStyle={{ borderRadius: '12px', border: 'none',boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}></RechartsTooltip>
-                                    </PieChart>
-                                </ResponsiveContainer>
+                                <div className="flex flex-wrap justify-center gap-4 mt-4">
+                                    {(paymentBreakdown || []).map((entry, index) => (
+                                        <div key={entry.name} className="flex items-center gap-2 text-sm font-bold text-slate-600">
+                                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }}></div>
+                                            {entry.name} <span className="text-slate-400">({entry.value})</span>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
-                            <div className="flex flex-wrap justify-center gap-4 mt-4">
-                                {(paymentBreakdown || []).map((entry, index) => (
-                                    <div key={entry.name} className="flex items-center gap-2 text-sm font-bold text-slate-600">
-                                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }}></div>
-                                        {entry.name} <span className="text-slate-400">({entry.value})</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
 
-                        {/* Category Breakdown Bar Chart */}
-                        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-                            <h3 className="text-lg font-black text-slate-900 mb-6 tracking-tight">Sales by Category</h3>
-                            <div className="h-72 w-full">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={sanitizedCategoryBreakdown} layout="vertical" margin={{ top: 0, right: 0, left: 20, bottom: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
-                                        <XAxis type="number" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `KSh ${val}`} />
-                                        <YAxis dataKey="category" type="category" stroke="#64748b" fontSize={12} fontWeight="bold" tickLine={false} axisLine={false} width={80} />
-                                        <RechartsTooltip 
-                                            cursor={{fill: '#f8fafc'}}
-                                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                                            formatter={(value) => [formatCurrency(value), 'Revenue']}
-                                        />
-                                        <Bar dataKey="revenue" fill="#10b981" radius={[0, 8, 8, 0]} barSize={24} />
-                                    </BarChart>
-                                </ResponsiveContainer>
+                            {/* Category Breakdown Bar Chart */}
+                            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                                <h3 className="text-lg font-black text-slate-900 mb-6 tracking-tight">Sales by Category</h3>
+                                <div className="h-72 w-full">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <BarChart data={sanitizedCategoryBreakdown} layout="vertical" margin={{ top: 0, right: 0, left: 20, bottom: 0 }}>
+                                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                                            <XAxis type="number" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `KSh ${val}`} />
+                                            <YAxis dataKey="category" type="category" stroke="#64748b" fontSize={12} fontWeight="bold" tickLine={false} axisLine={false} width={80} />
+                                            <RechartsTooltip 
+                                                cursor={{fill: '#f8fafc'}}
+                                                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                                                formatter={(value) => [formatCurrency(value), 'Revenue']}
+                                            />
+                                            <Bar dataKey="revenue" fill="#10b981" radius={[0, 8, 8, 0]} barSize={24} />
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                </div>
                             </div>
-                        </div>
 
-                        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-                            <div className="p-6 border-b border-slate-100">
-                                <h3 className="text-lg font-black text-slate-900 tracking-tight">Top Performing Items</h3>
-                            </div>
-                            <div className="overflow-x-auto flex-1">
-                                <table className="w-full text-left">
-                                    <thead className="bg-slate-50/50">
-                                        <tr>
-                                            <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Item Name</th>
-                                            <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Units Sold</th>
-                                            <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">Revenue</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100">
-                                        {(topItems || []).map((item, idx) => (
-                                            <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
-                                                <td className="p-4 font-bold text-slate-900">{item.name}</td>
-                                                <td className="p-4 text-slate-500 font-medium">
-                                                    <span className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-md text-sm">{item.total_sold}</span>
-                                                </td>
-                                                <td className="p-4 text-indigo-600 font-black text-right">{formatCurrency(item.total_revenue)}</td>
+                            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+                                <div className="p-6 border-b border-slate-100">
+                                    <h3 className="text-lg font-black text-slate-900 tracking-tight">Top Performing Items</h3>
+                                </div>
+                                <div className="overflow-x-auto flex-1">
+                                    <table className="w-full text-left">
+                                        <thead className="bg-slate-50/50">
+                                            <tr>
+                                                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Item Name</th>
+                                                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Units Sold</th>
+                                                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">Revenue</th>
                                             </tr>
-                                        ))}
-                                        {(!topItems || topItems.length === 0) && (
-                                            <tr><td colSpan="3" className="p-8 text-center text-slate-500 font-medium">No item data available.</td></tr>
-                                        )}
-                                    </tbody>
-                                </table>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {(topItems || []).map((item, idx) => (
+                                                <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                                                    <td className="p-4 font-bold text-slate-900">{item.name}</td>
+                                                    <td className="p-4 text-slate-500 font-medium">
+                                                        <span className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-md text-sm">{item.total_sold}</span>
+                                                    </td>
+                                                    <td className="p-4 text-indigo-600 font-black text-right">{formatCurrency(item.total_revenue)}</td>
+                                                </tr>
+                                            ))}
+                                            {(!topItems || topItems.length === 0) && (
+                                                <tr><td colSpan="3" className="p-8 text-center text-slate-500 font-medium">No item data available.</td></tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
+
                     </div>
+                    
                 </>
             )}
         </div>
