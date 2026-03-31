@@ -5,13 +5,13 @@ import MenuItem from '../models/MenuItem.js';
 import MenuCategory from '../models/MenuCategory.js';
 
 // ⚡ ENTERPRISE UPGRADE: Dynamic Temporal Calculator
-const calculateDynamicDataRanges = (startDateQuery,endDateQuery) => {
-    let startDate, endDate
+const calculateDynamicDataRanges = (startDateQuery, endDateQuery) => {
+    let startDate, endDate;
 
-    // 1. Parse or Default to 'Today'
-    if (startDateQuery,endDateQuery){
+    // ⚡ FIX 1: Corrected JS conditional logic
+    if (startDateQuery && endDateQuery){
         startDate = new Date(startDateQuery);
-        endDate = new Date(endDateQuery)
+        endDate = new Date(endDateQuery);
     } else {
         const now = new Date();
         startDate = new Date(now);
@@ -19,29 +19,27 @@ const calculateDynamicDataRanges = (startDateQuery,endDateQuery) => {
         endDate = now; //Right now
     }
 
-    // 2. Calculate Exact Duration for True 1:1 Comparative Analysis
     const durationMs = endDate.getTime() - startDate.getTime();
 
     // Previous period is the exact identical duration immediately preceding the start date
     const previousStartDate = new Date(startDate.getTime() - durationMs);
     const previousEndDate = new Date(endDate.getTime() - durationMs);
 
-    // 3. Determine Granularity for PostgreSQL DATE_TRUNC
+    // Determine Granularity for PostgreSQL DATE_TRUNC
     const durationDays = durationMs / (1000 * 60 * 60 * 24);
-    let granuality = 'hour';
+    
+    // ⚡ FIX 2: Corrected spelling to match frontend expectations
+    let granularity = 'hour';
 
     if (durationDays > 60){
-        granuality = 'month';
+        granularity = 'month';
     } else if (durationDays > 2){
-        granuality = 'day'
+        granularity = 'day';
     }
 
-    
-    
-    return { startDate, endDate,previousEndDate,previousStartDate,durationMs,granuality};
+    return { startDate, endDate, previousEndDate, previousStartDate, durationMs, granularity };
 };
 
-// Calculate percentage change
 const calculateTrend = (current, previous) => {
     if (previous === 0) return current > 0 ? 100 : 0;
     return (((current - previous) / previous) * 100).toFixed(1);
@@ -51,9 +49,9 @@ export const getDashboardOverview = async (req, res) => {
     try {
         const venueId = req.user.venueId;
         const { startDate: queryStart, endDate: queryEnd } = req.query;
-        const { startDate, endDate, previousStartDate,previousEndDate,durationMs,granuality } = calculateDynamicDataRanges(queryStart,queryEnd);
+        // ⚡ FIX: Receiving the correctly spelled 'granularity'
+        const { startDate, endDate, previousStartDate, previousEndDate, durationMs, granularity } = calculateDynamicDataRanges(queryStart,queryEnd);
 
-        // Common where clause for current period active orders (SECURE)
         const currentWhere = {
             venue_id: venueId,
             status: { [Op.notIn]: ['CANCELLED'] },
@@ -62,11 +60,10 @@ export const getDashboardOverview = async (req, res) => {
 
         const previousWhere = {
             venue_id: venueId,
-            status: { [Op.notIn]: ["CANCELED"]},
-            createdAt: { [Op.between]: [previousStartDate,previousEndDate]}
+            status: { [Op.notIn]: ["CANCELLED"]}, // ⚡ FIX: Corrected spelling of CANCELLED to match standard
+            createdAt: { [Op.between]: [previousStartDate, previousEndDate]}
         };
 
-        // ⚡ ENTERPRISE UPGRADE: All queries executed in parallel
         const [
             currentOrders, 
             prevOrders,
@@ -77,46 +74,43 @@ export const getDashboardOverview = async (req, res) => {
             fulfillmentData,
             categoryBreakdown
         ] = await Promise.all([
-            // 1. Fetch Current Orders
             Order.findAll({ 
                 where: currentWhere, 
                 attributes: ['total_amount', 'payment_method', 'createdAt'],
                 raw: true 
             }),
             
-            // 2. Fetch Previous Period Orders
             Order.findAll({
                 where: previousWhere,
                 attributes: ['total_amount'],
                 raw: true
             }),
             
-            // 3. ⚡ PostgreSQL Native Aggregation: Current Period Trend
+            // ⚡ FIX: Injecting the properly spelled `granularity`
             Order.findAll({
                 where: currentWhere,
                 attributes: [
-                    [fn('DATE_TRUNC',granuality, col('createdAt')),'timeLabel'],
+                    [fn('DATE_TRUNC', granularity, col('createdAt')),'timeLabel'],
                     [fn('SUM',col('total_amount')),'revenue'],
                     [fn('COUNT',col('order_id')),'orders']
                 ],
-                group: [fn("DATE_TRUNC",granuality,col('createdAt'))],
-                order: [fn("DATE_TRUNC",granuality,col('createdAt'))],
+                group: [fn("DATE_TRUNC", granularity, col('createdAt'))],
+                order: [[fn("DATE_TRUNC", granularity, col('createdAt')), 'ASC']], // ⚡ Ensure ascending order for charts
                 raw: true
-            })
-            ,
-            // 4. ⚡ PostgreSQL Native Aggregation: Previous Period Trend
+            }),
+            
             Order.findAll({
                 where: previousWhere,
                 attributes: [
-                    [fn('DATE_TRUNC',granuality, col('createdAt')),'timeLabel'],
+                    [fn('DATE_TRUNC', granularity, col('createdAt')),'timeLabel'],
                     [fn('SUM',col('total_amount')),'revenue'],
                     [fn('COUNT',col('order_id')),'orders']
                 ],
-                group: [fn("DATE_TRUNC",granuality,col('createdAt'))],
-                order: [fn("DATE_TRUNC",granuality,col('createdAt'))],
+                group: [fn("DATE_TRUNC", granularity, col('createdAt'))],
+                order: [[fn("DATE_TRUNC", granularity, col('createdAt')), 'ASC']],
                 raw: true
             }),
-            // 5. Top 5 Menu Items
+
             OrderItem.findAll({
                 include: [
                     { model: Order, attributes: [], where: currentWhere },
@@ -127,16 +121,12 @@ export const getDashboardOverview = async (req, res) => {
                     [fn('SUM', col('OrderItem.quantity')), 'total_sold'],
                     [fn('SUM', literal('"OrderItem"."quantity" * "OrderItem"."price_at_time"')), 'total_revenue']
                 ],
-                
-                // ⚡ THE FIX: Wrap grouping targets in col() to bypass Sequelize's auto-scoping
                 group: [col('MenuItem.item_id'), col('MenuItem.name')], 
-                // ⚡ THE FIX: Explicitly qualify the order target
                 order: [[fn('SUM', col('OrderItem.quantity')), 'DESC']],
                 limit: 5,
                 raw: true
             }),
             
-            // 6. Live Pulse Metrics
             Order.count({
                 where: {
                     venue_id: venueId,
@@ -145,7 +135,6 @@ export const getDashboardOverview = async (req, res) => {
                 }
             }),
             
-            // 7. Kitchen Fulfillment Metric
             Order.findOne({
                 where: {
                     ...currentWhere, status: 'COMPLETED' 
@@ -156,7 +145,6 @@ export const getDashboardOverview = async (req, res) => {
                 raw: true
             }),
             
-            // 8. Sales by Category (Menu Engineering)
             OrderItem.findAll({
                 include: [
                     { model: Order, attributes: [], where: currentWhere },
@@ -171,15 +159,12 @@ export const getDashboardOverview = async (req, res) => {
                     [fn('SUM', col('OrderItem.quantity')), 'total_sold'],
                     [fn('SUM', literal('"OrderItem"."quantity" * "OrderItem"."price_at_time"')), 'revenue'] 
                 ],
-                
-                // ⚡ THE FIX: Apply col() wrapping here as well (Using category_id from your schema)
                 group: [col('MenuItem.category_id'), col('MenuItem.MenuCategory.name')],
                 order: [[fn('SUM', literal('"OrderItem"."quantity" * "OrderItem"."price_at_time"')), 'DESC']],
                 raw: true
             })
         ]);
 
-        // Calculate KPIs
         const totalRevenue = currentOrders.reduce((sum, order) => sum + Number(order.total_amount), 0);
         const totalOrders = currentOrders.length;
         const aov = totalOrders > 0 ? (totalRevenue / totalOrders).toFixed(2) : 0;
@@ -188,9 +173,7 @@ export const getDashboardOverview = async (req, res) => {
         const prevTotalOrders = prevOrders.length;
         const prevAov = prevTotalOrders > 0 ? (prevRevenue / prevTotalOrders) : 0;
 
-        // Payment Breakdown
         const paymentBreakdownMap = {};
-        
         currentOrders.forEach(order => {
             const method = order.payment_method || 'OTHER';
             paymentBreakdownMap[method] = (paymentBreakdownMap[method] || 0) + 1;
@@ -200,12 +183,9 @@ export const getDashboardOverview = async (req, res) => {
             name: key, value: paymentBreakdownMap[key]
         }));
 
-        // ⚡ TEMPORAL ALIGNMENT ENGINE FOR REACT RECHARTS
         const unifiedTrendsMap = {};
 
-        //process current Data
         currentSalesTrendRaw.forEach(row =>{
-            // Convert to ISO string to ensure consistency across timezones
             const timeKey = new Date(row.timeLabel).toISOString();
             unifiedTrendsMap[timeKey]={
                 timeLabel: timeKey,
@@ -216,10 +196,8 @@ export const getDashboardOverview = async (req, res) => {
             };
         });
 
-        // Process Previous Data & Shift Time Forward
         previousSalesTrendRaw.forEach(row =>{
             const originalTime = new Date(row.timeLabel);
-            // Shift the past date forward by the exact duration of the selected range
             const shiftedTime = new Date(originalTime.getTime() + durationMs);
             const timeKey = shiftedTime.toISOString();
 
@@ -231,20 +209,15 @@ export const getDashboardOverview = async (req, res) => {
                     previousRevenue: 0,
                     previousOrders: 0
                 };
-
             }
             unifiedTrendsMap[timeKey].previousRevenue = parseFloat(row.revenue || 0);
             unifiedTrendsMap[timeKey].previousOrders = parseInt(row.orders || 0, 10);
-            
         });
 
-        // Sort the map chronologically
         const salesTrends = Object.values(unifiedTrendsMap).sort((a,b) => new Date(a.timeLabel) - new Date(b.timeLabel));
 
-
-        // Send unified JSON response
         res.status(200).json({
-            granuality,
+            granularity, // ⚡ Correctly spelled! The frontend will now format perfectly.
             kpis: {
                 revenue: { value: totalRevenue, trend: calculateTrend(totalRevenue, prevRevenue) },
                 orders: { value: totalOrders, trend: calculateTrend(totalOrders, prevTotalOrders) },
@@ -252,9 +225,7 @@ export const getDashboardOverview = async (req, res) => {
             },
             livePulse: {
                 activeOrders: liveActiveOrders,
-                averageFulfillmentTime: fulfillmentData?.avg_minutes
-                    ? parseFloat(fulfillmentData.avg_minutes).toFixed(1)
-                    : '0.0'
+                averageFulfillmentTime: fulfillmentData?.avg_minutes ? parseFloat(fulfillmentData.avg_minutes).toFixed(1) : '0.0'
             },
             salesTrends,
             paymentBreakdown,

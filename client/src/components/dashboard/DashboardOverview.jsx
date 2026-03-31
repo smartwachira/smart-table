@@ -8,7 +8,7 @@ import {
 import { 
     TrendingUp, TrendingDown, DollarSign, ShoppingBag, 
     CreditCard, Activity, QrCode, PlusCircle, Clock, Flame,
-    Calendar,ChevronDown,Download
+    Calendar, ChevronDown, Download
 } from 'lucide-react';
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
@@ -17,112 +17,122 @@ const formatCurrency = (val) => new Intl.NumberFormat('en-KE', {
     style: 'currency', 
     currency: 'KES', 
     minimumFractionDigits: 0 
-}).format(val || 0); // Added safe fallback
+}).format(val || 0);
 
+// ⚡ Intelligent Recharts X-Axis Formatter (Strict East African Time)
 const formatTimeLabel = (isoString, granularity) => {
-    const date = new Date(isoString);
-    if (granularity === 'hour'){
-        return `${date.toLocaleTimeString('en-US',{ hour: '2-digit', minute: '2-digit',hour12: false})},${date.toLocaleTimeString('en-US',{ weekday: 'short'})}`
-    } else if (granularity === 'day'){
-        return `${date.toLocaleDateString('en-US', {month: 'short',day: 'numeric'})},${date.toLocaleDateString('en-US',{weekday: 'short'})}`;
+    if (!isoString) return '';
+    const safeString = String(isoString).replace(' ', 'T');
+    const date = new Date(safeString);
+
+    if (isNaN(date.getTime())) return String(isoString).split('T')[0];
+
+    const timeZone = 'Africa/Nairobi'; 
+
+    if (granularity === 'hour') {
+        return `${date.toLocaleTimeString('en-US', { timeZone, hour: '2-digit', minute: '2-digit', hour12: false })}, ${date.toLocaleDateString('en-US',{ timeZone, weekday: 'short' })}`;
+    } else if (granularity === 'day') {
+        return `${date.toLocaleDateString('en-US', { timeZone, month: 'short', day: 'numeric' })}, ${date.toLocaleDateString('en-US',{ timeZone, weekday: 'short' })}`;
+    } else if (granularity === 'month') {
+        return date.toLocaleDateString('en-US', { timeZone, month: 'short', year: 'numeric' });
     } else {
-        return date.toLocaleDateString('en-US',{month: 'short', year: 'numeric'});
+        return `${date.toLocaleDateString('en-US', { timeZone, month: 'short', year: 'numeric' })} ${date.toLocaleTimeString('en-US',{ timeZone, hour: 'numeric', minute:'2-digit' })}`;
     }
 };
 
-// --- CLIENT-SIDE CSV EXPORT ENGINE ---
-const generateCSV = (data,dataRangeLabel) => {
+const generateCSV = (data, dateRangeLabel) => {
     if (!data) return;
-    const { kpis, livePulse, SalesTrends, categoryBreakdown, topItems} = data;
+    const { kpis, livePulse, salesTrends, categoryBreakdown, topItems } = data;
 
-    let csv = `Smart Table Analytical Report - ${dataRangeLabel}\n\n`;
+    let csv = `Smart Table Analytical Report - ${dateRangeLabel}\n\n`;
 
-    // Section 1: KPIs & Live Pulse
     csv += "--- EXECUTIVE SUMMARY ---\n";
-    csv += 'Metric,Value,Trend';
+    csv += 'Metric,Value,Trend\n';
     csv += `Gross Revenue,${kpis.revenue?.value || 0},${kpis.revenue?.trend || 0}%\n`;
-    csv += `Total Orders,${kpis.orders?.value || 0},${kpis.orders?.trend || 0}%\n `;
-    csv += `Avg Order Value,${kpis.aov.value || 0},${kpis.aov?.trend || 0}%\n`;
+    csv += `Total Orders,${kpis.orders?.value || 0},${kpis.orders?.trend || 0}%\n`;
+    csv += `Avg Order Value,${kpis.aov?.value || 0},${kpis.aov?.trend || 0}%\n`;
     csv += `Live Active Orders,${livePulse?.activeOrders || 0},N/A\n`;
     csv += `Avg Kitchen Time (min),${livePulse?.averageFulfillmentTime || 0},N/A\n\n`;
 
-    //Section 3: Category Breakdown
-    csv += "--- CATEGORY PERFORMANCE ---\n";
-    csv += "Category,Units Sold,Revenue\n";
-    (categoryBreakdown || []).forEach(row => {
-        csv += `${row.category},${row.total_sold},${row.revenue}\n`
+    csv += "--- SALES TRENDS ---\n";
+    csv += "Timestamp,Current Revenue,Previous Revenue,Current Orders,Previous Orders\n";
+    (salesTrends || []).forEach(row => {
+        csv += `${row.timeLabel},${row.currentRevenue},${row.previousRevenue},${row.currentOrders},${row.previousOrders}\n`;
     });
     csv += "\n";
 
-    //Section 4: Top Items
+    csv += "--- CATEGORY PERFORMANCE ---\n";
+    csv += "Category,Units Sold,Revenue\n";
+    (categoryBreakdown || []).forEach(row => {
+        csv += `${row.category},${row.total_sold},${row.revenue}\n`;
+    });
+    csv += "\n";
+
+    csv += "--- TOP PERFORMING ITEMS ---\n";
     csv += "Item Name,Units Sold,Revenue\n";
-    csv += "Item Name, Units Sold,Revenue\n";
     (topItems || []).forEach(row =>{
-        csv += `${row.name},${row.total_sold},${row.total_revenue}\n`
+        const safeName = row.name ? `"${row.name.replace(/"/g, '""')}"` : '"Unknown"';
+        csv += `${safeName},${row.total_sold},${row.total_revenue}\n`;
     });
 
-    //Trigger Download
     const blob = new Blob([csv],{ type: 'text/csv;charset=utf-8;'});
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
-    link.setAttribute('href',url);
-    link.setAttribute("download",`SmartTable_Report_${dateRangeLabel.replace(/\s+/g,'_')}.csv`);
+    link.setAttribute('href', url);
+    link.setAttribute("download", `SmartTable_Report_${dateRangeLabel.replace(/\s+/g,'_')}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 };
-
 
 const StatCard = ({ title, value, trend, icon: Icon, LinkTo }) => {
     const isPositive = Number(trend) >= 0;
     const CardContent = (
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col transition-all hover:shadow-md">
-            <div className="flex justify-between items-start mb-4">
-                <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                    <Icon size={24} />
+        <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col transition-all hover:shadow-md h-full hover:border-indigo-200 group">
+            <div className="flex justify-between items-start mb-3 sm:mb-4">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <Icon size={20} className="sm:w-6 sm:h-6" />
                 </div>
-                <span className={`flex items-center gap-1 text-sm font-bold px-2.5 py-1 rounded-full ${isPositive ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
-                    {isPositive ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                <span className={`flex items-center gap-1 text-xs sm:text-sm font-bold px-2.5 py-1 rounded-full ${isPositive ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
+                    {isPositive ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                     {Math.abs(trend || 0)}%
                 </span>
             </div>
-            <h3 className="text-slate-500 font-bold text-sm uppercase tracking-wider">{title}</h3>
-            <p className="text-3xl font-black text-slate-900 mt-1">{value}</p>
+            <h3 className="text-slate-500 font-bold text-xs sm:text-sm uppercase tracking-wider line-clamp-1">{title}</h3>
+            <p className="text-2xl sm:text-3xl font-black text-slate-900 mt-1 truncate">{value}</p>
         </div>
     );
-
     return LinkTo ? <Link to={LinkTo} className="block">{CardContent}</Link> : CardContent;
 };
 
-
-// ⚡ Custom Tooltip for the Dual-Line Comparative Chart
-const ComparativeTooltip = ({  active, payload, label, granularity}) =>{
-    if (active &&  payload && payload.length){
+const ComparativeTooltip = ({ active, payload, label, granularity }) => {
+    if (active && payload && payload.length) {
         const current = payload.find(p => p.dataKey === 'currentRevenue')?.value || 0;
-        const previous =  payload.find(p => p.dataKey === 'previousRevenue')?.value || 0;
+        const previous = payload.find(p => p.dataKey === 'previousRevenue')?.value || 0;
         const diff = current - previous;
-        const  isPositive = diff >= 0;
+        const isPositive = diff >= 0;
 
         return (
-            <div className="bg-white p-4 rounded-xl shadow-xl border border-slate-100 min-w-[200px]">
-                <p className="font-bold text-slate-500 text-sm mb-3 pb-2 border-b border-slate-100">
+            <div className="bg-white p-3 sm:p-4 rounded-xl shadow-xl border border-slate-100 min-w-[160px] sm:min-w-[200px] text-xs sm:text-sm">
+                <p className="font-bold text-slate-500 mb-2 pb-2 border-b border-slate-100">
                     {formatTimeLabel(label, granularity)}
                 </p>
-                <div className="space-y-2">
-                    <div className="flex justify-between items-center text-sm">
-                        <span className="flex items-center gap-2 font-bold text-indigo-600">
-                            <div className="w-2 h-2 rounded-full bg-indigo-600"></div>
+                <div className="space-y-1.5 sm:space-y-2">
+                    <div className="flex justify-between items-center">
+                        <span className="flex items-center gap-1.5 font-bold text-indigo-600">
+                            <div className="w-2 h-2 rounded-full bg-indigo-600"></div> Current
                         </span>
                         <span className="font-black text-slate-900">{formatCurrency(current)}</span>
                     </div>
-                    <div className="flex justify-between items-center text-sm">
-                        <span className="flex items-center gap-2 font-bold text-slate-400">
+                    <div className="flex justify-between items-center">
+                        <span className="flex items-center gap-1.5 font-bold text-slate-400">
                             <div className="w-2 h-2 rounded-full bg-slate-300"></div> Previous
                         </span>
                         <span className="font-bold text-slate-500">{formatCurrency(previous)}</span>
                     </div>
-                    <div className="pt-2 mt-2 border-t border-slate-50 flex justify-between items-center text-xs font-bold">
+                    <div className="pt-2 mt-2 border-t border-slate-50 flex justify-between items-center font-bold">
                         <span className="text-slate-400">Difference</span>
                         <span className={isPositive ? 'text-emerald-500': 'text-red-500'}>
                             {isPositive ? '+' : ''}{formatCurrency(diff)}
@@ -135,28 +145,19 @@ const ComparativeTooltip = ({  active, payload, label, granularity}) =>{
     return null;
 };
 
-// --- MAIN COMPONENT ---
 const SkeletonLoader = () => (
-    <div className="space-y-6 animate-pulse p-4 md:p-8 max-w-7xl mx-auto">
-        <div className="flex justify-between h-10 bg-slate-200 rounded-xl w-1/4"></div>
-        <div className="h-28 bg-slate-800 rounded-2xl w-full"></div> 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {[1, 2, 3].map(i => <div key={i} className="h-40 bg-slate-200 rounded-2xl"></div>)}
+    <div className="space-y-4 sm:space-y-6 animate-pulse p-3 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+        <div className="flex justify-between h-8 sm:h-10 bg-slate-200 rounded-xl w-1/2 md:w-1/4"></div>
+        <div className="h-24 sm:h-28 bg-slate-800 rounded-2xl sm:rounded-3xl w-full"></div> 
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map(i => <div key={i} className="h-32 sm:h-40 bg-slate-200 rounded-2xl"></div>)}
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 h-80 bg-slate-200 rounded-2xl"></div>
-            <div className="h-80 bg-slate-200 rounded-2xl"></div>
-        </div>
+        <div className="h-64 sm:h-96 bg-slate-200 rounded-2xl sm:rounded-3xl w-full"></div>
     </div>
 );
 
 export default function DashboardOverview() {
-    const [dateRange, setDateRange] = useState({
-        label: 'Today',
-        preset: 'today',
-        start: '',
-        end: ''
-    });
+    const [dateRange, setDateRange] = useState({ label: 'Today', preset: 'today', start: '', end: '' });
     const [customStart, setCustomStart] = useState('');
     const [customEnd, setCustomEnd] = useState('');
     const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
@@ -166,40 +167,34 @@ export default function DashboardOverview() {
     const [isLoading, setIsLoading] = useState(true);
     const [errorMsg, setErrorMsg] = useState(null);
 
-    // Click outside handler for Date Picker
-
     useEffect(() => {
-        const handleClickOutside = (event) =>{
-            if (datePickerRef.current && !datePickerRef.current.contains(event.target)){
+        const handleClickOutside = (event) => {
+            if (datePickerRef.current && !datePickerRef.current.contains(event.target)) {
                 setIsDatePickerOpen(false);
             }
         };
-        document.addEventListener('mousedown',handleClickOutside);
-        return () => document.removeEventListener('mousedown',handleClickOutside)
-    },[]);
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
-    // ⚡ Silent Polling & Data Fetching Engine
     const fetchDashboardData = useCallback(async (isSilent = false) => {
         const token = localStorage.getItem('token');
         if (!isSilent) setIsLoading(true);
         setErrorMsg(null);
         
         try {
-            // Calculate ISO strings based on preset
             const now = new Date();
             let startDateStr = new Date();
             let endDateStr = new Date(now);
 
-
-            // Handle Logic based on Preset or Custom dates
-            if (dateRange.preset === 'custom'){
+            if (dateRange.preset === 'custom') {
                 const startObj = new Date(dateRange.start);
                 startObj.setHours(0,0,0,0);
                 startDateStr = startObj;
 
                 const endObj = new Date(dateRange.end);
                 endObj.setHours(23,59,59,999);
-                endDateStr = startObj; 
+                endDateStr = endObj; 
             } else {
                 switch (dateRange.preset) {
                     case 'yesterday':
@@ -221,59 +216,52 @@ export default function DashboardOverview() {
                     case 'ytd':
                         startDateStr = new Date(now.getFullYear(), 0, 1);
                         break;
-                    default: // 'today'
+                    default: 
                         startDateStr.setHours(0,0,0,0);
                 }
             }
             
             const res = await axios.get(`/api/dashboard/overview`, {
                 headers: { Authorization: `Bearer ${token}` },
-                params: {
-                    startDate: startDateStr.toISOString(),
-                    endDate: endDateStr.toISOString()
-                }
+                params: { startDate: startDateStr.toISOString(), endDate: endDateStr.toISOString() }
             });
 
-            // ⚡ DEFENSIVE GUARD: Catch 404 HTML fallbacks masquerading as 200 OK
             if (typeof res.data === 'string' && res.data.includes('<!DOCTYPE html>')) {
                 throw new Error("Received HTML instead of JSON. The backend route is not mounted.");
             }
 
             setData(res.data);
         } catch (error) {
-            console.error("Dashboard Fetch Error:", error);
             setErrorMsg(error.response?.data?.message || error.message || "Failed to fetch dashboard data.");
         } finally {
-            setIsLoading(false);
+            if (!isSilent) setIsLoading(false);
         }
     }, [dateRange]);
 
     useEffect(() => {
         fetchDashboardData(false);
-        const interval = setInterval(fetchDashboardData(true), 60000);
+        const interval = setInterval(() => fetchDashboardData(true), 60000);
         return () => clearInterval(interval);
     }, [fetchDashboardData]);
 
-    const applyCustomDate = () =>{
+    const applyCustomDate = () => {
         if (!customStart || !customEnd) return;
-        setDateRange({
-             label: `${customStart} to ${customEnd}`, 
-             preset: 'custom',
-             start:customStart,
-             end: customEnd
-        });
+        if (new Date(customStart) > new Date(customEnd)) {
+            alert("Start date cannot be after end date.");
+            return;
+        }
+        setDateRange({ label: `${customStart} to ${customEnd}`, preset: 'custom', start: customStart, end: customEnd });
         setIsDatePickerOpen(false);
     };
 
     if (isLoading && !data) return <SkeletonLoader />;
 
-    // ⚡ DEFENSIVE GUARD: Gracefully handle missing or malformed data
     if (errorMsg || !data || !data.kpis) {
         return (
-            <div className="p-8 flex flex-col items-center justify-center text-center mt-12 animate-in fade-in">
-                <Activity size={48} className="text-red-400 mb-4" />
-                <h2 className="text-xl font-bold text-slate-900 mb-2">Connection Error</h2>
-                <p className="text-slate-500 max-w-md">{errorMsg || "Failed to load dashboard structure. Ensure your backend route is mounted."}</p>
+            <div className="p-4 sm:p-8 flex flex-col items-center justify-center text-center mt-12 animate-in fade-in">
+                <Activity size={40} className="text-red-400 mb-4 sm:w-12 sm:h-12" />
+                <h2 className="text-lg sm:text-xl font-bold text-slate-900 mb-2">Connection Error</h2>
+                <p className="text-sm sm:text-base text-slate-500 max-w-md">{errorMsg || "Failed to load dashboard structure."}</p>
             </div>
         );
     }
@@ -281,54 +269,44 @@ export default function DashboardOverview() {
     const { granularity, kpis, livePulse, salesTrends, paymentBreakdown, topItems, categoryBreakdown } = data;
     const hasOrders = kpis.orders?.value > 0;
 
-    // ⚡ DEFENSIVE GUARD: Parse PostgreSQL strings to Numbers so Recharts doesn't crash
     const sanitizedCategoryBreakdown = (categoryBreakdown || []).map(item => ({
         category: item.category || 'Uncategorized',
         revenue: Number(item.revenue || 0) 
     }));
 
     return (
-        <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6 bg-slate-50 min-h-screen animate-in fade-in duration-500">
+        <div className="p-3 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-4 sm:space-y-6 bg-slate-50 min-h-screen animate-in fade-in duration-500">
             
             {/* Header & Filters */}
-            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-4">
+            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3 sm:gap-4 mb-2">
                 <div>
-                    <h1 className="text-3xl font-black text-slate-900 tracking-tight">Dashboard Overview</h1>
-                    <p className="text-slate-500 font-medium mt-1">Track your venue's real-time performance.</p>
+                    <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Dashboard Overview</h1>
+                    <p className="text-xs sm:text-sm text-slate-500 font-medium mt-1">Track your venue's real-time performance.</p>
                 </div>
 
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
-                    {/* Export CSV Placeholder */}
-                    <button onClick={()=>generateCSV(data, dateRange.label)} className="hidden md:flex items-center gap-2 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl px-4 py-3 hover:bg-slate-50 hover:text-indigo-600 transition-colors shadow-sm">
-                        <Download size={18}></Download> Export
-                    </button>
-
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full lg:w-auto">
                     {/* Custom Date Range Picker */}
-                    <div className="relative w-full md:w-56" ref={datePickerRef}>
+                    <div className="relative w-full sm:w-56" ref={datePickerRef}>
                         <button 
-                            onClick={()=> setIsDatePickerOpen(!isDatePickerOpen)}
-                            className="w-full flex items-center justify-between bg-white border border-slate-200 text-slate-700 font-bold rounded-xl px-4 py-3 shadow-sm hover:border-indigo-300 transition-colors"
+                            onClick={() => setIsDatePickerOpen(!isDatePickerOpen)}
+                            className="w-full flex items-center justify-between bg-white border border-slate-200 text-slate-700 font-bold rounded-xl px-4 py-3 sm:py-2.5 shadow-sm hover:border-indigo-300 transition-colors text-sm sm:text-base"
                         >
-                            <span className="flex items-center gap-2 truncate"><Calendar size={18} className="text-indigo-500"></Calendar> <span className="truncate">{dateRange.label}</span></span>
-                            <ChevronDown size={18} className={`text-slate-400 transition-transform shrink-0 ${isDatePickerOpen ? 'rotate-180' : ''}`}></ChevronDown>
-
+                            <span className="flex items-center gap-2 truncate"><Calendar size={18} className="text-indigo-500 shrink-0" /> <span className="truncate">{dateRange.label}</span></span>
+                            <ChevronDown size={18} className={`text-slate-400 transition-transform shrink-0 ${isDatePickerOpen ? 'rotate-180' : ''}`} />
                         </button>
 
                         {isDatePickerOpen && (
-                            <div className="absolute top-full right-0 mt-2 w-full sm:w-80 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2">
+                            <div className="absolute top-full left-0 sm:left-auto right-0 mt-2 w-full sm:w-80 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2">
                                 <div className="p-2 border-b border-slate-100 grid grid-cols-2 gap-1">
                                     {[
-                                        { label: 'Today', preset: 'today' },
-                                        { label: 'Yesterday', preset: 'yesterday' },
-                                        { label: 'Last 7 Days', preset: '7days' },
-                                        { label: 'This Month', preset: 'thisMonth' },
-                                        { label: 'Last Month', preset: 'lastMonth' },
-                                        { label: 'Year to Date', preset: 'ytd' }
+                                        { label: 'Today', preset: 'today' }, { label: 'Yesterday', preset: 'yesterday' },
+                                        { label: 'Last 7 Days', preset: '7days' }, { label: 'This Month', preset: 'thisMonth' },
+                                        { label: 'Last Month', preset: 'lastMonth' }, { label: 'Year to Date', preset: 'ytd' }
                                     ].map(item => (
                                         <button 
                                             key={item.preset}
                                             onClick={() => { setDateRange({ label: item.label, preset: item.preset }); setIsDatePickerOpen(false); }}
-                                            className={`text-left px-3 py-2 rounded-xl text-xs font-bold transition-colors ${dateRange.preset === item.preset ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
+                                            className={`text-left px-3 py-2.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-colors ${dateRange.preset === item.preset ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
                                         >
                                             {item.label}
                                         </button>
@@ -336,15 +314,15 @@ export default function DashboardOverview() {
                                 </div>
                                 <div className="p-4 space-y-3 bg-slate-50/50">
                                     <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Custom Range</p>
-                                    <div className="flex items-center gap-2">
-                                        <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="w-full text-sm border border-slate-200 rounded-lg p-2 outline-none focus:border-indigo-500" />
-                                        <span className="text-slate-400 font-bold text-xs">TO</span>
-                                        <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="w-full text-sm border border-slate-200 rounded-lg p-2 outline-none focus:border-indigo-500" />
+                                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                                        <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="w-full text-sm border border-slate-200 rounded-lg p-2.5 sm:p-2 outline-none focus:border-indigo-500 bg-white" />
+                                        <span className="text-slate-400 font-bold text-xs text-center hidden sm:block">TO</span>
+                                        <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="w-full text-sm border border-slate-200 rounded-lg p-2.5 sm:p-2 outline-none focus:border-indigo-500 bg-white" />
                                     </div>
                                     <button 
                                         onClick={applyCustomDate}
                                         disabled={!customStart || !customEnd}
-                                        className="w-full bg-indigo-600 text-white font-bold py-2 rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                                        className="w-full bg-indigo-600 text-white font-bold py-3 sm:py-2 rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50 transition-colors"
                                     >
                                         Apply Custom Dates
                                     </button>
@@ -355,195 +333,178 @@ export default function DashboardOverview() {
                 </div>
             </div>
 
-            {/* LIVE PULSE BANNER */}
-            <div className="bg-slate-900 rounded-[2rem] p-6 md:p-8 text-white shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-6 relative overflow-hidden border border-slate-800">
+            {/* LIVE PULSE BANNER - Mobile flex wrapping */}
+            <div className="bg-slate-900 rounded-[1.5rem] sm:rounded-[2rem] p-5 sm:p-8 text-white shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-5 sm:gap-6 relative overflow-hidden border border-slate-800">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse"></div>
-                
                 <div className="relative z-10">
-                    <h2 className="text-xl md:text-2xl font-black flex items-center gap-3 tracking-tight">
-                        <span className="relative flex h-4 w-4">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500"></span>
-                        </span>
+                    <h2 className="text-lg sm:text-xl md:text-2xl font-black flex items-center gap-2 sm:gap-3 tracking-tight">
+                        <span className="relative flex h-3 w-3 sm:h-4 sm:w-4"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 sm:h-4 sm:w-4 bg-emerald-500"></span></span>
                         Live Pulse
                     </h2>
-                    <p className="text-slate-400 font-medium mt-1 text-sm md:text-base">Real-time floor & kitchen metrics</p>
+                    <p className="text-slate-400 font-medium mt-1 text-xs sm:text-sm md:text-base">Real-time floor & kitchen metrics</p>
                 </div>
-                
-                <div className="flex items-center gap-8 md:gap-12 w-full md:w-auto relative z-10 divide-x divide-slate-700">
-                    <div className="pr-2 md:pr-0">
-                        <div className="flex items-center gap-2 text-slate-400 mb-1">
-                            <Flame size={16} className="text-amber-500" />
-                            <span className="text-xs font-bold uppercase tracking-wider">Active Orders</span>
-                        </div>
-                        <p className="text-4xl md:text-5xl font-black text-white">{livePulse?.activeOrders || 0}</p>
+                <div className="flex items-center justify-start gap-6 sm:gap-8 md:gap-12 w-full md:w-auto relative z-10 divide-x divide-slate-700/50">
+                    <div className="pr-2 sm:pr-0">
+                        <div className="flex items-center gap-1.5 sm:gap-2 text-slate-400 mb-1"><Flame size={14} className="text-amber-500 sm:w-4 sm:h-4" /><span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider">Active Orders</span></div>
+                        <p className="text-3xl sm:text-4xl md:text-5xl font-black text-white">{livePulse?.activeOrders || 0}</p>
                     </div>
-                    <div className="pl-8 md:pl-12">
-                        <div className="flex items-center gap-2 text-slate-400 mb-1">
-                            <Clock size={16} className="text-indigo-400" />
-                            <span className="text-xs font-bold uppercase tracking-wider">Avg Kitchen Time</span>
-                        </div>
-                        <p className="text-4xl md:text-5xl font-black text-white">
-                            {livePulse?.averageFulfillmentTime || 0} <span className="text-xl md:text-2xl text-slate-500 font-bold">min</span>
-                        </p>
+                    <div className="pl-6 sm:pl-8 md:pl-12">
+                        <div className="flex items-center gap-1.5 sm:gap-2 text-slate-400 mb-1"><Clock size={14} className="text-indigo-400 sm:w-4 sm:h-4" /><span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider">Avg Kitchen Time</span></div>
+                        <p className="text-3xl sm:text-4xl md:text-5xl font-black text-white">{livePulse?.averageFulfillmentTime || 0} <span className="text-lg sm:text-xl md:text-2xl text-slate-500 font-bold">min</span></p>
                     </div>
                 </div>
             </div>
 
-            {/* EMPTY STATE */}
             {!hasOrders ? (
-                <div className="bg-white border border-slate-200 rounded-[2rem] p-12 text-center shadow-sm max-w-3xl mx-auto mt-8">
-                    <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
-                        <Activity size={48} className="text-indigo-300" />
-                    </div>
-                    <h2 className="text-2xl font-black text-slate-900 mb-2">No orders found for this period</h2>
-                    <p className="text-slate-500 mb-8 max-w-md mx-auto text-lg">It looks like things are quiet. Make sure your tables have QR codes and your menu is fully stocked!</p>
-                    
-                    <div className="flex flex-col sm:flex-row justify-center gap-4">
-                        <Link to="/dashboard/qr" className="flex items-center justify-center gap-2 bg-indigo-600 text-white px-6 py-4 rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20 active:scale-95">
-                            <QrCode size={20} /> Generate QR Codes
-                        </Link>
-                        <Link to="/dashboard/menu" className="flex items-center justify-center gap-2 bg-slate-100 text-slate-700 px-6 py-4 rounded-xl font-bold hover:bg-slate-200 transition-all active:scale-95">
-                            <PlusCircle size={20} /> Add Menu Items
-                        </Link>
+                /* Empty State */
+                <div className="bg-white border border-slate-200 rounded-[1.5rem] sm:rounded-[2rem] p-6 sm:p-12 text-center shadow-sm max-w-3xl mx-auto mt-4 sm:mt-8">
+                    <div className="w-16 h-16 sm:w-24 sm:h-24 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6"><Activity size={32} className="text-indigo-300 sm:w-12 sm:h-12" /></div>
+                    <h2 className="text-xl sm:text-2xl font-black text-slate-900 mb-2">No orders found</h2>
+                    <p className="text-slate-500 mb-6 sm:mb-8 max-w-md mx-auto text-sm sm:text-lg px-2">It looks like things are quiet. Ensure your tables have QR codes and your menu is fully stocked!</p>
+                    <div className="flex flex-col sm:flex-row justify-center gap-3 sm:gap-4">
+                        <Link to="/dashboard/qr" className="flex items-center justify-center gap-2 bg-indigo-600 text-white px-5 py-3.5 sm:py-4 rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20 active:scale-95 text-sm sm:text-base"><QrCode size={18} /> Generate QR Codes</Link>
+                        <Link to="/dashboard/menu" className="flex items-center justify-center gap-2 bg-slate-100 text-slate-700 px-5 py-3.5 sm:py-4 rounded-xl font-bold hover:bg-slate-200 transition-all active:scale-95 text-sm sm:text-base"><PlusCircle size={18} /> Add Menu Items</Link>
                     </div>
                 </div>
             ) : (
                 <>
+                    {/* ⚡ NEW: Export CSV Bar - Only shows when there are orders */}
+                    <div className="flex justify-end pt-2 pb-1 animate-in fade-in">
+                        <button 
+                            onClick={() => generateCSV(data, dateRange.label)} 
+                            className="flex justify-center items-center gap-2 bg-white border border-indigo-200 text-indigo-700 font-bold rounded-xl px-4 py-2 hover:bg-indigo-50 transition-colors shadow-sm text-sm"
+                        >
+                            <Download size={16} /> Download Report
+                        </button>
+                    </div>
+
                     {/* KPI Grid */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                         <StatCard title="Gross Revenue" value={formatCurrency(kpis.revenue?.value)} trend={kpis.revenue?.trend} icon={DollarSign} />
                         <StatCard title="Total Orders" value={kpis.orders?.value || 0} trend={kpis.orders?.trend} icon={ShoppingBag} LinkTo="/dashboard/orders" />
                         <StatCard title="Avg Order Value" value={formatCurrency(kpis.aov?.value)} trend={kpis.aov?.trend} icon={CreditCard} />
-                        {/* 4th Card to complete the 4-column layout gracefully */}
-                        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center items-center text-center transition-all hover:border-indigo-200 group">
-                             <div className="w-12 h-12 rounded-xl bg-slate-50 text-slate-400 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform"><QrCode size={24} /></div>
-                             <h3 className="text-slate-500 font-bold text-sm uppercase tracking-wider mb-1">Floor Plan</h3>
-                             <Link to="/dashboard/qr" className="text-indigo-600 font-bold hover:underline text-sm">Manage Tables &rarr;</Link>
+                        <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center items-center text-center transition-all hover:border-indigo-200 group">
+                             <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-slate-50 text-slate-400 flex items-center justify-center mb-2 sm:mb-3 group-hover:scale-110 transition-transform"><QrCode size={20} className="sm:w-6 sm:h-6" /></div>
+                             <h3 className="text-slate-500 font-bold text-xs sm:text-sm uppercase tracking-wider mb-1">Floor Plan</h3>
+                             <Link to="/dashboard/qr" className="text-indigo-600 font-bold hover:underline text-xs sm:text-sm">Manage Tables &rarr;</Link>
                         </div>
                     </div>
 
                     {/* Comparative Line Chart */}
-                    <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-                        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-                            <div className="flex justify-between items-center mb-6">
-                                <h3 className="text-lg font-black text-slate-900 tracking-tight">Revenue Trend</h3>
-                                <div className="flex gap-4">
-                                    <span className="flex items-center gap-2 text-xs font-bold text-slate-600">
-                                        <div className="w-3 h-1 rounded-full bg-indigo-600"></div>
-                                        Current Period
-                                    </span>
-                                    <span className="flex items-center gap-2 text-xs font-bold text-slate-400">
-                                        <div className="w-3 h-1 rounded-full bg-slate-400"></div>
-                                        Previous Period
-                                    </span>
-                                </div>
-                                
+                    <div className="bg-white p-4 sm:p-6 rounded-[1.5rem] sm:rounded-3xl border border-slate-200 shadow-sm">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 gap-3 sm:gap-4">
+                            <h3 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">Revenue Trend</h3>
+                            <div className="flex flex-wrap gap-3 sm:gap-4">
+                                <span className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs font-bold text-slate-600">
+                                    <div className="w-2.5 h-1 sm:w-3 rounded-full bg-indigo-600"></div> Current
+                                </span>
+                                <span className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs font-bold text-slate-400">
+                                    <div className="w-2.5 h-1 sm:w-3 rounded-full bg-slate-300"></div> Previous
+                                </span>
                             </div>
+                        </div>
 
-                            <div className="h-[300px] md:h-[400px] w-full">
+                        <div className="h-[250px] sm:h-[300px] md:h-[400px] w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={salesTrends || []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                    <XAxis 
+                                        dataKey="timeLabel" 
+                                        stroke="#94a3b8" 
+                                        fontSize={10} 
+                                        tickLine={false} 
+                                        axisLine={false} 
+                                        dy={10} 
+                                        tickFormatter={(val) => formatTimeLabel(val, granularity)}
+                                        minTickGap={30}
+                                        interval="preserveStartEnd" 
+                                    />
+                                    <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `KSh ${val}`} />
+                                    <RechartsTooltip content={<ComparativeTooltip granularity={granularity} />} />
+                                    <Line type="monotone" dataKey="previousRevenue" stroke="#cbd5e1" strokeWidth={2} strokeDasharray="4 4" dot={false} activeDot={false} />
+                                    <Line type="monotone" dataKey="currentRevenue" stroke="#4f46e5" strokeWidth={3} dot={false} activeDot={{ r: 6, strokeWidth: 0, fill: '#4f46e5' }} />
+                                </LineChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+
+                    {/* Bottom Row Charts */}
+                    <div className="flex flex-col lg:flex-row gap-4 sm:gap-6">
+                        {/* Doughnut Chart */}
+                        <div className="bg-white p-4 sm:p-6 rounded-[1.5rem] sm:rounded-3xl border border-slate-200 shadow-sm flex flex-col lg:w-1/3">
+                            <h3 className="text-base sm:text-lg font-black text-slate-900 mb-2 tracking-tight">Gateways</h3>
+                            <div className="flex-1 w-full relative h-[200px] sm:h-[250px]">
                                 <ResponsiveContainer width="100%" height="100%">
-                                    <LineChart data={salesTrends || []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                        <XAxis 
-                                            dataKey="timeLabel" 
-                                            stroke="#94a3b8" 
-                                            fontSize={12} 
-                                            tickLine={false} 
-                                            axisLine={false} 
-                                            dy={10} 
-                                            tickFormatter={(val) => formatXAxisTick(val, granularity)}
-                                            minTickGap={30}
+                                    <PieChart>
+                                        <Pie data={paymentBreakdown || []} innerRadius={50} outerRadius={70} paddingAngle={5} dataKey="value">
+                                            {(paymentBreakdown || []).map((entry, index)=> <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]}/>)}
+                                        </Pie>
+                                        <RechartsTooltip contentStyle={{ borderRadius: '12px', border: 'none',boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}></RechartsTooltip>
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            </div>
+                            <div className="flex flex-wrap justify-center gap-3 sm:gap-4 mt-2 sm:mt-4">
+                                {(paymentBreakdown || []).map((entry, index) => (
+                                    <div key={entry.name} className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm font-bold text-slate-600">
+                                        <div className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }}></div>
+                                        {entry.name} <span className="text-slate-400">({entry.value})</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Category Breakdown Bar Chart */}
+                        <div className="bg-white p-4 sm:p-6 rounded-[1.5rem] sm:rounded-3xl border border-slate-200 shadow-sm flex-1">
+                            <h3 className="text-base sm:text-lg font-black text-slate-900 mb-4 sm:mb-6 tracking-tight">Sales by Category</h3>
+                            <div className="h-[250px] sm:h-[250px] w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={sanitizedCategoryBreakdown} layout="vertical" margin={{ top: 0, right: 0, left: 10, bottom: 0 }}>
+                                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                                        <XAxis type="number" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `KSh ${val}`} />
+                                        <YAxis dataKey="category" type="category" stroke="#64748b" fontSize={10} sm:fontSize={12} fontWeight="bold" tickLine={false} axisLine={false} width={80} />
+                                        <RechartsTooltip 
+                                            cursor={{fill: '#f8fafc'}}
+                                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                                            formatter={(value) => [formatCurrency(value), 'Revenue']}
                                         />
-                                        <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `KSh ${val}`} />
-                                        <RechartsTooltip content={<ComparativeTooltip granularity={granularity} />} />
-                                        <Line type="monotone" dataKey="previousRevenue" stroke="#cbd5e1" strokeWidth={3} strokeDasharray="5 5" dot={false} activeDot={false} />
-                                        <Line type="monotone" dataKey="currentRevenue" stroke="#4f46e5" strokeWidth={4} dot={false} activeDot={{ r: 8, strokeWidth: 0, fill: '#4f46e5' }} />
-                                    </LineChart>
+                                        <Bar dataKey="revenue" fill="#10b981" radius={[0, 4, 4, 0]} barSize={20} sm:barSize={24} />
+                                    </BarChart>
                                 </ResponsiveContainer>
                             </div>
                         </div>
-
-                        {/* Bottom Row Charts */}
-                        <div className="flex flex-col lg:flex-row gap-6">
-
-                            {/* Doughnut Chart */}
-                            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col">
-                                <h3 className="text-lg font-black text-slate-900 mb-2 tracking-tight">Payment Gateways</h3>
-                                <div className="flex-1 w-full relative min-h-[250px]">
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <PieChart>
-                                            <Pie data={paymentBreakdown || []} innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
-                                                {(paymentBreakdown || []).map((entry, index)=> <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]}/>)}
-                                            </Pie>
-                                            <RechartsTooltip contentStyle={{ borderRadius: '12px', border: 'none',boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}></RechartsTooltip>
-                                        </PieChart>
-                                    </ResponsiveContainer>
-                                </div>
-                                <div className="flex flex-wrap justify-center gap-4 mt-4">
-                                    {(paymentBreakdown || []).map((entry, index) => (
-                                        <div key={entry.name} className="flex items-center gap-2 text-sm font-bold text-slate-600">
-                                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }}></div>
-                                            {entry.name} <span className="text-slate-400">({entry.value})</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Category Breakdown Bar Chart */}
-                            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-                                <h3 className="text-lg font-black text-slate-900 mb-6 tracking-tight">Sales by Category</h3>
-                                <div className="h-72 w-full">
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <BarChart data={sanitizedCategoryBreakdown} layout="vertical" margin={{ top: 0, right: 0, left: 20, bottom: 0 }}>
-                                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
-                                            <XAxis type="number" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `KSh ${val}`} />
-                                            <YAxis dataKey="category" type="category" stroke="#64748b" fontSize={12} fontWeight="bold" tickLine={false} axisLine={false} width={80} />
-                                            <RechartsTooltip 
-                                                cursor={{fill: '#f8fafc'}}
-                                                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                                                formatter={(value) => [formatCurrency(value), 'Revenue']}
-                                            />
-                                            <Bar dataKey="revenue" fill="#10b981" radius={[0, 8, 8, 0]} barSize={24} />
-                                        </BarChart>
-                                    </ResponsiveContainer>
-                                </div>
-                            </div>
-
-                            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-                                <div className="p-6 border-b border-slate-100">
-                                    <h3 className="text-lg font-black text-slate-900 tracking-tight">Top Performing Items</h3>
-                                </div>
-                                <div className="overflow-x-auto flex-1">
-                                    <table className="w-full text-left">
-                                        <thead className="bg-slate-50/50">
-                                            <tr>
-                                                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Item Name</th>
-                                                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Units Sold</th>
-                                                <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">Revenue</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100">
-                                            {(topItems || []).map((item, idx) => (
-                                                <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
-                                                    <td className="p-4 font-bold text-slate-900">{item.name}</td>
-                                                    <td className="p-4 text-slate-500 font-medium">
-                                                        <span className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-md text-sm">{item.total_sold}</span>
-                                                    </td>
-                                                    <td className="p-4 text-indigo-600 font-black text-right">{formatCurrency(item.total_revenue)}</td>
-                                                </tr>
-                                            ))}
-                                            {(!topItems || topItems.length === 0) && (
-                                                <tr><td colSpan="3" className="p-8 text-center text-slate-500 font-medium">No item data available.</td></tr>
-                                            )}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-
                     </div>
-                    
+
+                    {/* Top Items Table */}
+                    <div className="bg-white rounded-[1.5rem] sm:rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+                        <div className="p-4 sm:p-6 border-b border-slate-100">
+                            <h3 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">Top Performing Items</h3>
+                        </div>
+                        <div className="overflow-x-auto custom-scrollbar flex-1 max-h-[300px]">
+                            <table className="w-full text-left min-w-[450px] sm:min-w-[500px]">
+                                <thead className="bg-slate-50/50 sticky top-0 z-10 backdrop-blur-sm">
+                                    <tr>
+                                        <th className="p-3 sm:p-4 text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Item Name</th>
+                                        <th className="p-3 sm:p-4 text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider text-center">Units Sold</th>
+                                        <th className="p-3 sm:p-4 text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider text-right">Revenue</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {(topItems || []).map((item, idx) => (
+                                        <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                                            <td className="p-3 sm:p-4 font-bold text-xs sm:text-sm text-slate-900 truncate max-w-[150px] sm:max-w-[200px]">{item.name}</td>
+                                            <td className="p-3 sm:p-4 text-slate-500 font-medium text-center">
+                                                <span className="bg-slate-100 text-slate-600 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md text-xs sm:text-sm">{item.total_sold}</span>
+                                            </td>
+                                            <td className="p-3 sm:p-4 text-indigo-600 font-black text-xs sm:text-sm text-right">{formatCurrency(item.total_revenue)}</td>
+                                        </tr>
+                                    ))}
+                                    {(!topItems || topItems.length === 0) && (
+                                        <tr><td colSpan="3" className="p-6 sm:p-8 text-center text-slate-500 font-medium text-sm">No item data available.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </>
             )}
         </div>
