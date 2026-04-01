@@ -51,6 +51,10 @@ const Order = sequelize.define ('Order', {
     notes: {
         type: DataTypes.TEXT,
         allowNull: true,
+    },
+    cash_collected_by: {
+        type: DataTypes.UUID,
+        allowNull:true
     }
 
 

@@ -2,59 +2,52 @@ import Order from '../models/Order.js';
 import OrderItem from '../models/OrderItem.js';
 import MenuItem from '../models/MenuItem.js';
 import sequelize from '../config/db.js';
-import { request } from 'express';
 import { Op } from 'sequelize';
 import Venue from '../models/Venue.js';
 
-
-
-
-export const createOrder = async (req,res) => {
-    const t = await sequelize.transaction(); //Start a "Safety Net"
+export const createOrder = async (req, res) => {
+    const t = await sequelize.transaction(); // Start a "Safety Net"
 
     try {
-
         // Collect data from request
-        const {venue_id,table_number, items, payment_method, customer_name,phone_number } = req.body;
+        const { venue_id, table_number, items, payment_method, customer_name, phone_number } = req.body;
 
-        //STRICT VALIDATION AGAINST VENUE SETTINGS
+        // STRICT VALIDATION AGAINST VENUE SETTINGS
         const venue = await Venue.findByPk(venue_id);
-        if (!venue) return res.status(404).json({ message: "Venue not found."});
+        if (!venue) return res.status(404).json({ message: "Venue not found." });
 
-        if (!venue.is_accepting_orders){
-          return res.status(403).json({ message: 'This venue is currently not accepting orders.'})
+        if (!venue.is_accepting_orders) {
+            return res.status(403).json({ message: 'This venue is currently not accepting orders.' });
         }
 
-        if (payment_method === 'CASH' && !venue.allow_cash_payments){
-          return res.status(400).json({ message: 'Cash payments are disabled for this venue.'});
+        if (payment_method === 'CASH' && !venue.allow_cash_payments) {
+            return res.status(400).json({ message: 'Cash payments are disabled for this venue.' });
         }
 
-        if (!items || items.length === 0){
-            return res.status(400).json({ message: "Cannot place empty order"});
+        if (!items || items.length === 0) {
+            return res.status(400).json({ message: "Cannot place empty order" });
         }
 
-        //Fetch all requested items from the database to verify prices
-        const itemIds = items.map(item=>item.item_id);
-        const dbItems = await MenuItem.findAll({ where: {item_id: itemIds}});
+        // Fetch all requested items from the database to verify prices
+        const itemIds = items.map(item => item.item_id);
+        const dbItems = await MenuItem.findAll({ where: { item_id: itemIds } });
 
-        //Calculate the TRUE total amount on the server
+        // Calculate the TRUE total amount on the server
         let trueTotalAmount = 0;
-
-    
 
         // Prepare the Items Data
         const validatedItems = items.map((clientItem) => {
-          const realItem = dbItems.find(dbI =>dbI.item_id === clientItem.item_id);
-          if (!realItem) throw new Error(`Item ${clientItem.item_id} not found`);
+            const realItem = dbItems.find(dbI => dbI.item_id === clientItem.item_id);
+            if (!realItem) throw new Error(`Item ${clientItem.item_id} not found`);
 
-          trueTotalAmount = Number(realItem.price) * clientItem.quantity;
-          
+            // ⚡ FIX: Add to the total using += instead of overwriting it
+            trueTotalAmount += Number(realItem.price) * clientItem.quantity;
 
-          return {
-            item_id: realItem.item_id,
-            quantity: clientItem.quantity,
-            price_at_time: realItem.price
-          }
+            return {
+                item_id: realItem.item_id,
+                quantity: clientItem.quantity,
+                price_at_time: realItem.price
+            };
         });
 
         // Create the Main Order Record
@@ -66,142 +59,149 @@ export const createOrder = async (req,res) => {
             total_amount: trueTotalAmount,
             payment_method,
             status: 'PENDING',
-            payment_status: 'PENDING'
-        }, {transaction: t}); // pass the transaction object
+            payment_status: payment_method === 'CASH' ? 'PENDING' : 'PENDING' // Assuming MPesa updates this later
+        }, { transaction: t });
 
         const orderItemsData = validatedItems.map(item => ({
             ...item,
-            order_id: newOrder.id || newOrder.order_id || newOrder.getDataValue('order_id')
+            order_id: newOrder.order_id || newOrder.getDataValue('order_id')
         }));
 
-        //3. Bulk Insert all Items at once
-        await OrderItem.bulkCreate(orderItemsData, { transaction: t});
+        // Bulk Insert all Items at once
+        await OrderItem.bulkCreate(orderItemsData, { transaction: t });
 
-        // 4. Commit (save) changes.
-        await t.commit(); //success
+        // Commit (save) changes
+        await t.commit();
 
-        //BROADCAST: to socket system
+        // BROADCAST: to socket system
         const io = req.app.get('socketio');
-        if (io){
-          io.to(venue_id).emit('receive_order',{
-            order: newOrder,
-            items: items
-          });
+        if (io) {
+            io.to(venue_id).emit('receive_order', {
+                order: newOrder,
+                items: items
+            });
         }
 
         res.status(201).json({
             message: 'Order placed successfully',
-            orderId: newOrder.order_id || newOrder.id,
+            orderId: newOrder.order_id,
             amount: trueTotalAmount
         });
-       
-    } catch (error){
+
+    } catch (error) {
         await t.rollback(); // Failure
         console.error('❌ Order Error:', error);
-        res.status(500).json({ message: 'Failed to place order', error: error.message})
+        res.status(500).json({ message: 'Failed to place order', error: error.message });
     }
 };
 
-//Fetch all orders from the database
-
+// Fetch all live active orders for the Kitchen Display System (KDS)
 export const getOrders = async (req, res) => {
-  try {
-    const { venueId } = req.user;
-
-    const orders = await Order.findAll({
-      where: { 
-        venue_id: venueId,
-        // Only show active orders in the kitchen (hide completed ones)
-        status:{ [Op.notIn]:['COMPLETED','CANCELLED']},
-
-        [Op.or]: [
-          {payment_status: 'PAID'},
-          { payment_method: 'CASH'}
-        ]
-      },
-      include: [
-        {
-          model: OrderItem,
-          include: [MenuItem] // Include Food Names
-        }
-      ],
-      order: [['createdAt', 'ASC']] // Oldest orders first
-    });
-
-    res.status(200).json(orders);
-    
-  } catch (error) {
-    console.error('❌ Get Orders Error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-//Update Order status
-export const updateOrderStatus = async (req, res) =>{
     try {
-        //collect data
+        const venueId = req.user.venueId; // Ensure consistent auth token usage
+
+        const orders = await Order.findAll({
+            where: {
+                venue_id: venueId,
+                // ⚡ ENTERPRISE KDS RULE: Only fetch explicitly active states
+                status: { [Op.in]: ['PENDING', 'PREPARING', 'READY'] },
+                [Op.or]: [
+                    { payment_status: 'PAID' },
+                    { payment_method: 'CASH' } // Cash is paid at the table
+                ]
+            },
+            include: [
+                {
+                    model: OrderItem,
+                    include: [MenuItem] // Ensure we get the menu item names
+                }
+            ],
+            order: [['createdAt', 'ASC']] // Oldest orders first (FIFO)
+        });
+
+        res.status(200).json(orders);
+
+    } catch (error) {
+        console.error('❌ Get Orders Error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+// Update Order status (State Machine)
+export const updateOrderStatus = async (req, res) => {
+    try {
+        // ⚡ FIX: Get orderId from params to match the router (/:orderId/status)
+        const { orderId } = req.params;
+        const { status, cancelReason } = req.body;
+        const venueId = req.user.venueId;
+
+        const validStates = ['PENDING', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED'];
         
-        const { orderId,status, cancelReason } = req.body;
-        const { venueId } = req.user;
+        if (!status) return res.status(400).json({ message: "Status is required." });
 
+        // ⚡ FIX: Corrected typo from toUppercase() to toUpperCase()
+        const upperStatus = status.toUpperCase();
 
-
-        const validStatuses = ['PENDING', 'PREPARING', 'READY'];
-        if(!validStatuses.includes(status)){
-            return res.status(400).json({message: 'Invalid status'});
+        // ⚡ FIX: Validate against the properly capitalized status
+        if (!validStates.includes(upperStatus)) {
+            return res.status(400).json({ 
+                message: `Invalid status transition. Allowed status: ${validStates.join(', ')}` 
+            });
         }
 
-        //1. Find the order
-        const order = await Order.findOne({ where: { order_id: orderId, venue_id: venueId}});
+        // Find the order securely
+        const order = await Order.findOne({ where: { order_id: orderId, venue_id: venueId } });
 
-        if (!order){
-            return res.status(404).json({ message: 'Order not found'});
-
+        if (!order) {
+            return res.status(404).json({ message: 'Order not found' });
         }
 
-        //Only Managers/Owners should cancel orders, Waiters/Kitchen can only move forward
-        if (status === 'CANCELLED' && !['MANAGER', 'OWNER'].includes(req.user.role)){
-          return res.status(403).json({ message: "Only managers can cancel active orders."});
+        // Only Managers/Owners should cancel orders, Waiters/Kitchen can only move forward
+        if (upperStatus === 'CANCELLED' && !['MANAGER', 'OWNER'].includes(req.user.role)) {
+            return res.status(403).json({ message: "Only managers can cancel active orders." });
         }
-        //2. Update the status
 
-        order.status = status;
-        if (status === 'CANCELLED'){
-          order.notes = order.notes ? `${order.notes} | Cancelled: ${cancelReason}` : `Cancelled: ${cancelReason}`
-          // NOTE: In production, trigger M-Pesa reversal or Void Ledger entry here
-        };
+        // Update the status
+        order.status = upperStatus;
+        
+        if (upperStatus === 'CANCELLED') {
+            const reasonText = cancelReason || 'No reason provided';
+            order.notes = order.notes ? `${order.notes} | Cancelled: ${reasonText}` : `Cancelled: ${reasonText}`;
+            // NOTE: In production, trigger M-Pesa reversal or Void Ledger entry here
+        }
+        
+        // This will automatically update `updatedAt`, which powers the dashboard fulfillment metrics!
         await order.save();
 
-        const io = req.app.get('socketio')
+        const io = req.app.get('socketio');
+        if (io) {
+            // ⚡ FIX: Corrected orderId key for your Sequelize model
+            io.to(venueId).emit("orderUpdated", {
+                newStatus: upperStatus,
+                orderId: order.order_id
+            });
+        }
 
-        io.to(venueId).emit("update-order-status",{
-          newStatus: status,
-          orderId: order.orderId
-        })
+        res.json({ message: 'Order updated', order });
 
-        res.json({message: 'Order updated', order});
-
-
-    } catch(error){
+    } catch (error) {
         console.error('Error updating order:', error);
-        res.status(500).json({message: 'Failed to update order'})
+        res.status(500).json({ message: 'Failed to update order' });
     }
 };
 
-// 5. TRACK ORDER (For Customer) - FIXED SYNTAX
+// TRACK ORDER (For Customer)
 export const getOrderStatus = async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    const order = await Order.findByPk(orderId, {
-      include: [{ model: OrderItem, include: [MenuItem] }]
-    });
+    try {
+        const { orderId } = req.params;
+        const order = await Order.findByPk(orderId, {
+            include: [{ model: OrderItem, include: [MenuItem] }]
+        });
 
-    if (!order) return res.status(404).json({ message: 'Order not found' });
-    res.status(200).json(order);
-  } catch (error) {
-    console.error('❌ Track Order Error:', error);
-    res.status(500).json({ message: 'Failed to check order status.' });
-  }
+        if (!order) return res.status(404).json({ message: 'Order not found' });
+        res.status(200).json(order);
+    } catch (error) {
+        console.error('❌ Track Order Error:', error);
+        res.status(500).json({ message: 'Failed to check order status.' });
+    }
 };
-
-
-
