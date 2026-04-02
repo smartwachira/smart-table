@@ -15,6 +15,7 @@ router.get('/:orderId/status',orderController.getOrderStatus);
 // Protected Routes (Staff Only)
 router.patch("/:orderId/status",protect, orderController.updateOrderStatus);
 router.get("/live",protect, orderController.getOrders);
+router.patch('/:orderId/collect-cash', protect, orderController.markCashCollected);
 
 
 

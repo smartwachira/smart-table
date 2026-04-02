@@ -205,3 +205,36 @@ export const getOrderStatus = async (req, res) => {
         res.status(500).json({ message: 'Failed to check order status.' });
     }
 };
+
+// ⚡ SECURE CASH COLLECTION
+export const markCashCollected = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const venueId = req.user.venueId;
+        const staffId = req.user.id; // Assuming your JWT payload includes the user's ID
+
+        const order = await Order.findOne({ where: { order_id: orderId, venue_id: venueId } });
+
+        if (!order) return res.status(404).json({ message: 'Order not found' });
+        if (order.payment_method !== 'CASH') return res.status(400).json({ message: 'Not a cash order' });
+        if (order.payment_status === 'PAID') return res.status(400).json({ message: 'Cash already collected' });
+
+        // Update status and stamp the audit trail
+        order.payment_status = 'PAID';
+        order.cash_collected_by = staffId; 
+        
+        await order.save();
+
+        // Broadcast the update so the UI removes the "Collect Cash" warning instantly
+        const io = req.app.get('socketio');
+        if (io) {
+            io.to(venueId).emit("orderUpdated", { orderId: order.order_id });
+        }
+
+        res.json({ message: 'Cash collected and logged successfully', order });
+
+    } catch (error) {
+        console.error('Error collecting cash:', error);
+        res.status(500).json({ message: 'Failed to process cash collection' });
+    }
+};
