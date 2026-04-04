@@ -110,6 +110,7 @@ export default function LiveOrders() {
 
             toast.success(`Ticket advanced to ${newStatus}`);
         } catch (error) {
+            console.error("Error advancing ticket",error);
             toast.error("Failed to advance ticket.");
             fetchOrders(); 
         }
@@ -128,6 +129,7 @@ export default function LiveOrders() {
             setCancelReason('');
             fetchOrders();
         } catch (error) {
+            console.error("Error cancelling Order",error)
             toast.error("Failed to cancel order.");
         }
     };
@@ -146,6 +148,7 @@ export default function LiveOrders() {
             });
             toast.success("Cash collection logged successfully.");
         } catch (error) {
+            console.error("Error loging cash collection",error)
             toast.error("Failed to log cash collection.");
             fetchOrders();
         }
