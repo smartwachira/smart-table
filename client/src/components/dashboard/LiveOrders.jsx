@@ -5,7 +5,8 @@ import { toast } from 'sonner';
 import io from 'socket.io-client';
 import { 
     ChefHat, CheckCircle2, Ban, AlertTriangle, Clock, 
-    User, BellRing, Flame, ArrowRight, UtensilsCrossed, Banknote, History, RotateCcw, Lock
+    User, BellRing, Flame, ArrowRight, UtensilsCrossed, 
+    Banknote, History, RotateCcw, Lock, Search
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -21,6 +22,9 @@ export default function LiveOrders() {
     const [cancelReason, setCancelReason] = useState('');
     
     const [activeTab, setActiveTab] = useState('PENDING');
+    
+    // ⚡ NEW: Search State
+    const [searchQuery, setSearchQuery] = useState('');
 
     const previousOrderIdsRef = useRef(new Set());
     const newOrderScrollRef = useRef(null);
@@ -132,28 +136,25 @@ export default function LiveOrders() {
         }
     };
 
-    // ⚡ STRICT DB-DRIVEN CASH COLLECTION
     const handleCollectCash = async (orderId) => {
         if (!window.confirm("Confirm you have received the cash for this order?")) return;
         
         try {
             const token = localStorage.getItem('token');
             
-            // 1. Send the request to the database
-            const response = await axios.patch(`/api/orders/${orderId}/collect-cash`, {}, {
+            setOrders(prev => prev.map(o => o.order_id === orderId ? { 
+                ...o, 
+                payment_status: 'PAID',
+                CashCollector: { name: user.name } 
+            } : o));
+            
+            await axios.patch(`/api/orders/${orderId}/collect-cash`, {}, {
                 headers: { Authorization: `Bearer ${token}` }
             });
-            
-            // 2. Update the UI using the EXACT data returned by the database
-            // This guarantees everyone sees the exact same name immediately.
-            setOrders(prev => prev.map(o => 
-                o.order_id === orderId ? { ...o, ...response.data.order } : o
-            ));
-            
             toast.success("Cash collection logged successfully.");
         } catch (error) {
             toast.error("Failed to log cash collection.");
-            fetchOrders(); // Re-sync with DB on failure
+            fetchOrders();
         }
     };
 
@@ -163,10 +164,31 @@ export default function LiveOrders() {
         return Math.floor((now - created) / 60000);
     };
 
-    const pendingOrders = orders.filter(o => o.status === 'PENDING');
-    const preparingOrders = orders.filter(o => o.status === 'PREPARING');
-    const readyOrders = orders.filter(o => o.status === 'READY');
-    const recallOrders = orders.filter(o => o.status === 'COMPLETED');
+    // ⚡ NEW: Deep-Search Filter Logic
+    const filteredOrders = orders.filter(order => {
+        if (!searchQuery.trim()) return true;
+        
+        const query = searchQuery.toLowerCase().trim();
+        
+        // Match against Short ID, Full ID, Customer Name, Table Number, or Item Names
+        const shortId = order.order_id ? order.order_id.slice(0, 4).toLowerCase() : '';
+        const fullId = order.order_id ? order.order_id.toLowerCase() : '';
+        const customer = order.customer_name ? order.customer_name.toLowerCase() : '';
+        const table = order.table_number ? order.table_number.toLowerCase() : '';
+        const itemNames = order.OrderItems ? order.OrderItems.map(i => (i.MenuItem?.name || i.name || '').toLowerCase()).join(' ') : '';
+
+        return shortId.includes(query) || 
+               fullId.includes(query) || 
+               customer.includes(query) || 
+               table.includes(query) || 
+               itemNames.includes(query);
+    });
+
+    // We now sort the *filtered* orders into their Kanban columns
+    const pendingOrders = filteredOrders.filter(o => o.status === 'PENDING');
+    const preparingOrders = filteredOrders.filter(o => o.status === 'PREPARING');
+    const readyOrders = filteredOrders.filter(o => o.status === 'READY');
+    const recallOrders = filteredOrders.filter(o => o.status === 'COMPLETED');
 
     if (loading) {
         return (
@@ -180,9 +202,10 @@ export default function LiveOrders() {
     const OrderTicket = ({ order, isFirst, isRecall = false }) => {
         const elapsedMins = getElapsedMinutes(order.createdAt || order.created_at);
         const isCashPending = order.payment_method === 'CASH' && order.payment_status === 'PENDING';
-        
-        // ⚡ REVENUE LEAKAGE PREVENTION: Lock the Complete button if unpaid
         const isPaymentPending = order.payment_status === 'PENDING';
+        
+        // Ensure we always have a safe short ID to display
+        const shortOrderId = order.order_id ? order.order_id.slice(0, 4).toUpperCase() : 'N/A';
         
         let slaColor = 'bg-white border-slate-200';
         let headerColor = 'bg-slate-50 text-slate-700';
@@ -209,7 +232,13 @@ export default function LiveOrders() {
                 {/* Header */}
                 <div className={`p-3 md:p-4 flex justify-between items-start ${headerColor}`}>
                     <div>
-                        <span className="text-[10px] font-black uppercase tracking-wider opacity-80">Table / Tab</span>
+                        <div className="flex items-center gap-2 mb-1">
+                            <span className="text-[10px] font-black uppercase tracking-wider opacity-80">Table / Tab</span>
+                            {/* ⚡ NEW: Display the Short Order ID */}
+                            <span className="text-[10px] bg-black/10 px-1.5 py-0.5 rounded font-black tracking-wider opacity-90">
+                                #{shortOrderId}
+                            </span>
+                        </div>
                         <h3 className="text-xl md:text-2xl font-black mb-1 leading-none">{order.table_number || 'Takeaway'}</h3>
                         <div className="flex items-center gap-1 text-xs font-bold opacity-90">
                             <User size={12} /> {order.customer_name || 'Guest'}
@@ -223,7 +252,7 @@ export default function LiveOrders() {
                     </div>
                 </div>
 
-                {/* ⚡ AUDIT TRAIL: Payment Status Banner */}
+                {/* Payment Status Banner */}
                 <div className="px-3 md:px-4 py-2 border-b border-slate-100 bg-white/50 flex justify-between items-center">
                     <span className="text-xs font-bold text-slate-500">Total: {Number(order.total_amount).toLocaleString('en-KE')} KES</span>
                     {isCashPending ? (
@@ -286,7 +315,6 @@ export default function LiveOrders() {
                             </button>
                         )}
                         {order.status === "READY" && (
-                            /* ⚡ REVENUE LEAKAGE PREVENTION: Disable completion if payment is pending */
                             <button 
                                 disabled={isPaymentPending}
                                 className={`flex-1 flex items-center justify-center gap-1.5 md:gap-2 py-2.5 md:py-3 px-2 rounded-xl text-xs md:text-sm font-bold transition-all shadow-sm ${
@@ -308,7 +336,7 @@ export default function LiveOrders() {
                                 className="flex-1 flex items-center justify-center gap-1.5 md:gap-2 bg-slate-200 hover:bg-slate-300 text-slate-700 py-2.5 md:py-3 px-2 rounded-xl text-xs md:text-sm font-bold transition-all active:scale-95 shadow-sm"
                                 onClick={() => updateStatus(order.order_id, 'READY')}
                             >
-                                <RotateCcw size={16}/> Undo (Move to Ready)
+                                <RotateCcw size={16}/> Undo
                             </button>
                         )}
                         
@@ -330,8 +358,8 @@ export default function LiveOrders() {
     return (
         <div className="max-w-[1800px] mx-auto p-3 md:p-6 lg:h-screen flex flex-col bg-slate-100 overflow-hidden">
             
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200 mb-4 shrink-0 gap-3">
+            {/* Header with Search */}
+            <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center bg-white p-4 md:p-5 rounded-2xl shadow-sm border border-slate-200 mb-4 shrink-0 gap-4">
                 <div>
                     <h1 className="text-xl md:text-2xl lg:text-3xl font-black text-slate-900 flex items-center gap-2 md:gap-3 tracking-tight">
                         Kitchen Display System 
@@ -342,10 +370,25 @@ export default function LiveOrders() {
                     </h1>
                     <p className="text-slate-500 font-medium text-xs md:text-sm mt-0.5 md:mt-1">First-In, First-Out (FIFO) Management</p>
                 </div>
-                <div className="hidden md:flex flex-wrap gap-3 md:gap-4">
-                    <div className="flex items-center gap-1.5 md:gap-2 text-[10px] md:text-xs font-bold text-slate-500"><div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full bg-slate-200"></div> Standard</div>
-                    <div className="flex items-center gap-1.5 md:gap-2 text-[10px] md:text-xs font-bold text-amber-600"><div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full bg-amber-400"></div> &gt; 10 mins</div>
-                    <div className="flex items-center gap-1.5 md:gap-2 text-[10px] md:text-xs font-bold text-red-600"><div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full bg-red-500"></div> &gt; 20 mins</div>
+                
+                <div className="flex flex-col sm:flex-row items-start sm:items-center w-full xl:w-auto gap-4">
+                    {/* ⚡ NEW: Global Ticket Search Bar */}
+                    <div className="relative w-full sm:w-[300px] lg:w-[350px]">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        <input
+                            type="text"
+                            placeholder="Search ticket #, table, or name..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all shadow-inner"
+                        />
+                    </div>
+
+                    <div className="hidden md:flex flex-wrap gap-3">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500"><div className="w-2.5 h-2.5 rounded-full bg-slate-200"></div> Standard</div>
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-amber-600"><div className="w-2.5 h-2.5 rounded-full bg-amber-400"></div> &gt; 10m</div>
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-red-600"><div className="w-2.5 h-2.5 rounded-full bg-red-500"></div> &gt; 20m</div>
+                    </div>
                 </div>
             </div>
 
@@ -370,13 +413,23 @@ export default function LiveOrders() {
             </div>
 
             {/* THE KANBAN BOARD */}
-            {orders.length === 0 ? (
+            {filteredOrders.length === 0 ? (
                 <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-3xl border border-dashed border-slate-300 m-2 min-h-[50vh]">
                     <div className="w-16 h-16 md:w-24 md:h-24 bg-slate-50 text-slate-300 rounded-full flex items-center justify-center mb-4 md:mb-6">
-                        <BellRing className="w-8 h-8 md:w-12 md:h-12" />
+                        <Search className="w-8 h-8 md:w-12 md:h-12" />
                     </div>
-                    <h2 className="text-xl md:text-2xl font-black text-slate-800 mb-1 md:mb-2">The Kitchen is Clear</h2>
-                    <p className="text-sm md:text-base text-slate-500 font-medium text-center px-4">Waiting for new orders to arrive...</p>
+                    <h2 className="text-xl md:text-2xl font-black text-slate-800 mb-1 md:mb-2">No tickets found</h2>
+                    <p className="text-sm md:text-base text-slate-500 font-medium text-center px-4">
+                        {searchQuery ? `No orders match "${searchQuery}"` : "Waiting for new orders to arrive..."}
+                    </p>
+                    {searchQuery && (
+                        <button 
+                            onClick={() => setSearchQuery('')}
+                            className="mt-4 bg-indigo-50 text-indigo-600 font-bold px-4 py-2 rounded-lg hover:bg-indigo-100"
+                        >
+                            Clear Search
+                        </button>
+                    )}
                 </div>
             ) : (
                 <div className="flex-1 flex lg:flex-row gap-4 md:gap-6 lg:overflow-x-auto pb-4 custom-scrollbar">
@@ -436,7 +489,7 @@ export default function LiveOrders() {
                 </div>
             )}
 
-            {/* Cancellation Modal ... */}
+            {/* Cancellation Modal */}
             {cancelModal.isOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setCancelModal({ isOpen: false, orderId: null })}></div>
