@@ -23,6 +23,7 @@ import DashboardLayout from "./layouts/DashboardLayout";
 import DashboardOverview from "./components/dashboard/DashboardOverview";
 import StaffManagement from "./components/dashboard/StaffManagement";
 import LiveOrders from "./components/dashboard/LiveOrders";
+import OrderHistory from "./components/dashboard/OrderHistory";
 import MenuManagement from "./components/dashboard/MenuManagement";
 import QRGenerator from "./components/dashboard/QRGenerator";
 import Settings from "./components/dashboard/Settings"
@@ -62,6 +63,7 @@ function App() {
                 
                 <Route path="staff" element={<StaffManagement />} />
                 <Route path="orders" element={<LiveOrders />} />
+                <Route path="history" element={<OrderHistory />} />
                 <Route path="menu" element={<MenuManagement />} />
                 <Route path="qr" element={<QRGenerator />} />
                 <Route path="settings" element={<Settings/>}/>

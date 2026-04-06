@@ -8,6 +8,7 @@ import {
     QrCode, 
     Settings, 
     LogOut,
+    History,
     Store,
     Smartphone,
     Menu,   
@@ -49,6 +50,7 @@ export default function DashboardLayout() {
         { path: '/dashboard', icon: LayoutDashboard, label: 'Overview' },
         // ⚡ Fixed Label and Icon for Live Orders
         { path: '/dashboard/orders', icon: ChefHat, label: 'Live Orders' }, 
+        { path: '/dashboard/history', icon: History, label: 'Order History' }, 
         { path: '/dashboard/menu', icon: MenuSquare, label: 'Menu Engineering' },
         { path: '/dashboard/staff', icon: Users, label: 'Staff' },
         { path: '/dashboard/qr', icon: QrCode, label: 'QR Codes' },

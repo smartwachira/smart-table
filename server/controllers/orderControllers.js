@@ -264,3 +264,46 @@ export const markCashCollected = async (req, res) => {
         res.status(500).json({ message: 'Failed to process cash collection' });
     }
 };
+
+// ⚡ FETCH HISTORICAL ORDERS (For Management Audits)
+export const getHistoricalOrders = async (req, res) => {
+    try {
+        const venueId = req.user.venueId;
+        const { startDate, endDate } = req.query;
+
+        // Construct the date filter securely
+        let dateFilter = {};
+        if (startDate && endDate) {
+            dateFilter = {
+                createdAt: {
+                    [Op.between]: [new Date(startDate), new Date(endDate)]
+                }
+            };
+        }
+
+        const orders = await Order.findAll({
+            where: {
+                venue_id: venueId,
+                ...dateFilter // Apply temporal date filtering
+            },
+            include: [
+                {
+                    model: OrderItem,
+                    include: [MenuItem] 
+                },
+                {
+                    model: User, 
+                    as: 'CashCollector', 
+                    attributes: [['username', 'name']] 
+                }
+            ],
+            order: [['createdAt', 'DESC']] // Newest first for auditing
+        });
+
+        res.status(200).json(orders);
+
+    } catch (error) {
+        console.error('❌ Get History Error:', error);
+        res.status(500).json({ message: 'Failed to fetch order history' });
+    }
+};
