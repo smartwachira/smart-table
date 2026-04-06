@@ -4,6 +4,7 @@ import MenuItem from '../models/MenuItem.js';
 import sequelize from '../config/db.js';
 import { Op } from 'sequelize';
 import Venue from '../models/Venue.js';
+import User from '../models/User.js';
 
 export const createOrder = async (req, res) => {
     const t = await sequelize.transaction(); // Start a "Safety Net"
@@ -40,7 +41,6 @@ export const createOrder = async (req, res) => {
             const realItem = dbItems.find(dbI => dbI.item_id === clientItem.item_id);
             if (!realItem) throw new Error(`Item ${clientItem.item_id} not found`);
 
-            // ⚡ FIX: Add to the total using += instead of overwriting it
             trueTotalAmount += Number(realItem.price) * clientItem.quantity;
 
             return {
@@ -95,25 +95,45 @@ export const createOrder = async (req, res) => {
     }
 };
 
-// Fetch all live active orders for the Kitchen Display System (KDS)
+// Fetch live active orders AND today's completed orders (For the KDS Recall Tab)
 export const getOrders = async (req, res) => {
     try {
-        const venueId = req.user.venueId; // Ensure consistent auth token usage
+        const venueId = req.user.venueId; 
+        
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
 
         const orders = await Order.findAll({
             where: {
                 venue_id: venueId,
-                // ⚡ ENTERPRISE KDS RULE: Only fetch explicitly active states
-                status: { [Op.in]: ['PENDING', 'PREPARING', 'READY'] },
-                [Op.or]: [
-                    { payment_status: 'PAID' },
-                    { payment_method: 'CASH' } // Cash is paid at the table
+                [Op.and]: [
+                    {
+                        [Op.or]: [
+                            { status: { [Op.in]: ['PENDING', 'PREPARING', 'READY'] } },
+                            { 
+                                status: 'COMPLETED',
+                                updatedAt: { [Op.gte]: startOfToday } // Only fetch completed orders from today
+                            }
+                        ]
+                    },
+                    {
+                        [Op.or]: [
+                            { payment_status: 'PAID' },
+                            { payment_method: 'CASH' } 
+                        ]
+                    }
                 ]
             },
             include: [
                 {
                     model: OrderItem,
-                    include: [MenuItem] // Ensure we get the menu item names
+                    include: [MenuItem] 
+                },
+                {
+                    model: User, 
+                    as: 'CashCollector', 
+                    // ⚡ FIX: Double brackets create an alias -> Fetches 'username' but outputs it as 'name'
+                    attributes: [['username', 'name']] 
                 }
             ],
             order: [['createdAt', 'ASC']] // Oldest orders first (FIFO)
@@ -130,7 +150,6 @@ export const getOrders = async (req, res) => {
 // Update Order status (State Machine)
 export const updateOrderStatus = async (req, res) => {
     try {
-        // ⚡ FIX: Get orderId from params to match the router (/:orderId/status)
         const { orderId } = req.params;
         const { status, cancelReason } = req.body;
         const venueId = req.user.venueId;
@@ -139,43 +158,43 @@ export const updateOrderStatus = async (req, res) => {
         
         if (!status) return res.status(400).json({ message: "Status is required." });
 
-        // ⚡ FIX: Corrected typo from toUppercase() to toUpperCase()
         const upperStatus = status.toUpperCase();
 
-        // ⚡ FIX: Validate against the properly capitalized status
         if (!validStates.includes(upperStatus)) {
             return res.status(400).json({ 
                 message: `Invalid status transition. Allowed status: ${validStates.join(', ')}` 
             });
         }
 
-        // Find the order securely
         const order = await Order.findOne({ where: { order_id: orderId, venue_id: venueId } });
 
         if (!order) {
             return res.status(404).json({ message: 'Order not found' });
         }
 
-        // Only Managers/Owners should cancel orders, Waiters/Kitchen can only move forward
+        // ⚡ REVENUE LEAKAGE FIX: Prevent completing an unpaid order
+        if (upperStatus === 'COMPLETED' && order.payment_status !== 'PAID') {
+            return res.status(403).json({ 
+                message: "Order cannot be completed until payment is received (Mark as Cash Collected or await M-Pesa)." 
+            });
+        }
+
+        // Only Managers/Owners should cancel orders
         if (upperStatus === 'CANCELLED' && !['MANAGER', 'OWNER'].includes(req.user.role)) {
             return res.status(403).json({ message: "Only managers can cancel active orders." });
         }
 
-        // Update the status
         order.status = upperStatus;
         
         if (upperStatus === 'CANCELLED') {
             const reasonText = cancelReason || 'No reason provided';
             order.notes = order.notes ? `${order.notes} | Cancelled: ${reasonText}` : `Cancelled: ${reasonText}`;
-            // NOTE: In production, trigger M-Pesa reversal or Void Ledger entry here
         }
         
-        // This will automatically update `updatedAt`, which powers the dashboard fulfillment metrics!
         await order.save();
 
         const io = req.app.get('socketio');
         if (io) {
-            // ⚡ FIX: Corrected orderId key for your Sequelize model
             io.to(venueId).emit("orderUpdated", {
                 newStatus: upperStatus,
                 orderId: order.order_id
@@ -211,7 +230,8 @@ export const markCashCollected = async (req, res) => {
     try {
         const { orderId } = req.params;
         const venueId = req.user.venueId;
-        const staffId = req.user.id; // Assuming your JWT payload includes the user's ID
+        // Safeguard: use userId or id depending on your JWT payload structure
+        const staffId = req.user.userId || req.user.id; 
 
         const order = await Order.findOne({ where: { order_id: orderId, venue_id: venueId } });
 
@@ -222,16 +242,22 @@ export const markCashCollected = async (req, res) => {
         // Update status and stamp the audit trail
         order.payment_status = 'PAID';
         order.cash_collected_by = staffId; 
+
+        // Fetch the EXACT name from the database to guarantee integrity
+        const staffMember = await User.findByPk(staffId, { attributes: ['username'] });
+
+        // Attach the exact DB name to the response object using the 'name' property expected by frontend
+        const updatedOrderData = order.toJSON();
+        updatedOrderData.CashCollector = { name: staffMember?.username || 'Unknown Staff' };
         
         await order.save();
 
-        // Broadcast the update so the UI removes the "Collect Cash" warning instantly
         const io = req.app.get('socketio');
         if (io) {
             io.to(venueId).emit("orderUpdated", { orderId: order.order_id });
         }
 
-        res.json({ message: 'Cash collected and logged successfully', order });
+        res.json({ message: 'Cash collected and logged successfully', order: updatedOrderData });
 
     } catch (error) {
         console.error('Error collecting cash:', error);

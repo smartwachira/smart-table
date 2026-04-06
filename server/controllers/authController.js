@@ -10,10 +10,11 @@ const generateToken = (user)=>{
     return jwt.sign(
         { userId: user.user_id,
             role: user.role,
-            venueId: user.venue_id
+            venueId: user.venue_id,
+            name: user.username
         },
         JWT_SECRET,
-        { expiresIn: '12h'}
+        { expiresIn: '1d'}
 
     );
 };
@@ -64,7 +65,8 @@ export const registerVenue = async ( req, res) =>{
             user: { 
                 name: newOwner.username,
                 role: newOwner.role,
-                venue_id: newOwner.venue_id
+                venue_id: newOwner.venue_id,
+                name:newOwner.username
             }
          })
     } catch (error){
@@ -170,7 +172,8 @@ export const managerLogin = async (req,res ) =>{
             user: {
                 name:user.username,
                 role:user.role,
-                venue_id: user.venue_id
+                venue_id: user.venue_id,
+                name:user.username
             }
         })
     } catch (error){
@@ -204,7 +207,9 @@ export const staffLogin = async (req,res)=>{
             user: {
                 username:user.username,
                 role: user.role,
-                venue_id: user.venue_id
+                venue_id: user.venue_id,
+                name:user.username
+
             },
              message: 'Login successful',
             

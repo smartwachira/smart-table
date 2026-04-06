@@ -26,6 +26,7 @@ export const protect = (req, res, next) => {
         req.user = {
             userId: decoded.userId,
             role: decoded.role,
+            name: decoded.name,
             venueId: decoded.venueId // CRITICAL: Implicit Multi-tenant boundary
         };
         next();

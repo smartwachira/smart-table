@@ -1,160 +1,102 @@
 import sequelize from './config/db.js';
 import crypto from 'crypto';
 import Venue from './models/Venue.js';
-import MenuCategory from './models/MenuCategory.js';
 import MenuItem from './models/MenuItem.js';
 import Order from './models/Order.js';
 import OrderItem from './models/OrderItem.js';
 
-const customerNames = ['Alex', 'Sarah', 'John', 'Jane', 'Mike', 'Emma', 'Chris', 'Njeri', 'Kamau', 'Wanjiku', 'Ochieng', 'Guest'];
-const tableNumbers = ['T-1', 'T-2', 'T-3', 'T-4', 'VIP-1', 'VIP-2', 'Bar', 'Takeaway'];
-const paymentMethods = ['M-PESA', 'M-PESA', 'M-PESA', 'CASH', 'CARD']; // Weighted towards M-PESA
+const customerNames = ['Kamau', 'Sarah', 'Guest', 'Njeri', 'Ochieng', 'Alex'];
+const tableNumbers = ['T-1', 'T-2', 'VIP-1', 'Bar', 'Takeaway'];
 
-const generateAdvancedSeedData = async () => {
+const seedLiveOrders = async () => {
     try {
         console.log('⏳ Connecting to database...');
         await sequelize.authenticate();
         
-        // 1. Wipe existing Orders and OrderItems
-        console.log('🧹 Wiping old orders for a clean slate...');
-        await OrderItem.destroy({ where: {} });
-        await Order.destroy({ where: {} });
-        console.log('✨ Database slate wiped clean.');
-
-        // 2. Fetch Venue & Menu
+        // 1. Fetch Venue & Menu
         const venue = await Venue.findOne();
         if (!venue) throw new Error('No venues found. Please create a venue first.');
 
-        const categories = await MenuCategory.findAll({ where: { venue_id: venue.venue_id } });
-        const categoryIds = categories.map(c => c.category_id);
-        if (categoryIds.length === 0) throw new Error('No menu categories found. Please seed categories.');
+        const menuItems = await MenuItem.findAll({ limit: 10 });
+        if (menuItems.length === 0) throw new Error('No menu items found.');
 
-        const menuItems = await MenuItem.findAll({ where: { category_id: categoryIds } });
-        if (menuItems.length === 0) throw new Error('No menu items found. Please seed menu items.');
-
-        console.log(`✅ Found Venue: ${venue.name} with ${menuItems.length} menu items.`);
-        console.log('🚀 Generating realistic enterprise dataset...');
+        console.log(`✅ Found Venue: ${venue.name}`);
+        console.log('🚀 Injecting Live KDS Test Data (Keeping old data safe)...');
 
         const ordersToInsert = [];
         const orderItemsToInsert = [];
-        const now = new Date();
+        const now = Date.now();
 
-        // --- PART A: Generate Historical Orders (Past 60 Days) ---
-        // Simulates the historical curve for the Recharts graphs
-        for (let i = 0; i < 250; i++) {
-            // Random date between 60 days ago and 1 day ago
-            const daysAgo = Math.floor(Math.random() * 60) + 1; 
-            const createdDate = new Date(now.getTime() - (daysAgo * 24 * 60 * 60 * 1000));
-            // Randomize hour to simulate lunch/dinner rushes (11am to 10pm)
-            createdDate.setHours(Math.floor(Math.random() * 11) + 11, Math.floor(Math.random() * 60), 0, 0);
+        // --- THE SCENARIOS TO TEST ---
+        const scenarios = [
+            // PENDING (New Tickets)
+            { status: 'PENDING', minsAgo: 2, payMethod: 'M-PESA', payStatus: 'PAID' }, // Standard
+            { status: 'PENDING', minsAgo: 12, payMethod: 'CASH', payStatus: 'PENDING' }, // Amber Warning + Collect Cash
+            { status: 'PENDING', minsAgo: 22, payMethod: 'M-PESA', payStatus: 'PAID' }, // Red Critical
 
-            // Simulate kitchen time: Completed 8 to 35 minutes later
-            const fulfillmentMinutes = Math.floor(Math.random() * 27) + 8;
-            const updatedDate = new Date(createdDate.getTime() + (fulfillmentMinutes * 60000));
+            // PREPARING (Cooking)
+            { status: 'PREPARING', minsAgo: 5, payMethod: 'CASH', payStatus: 'PENDING' }, // Standard + Collect Cash
+            { status: 'PREPARING', minsAgo: 15, payMethod: 'M-PESA', payStatus: 'PAID' }, // Amber Warning
+            { status: 'PREPARING', minsAgo: 25, payMethod: 'CARD', payStatus: 'PAID' }, // Red Critical
 
-            const paymentMethod = paymentMethods[Math.floor(Math.random() * paymentMethods.length)];
-            
-            // Select random items
-            const numItems = Math.floor(Math.random() * 4) + 1;
-            let totalAmount = 0;
-            const itemsForThisOrder = [];
+            // READY (Awaiting Pickup)
+            { status: 'READY', minsAgo: 8, payMethod: 'M-PESA', payStatus: 'PAID' }, // Standard
+            { status: 'READY', minsAgo: 18, payMethod: 'CASH', payStatus: 'PENDING' }, // Amber Warning + Collect Cash
 
-            for (let j = 0; j < numItems; j++) {
-                const item = menuItems[Math.floor(Math.random() * menuItems.length)];
-                const quantity = Math.floor(Math.random() * 3) + 1;
-                totalAmount += (Number(item.price) * quantity);
-                itemsForThisOrder.push({ item, quantity });
-            }
+            // COMPLETED (Recall Tab - Served earlier today)
+            { status: 'COMPLETED', minsAgo: 45, payMethod: 'M-PESA', payStatus: 'PAID' },
+            { status: 'COMPLETED', minsAgo: 90, payMethod: 'CASH', payStatus: 'PAID' },
+            { status: 'COMPLETED', minsAgo: 120, payMethod: 'M-PESA', payStatus: 'PAID' }
+        ];
 
-            // Create Order Payload (Historical orders are mostly COMPLETED or CANCELLED)
-            const isCancelled = Math.random() > 0.95; // 5% cancellation rate
+        for (const scenario of scenarios) {
+            const createdDate = new Date(now - (scenario.minsAgo * 60000));
             const orderId = crypto.randomUUID(); 
-
-            ordersToInsert.push({
-                order_id: orderId,
-                venue_id: venue.venue_id,
-                table_number: tableNumbers[Math.floor(Math.random() * tableNumbers.length)],
-                customer_name: customerNames[Math.floor(Math.random() * customerNames.length)],
-                payment_method: paymentMethod,
-                status: isCancelled ? 'CANCELLED' : 'COMPLETED',
-                payment_status: isCancelled ? 'FAILED' : 'PAID',
-                total_amount: totalAmount,
-                createdAt: createdDate,
-                updatedAt: updatedDate
-            });
-
-            // Link items to this specific order ID using your exact schema
-            itemsForThisOrder.forEach(({ item, quantity }) => {
-                orderItemsToInsert.push({
-                    order_id: orderId,
-                    item_id: item.item_id, // Mapped accurately to your model
-                    price_at_time: item.price, // Mapped accurately to your model
-                    quantity: quantity
-                });
-            });
-        }
-
-        // --- PART B: Generate "Live Pulse" Orders (Today) ---
-        // Simulates orders sitting on the expeditor screen right now
-        const liveStatuses = ['PENDING', 'PREPARING', 'READY'];
-        
-        for (let i = 0; i < 8; i++) {
-            // Created within the last 45 minutes
-            const minutesAgo = Math.floor(Math.random() * 45);
-            const createdDate = new Date(now.getTime() - (minutesAgo * 60000));
             
-            const paymentMethod = paymentMethods[Math.floor(Math.random() * paymentMethods.length)];
-            const status = liveStatuses[Math.floor(Math.random() * liveStatuses.length)];
-            
+            // Pick random items
             let totalAmount = 0;
-            const itemsForThisOrder = [];
             const numItems = Math.floor(Math.random() * 3) + 1;
-
+            
             for (let j = 0; j < numItems; j++) {
                 const item = menuItems[Math.floor(Math.random() * menuItems.length)];
                 const quantity = Math.floor(Math.random() * 2) + 1;
                 totalAmount += (Number(item.price) * quantity);
-                itemsForThisOrder.push({ item, quantity });
-            }
-
-            const orderId = crypto.randomUUID();
-
-            ordersToInsert.push({
-                order_id: orderId,
-                venue_id: venue.venue_id,
-                table_number: tableNumbers[Math.floor(Math.random() * tableNumbers.length)],
-                customer_name: customerNames[Math.floor(Math.random() * customerNames.length)],
-                payment_method: paymentMethod,
-                status: status,
-                payment_status: paymentMethod === 'M-PESA' ? 'PAID' : 'PENDING',
-                total_amount: totalAmount,
-                createdAt: createdDate,
-                updatedAt: createdDate // Hasn't been completed yet
-            });
-
-            itemsForThisOrder.forEach(({ item, quantity }) => {
+                
                 orderItemsToInsert.push({
                     order_id: orderId,
                     item_id: item.item_id, 
                     price_at_time: item.price,
                     quantity: quantity
                 });
+            }
+
+            ordersToInsert.push({
+                order_id: orderId,
+                venue_id: venue.venue_id,
+                table_number: tableNumbers[Math.floor(Math.random() * tableNumbers.length)],
+                customer_name: customerNames[Math.floor(Math.random() * customerNames.length)],
+                payment_method: scenario.payMethod,
+                status: scenario.status,
+                payment_status: scenario.payStatus,
+                total_amount: totalAmount,
+                createdAt: createdDate,
+                updatedAt: scenario.status === 'COMPLETED' ? new Date(createdDate.getTime() + 15*60000) : createdDate
             });
         }
 
-        // 3. Bulk Insert Everything into Postgres
-        console.log('💾 Injecting data into PostgreSQL...');
+        // 2. Bulk Insert safely alongside your existing data
+        console.log('💾 Appending orders into PostgreSQL...');
         await Order.bulkCreate(ordersToInsert);
         await OrderItem.bulkCreate(orderItemsToInsert);
 
-        console.log(`🎉 Success! ${ordersToInsert.length} orders and ${orderItemsToInsert.length} items securely injected.`);
-        console.log('📊 Go check your Dashboard Overview and Live Orders tabs!');
+        console.log(`🎉 Success! 11 meticulously timed orders injected.`);
+        console.log('📊 Head to the Live Orders tab to test the Kanban board!');
         process.exit(0);
 
     } catch (error) {
-        console.error('🔥 Failed to seed orders:', error);
+        console.error('🔥 Failed to seed live orders:', error);
         process.exit(1);
     }
 };
 
-generateAdvancedSeedData();
+seedLiveOrders();

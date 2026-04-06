@@ -118,6 +118,8 @@ OrderItem.belongsTo(Order, {foreignKey: "order_id"});
 MenuItem.hasMany(OrderItem, {foreignKey: 'item_id'});
 OrderItem.belongsTo(MenuItem, {foreignKey: 'item_id'});
 
+
+
 Venue.hasMany(User, { 
   foreignKey: 'venue_id',
   onDelete: 'CASCADE',
@@ -126,6 +128,15 @@ Venue.hasMany(User, {
 User.belongsTo(Venue, {
   foreignKey: "venue_id",
   as: 'venue'
+})
+
+User.hasMany(Order, {
+  foreignKey: 'cash_collected_by',
+  as: 'CollectedOrders'
+})
+Order.belongsTo(User, {
+  foreignKey: 'cash_collected_by',
+  as: 'CashCollector'
 })
 
 //Routes

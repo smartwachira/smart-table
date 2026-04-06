@@ -22,7 +22,8 @@ export const AuthProvider = ({ children }) =>{
             setUser({
             userId: decoded.userId,
             role: decoded.role,
-            venueId: decoded.venueId
+            venueId: decoded.venueId,
+            name:decoded.name
         });
 
         } catch (error) {
