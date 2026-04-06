@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import { 
   Search, Plus, Edit2, X, Check, Image as ImageIcon, 
-  UtensilsCrossed, AlertCircle, UploadCloud
+  UtensilsCrossed, AlertCircle, UploadCloud, Trash2
 } from 'lucide-react';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
@@ -124,6 +124,35 @@ export default function MenuManagement() {
     }
   };
 
+  // ⚡ NEW: Handle Category Deletion
+  const handleDeleteCategory = async (e, categoryId, categoryName) => {
+    e.stopPropagation(); 
+    if (!window.confirm(`Are you sure you want to delete the "${categoryName}" category?`)) return;
+
+    try {
+      await axios.delete(`/api/menu/categories/${categoryId}`, config);
+      setCategories(categories.filter(c => c.category_id !== categoryId));
+      if (activeCategory === categoryId) setActiveCategory('all');
+      toast.success('Category deleted.');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to delete category.');
+    }
+  };
+
+  // ⚡ NEW: Handle Item Deletion
+  const handleDeleteItem = async (e, itemId, itemName) => {
+    e.stopPropagation();
+    if (!window.confirm(`Are you sure you want to completely delete "${itemName}"?`)) return;
+
+    try {
+      await axios.delete(`/api/menu/items/${itemId}`, config);
+      setItems(items.filter(i => i.item_id !== itemId));
+      toast.success('Item deleted permanently.');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to delete item.', { duration: 5000 });
+    }
+  };
+
   const openDrawer = (item = null) => {
     setEditingItem(item);
     setIsDrawerOpen(true);
@@ -181,9 +210,19 @@ export default function MenuManagement() {
                 }`}
               >
                 <span className="truncate max-w-[120px] md:max-w-none">{cat.name}</span>
-                <span className={`text-[10px] md:text-xs px-2 py-0.5 rounded-full ${activeCategory === cat.category_id ? 'bg-indigo-500 text-white' : 'bg-slate-200 md:bg-slate-200 text-slate-600 group-hover:bg-slate-300'}`}>
-                  {itemCount}
-                </span>
+                <div className="flex items-center gap-1.5 md:gap-2">
+                  <span className={`text-[10px] md:text-xs px-2 py-0.5 rounded-full ${activeCategory === cat.category_id ? 'bg-indigo-500 text-white' : 'bg-slate-200 md:bg-slate-200 text-slate-600 group-hover:bg-slate-300'}`}>
+                    {itemCount}
+                  </span>
+                  {/* ⚡ NEW: Delete Category Button */}
+                  <div 
+                    onClick={(e) => handleDeleteCategory(e, cat.category_id, cat.name)}
+                    className={`p-1.5 md:p-2 rounded-lg transition-colors ${activeCategory === cat.category_id ? 'hover:bg-indigo-500 text-white' : 'hover:bg-red-100 text-slate-400 hover:text-red-600'} hidden group-hover:flex items-center justify-center`}
+                    title="Delete Category"
+                  >
+                    <Trash2 size={14} />
+                  </div>
+                </div>
               </button>
             )
           })}
@@ -245,7 +284,7 @@ export default function MenuManagement() {
         {/* Item Grid */}
         <div className="flex-1 overflow-y-auto p-3 md:p-6 pb-24 custom-scrollbar">
           {isLoading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-4 md:gap-6 animate-pulse">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6 animate-pulse">
               {[1, 2, 3, 4, 5, 6].map(n => (
                 <div key={n} className="bg-white rounded-2xl h-[280px] border border-slate-100 shadow-sm"></div>
               ))}
@@ -287,14 +326,26 @@ export default function MenuManagement() {
                       </div>
                     )}
 
-                    {/* Quick Edit Button - Always visible on mobile, hover on desktop */}
-                    <button 
-                      onClick={() => openDrawer(item)}
-                      className="absolute top-3 right-3 p-2 md:p-2.5 bg-white/90 backdrop-blur-sm text-slate-700 hover:text-indigo-600 rounded-xl shadow-sm md:opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100 active:scale-95"
-                      aria-label="Edit Item"
-                    >
-                      <Edit2 size={16} />
-                    </button>
+                    {/* ⚡ NEW: Action Buttons Container */}
+                    <div className="absolute top-3 right-3 flex flex-col gap-2 md:opacity-0 group-hover:opacity-100 transition-opacity focus-within:opacity-100">
+                      {/* Quick Edit Button */}
+                      <button 
+                        onClick={() => openDrawer(item)}
+                        className="p-2 md:p-2.5 bg-white/90 backdrop-blur-sm text-slate-700 hover:text-indigo-600 rounded-xl shadow-sm active:scale-95"
+                        aria-label="Edit Item"
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                      
+                      {/* Quick Delete Button */}
+                      <button 
+                        onClick={(e) => handleDeleteItem(e, item.item_id, item.name)}
+                        className="p-2 md:p-2.5 bg-white/90 backdrop-blur-sm text-slate-700 hover:text-red-600 rounded-xl shadow-sm active:scale-95"
+                        aria-label="Delete Item"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </div>
 
                   {/* Card Content */}

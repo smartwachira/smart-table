@@ -172,6 +172,80 @@ export const getPublicMenu = async (req,res)=>{
     }
 }
 
+// ⚡ DELETE CATEGORY (Only if empty)
+export const deleteCategory = async (req, res) => {
+    try {
+        const { categoryId } = req.params;
+        const venueId = req.user.venueId;
 
+        // 1. Find the category and verify ownership securely
+        const category = await MenuCategory.findByPk(categoryId);
+        
+        if (!category) {
+            return res.status(404).json({ message: "Category not found." });
+        }
+        
+        if (category.venue_id !== venueId) {
+            return res.status(403).json({ message: "Unauthorized to delete this category." });
+        }
 
+        // 2. Safety Check: Does it contain items? 
+        // We only need to check category_id here because we already proved the category belongs to the venue.
+        const itemsCount = await MenuItem.count({ where: { category_id: categoryId } });
+        
+        if (itemsCount > 0) {
+            return res.status(400).json({ 
+                message: "Cannot delete category because it still contains items. Move or delete the items first." 
+            });
+        }
 
+        // 3. Execute the safe delete
+        await category.destroy();
+
+        res.status(200).json({ message: "Category deleted successfully." });
+    } catch (error) {
+        console.error("Delete Category Error:", error);
+        res.status(500).json({ message: "Failed to delete category." });
+    }
+};
+
+// ⚡ DELETE MENU ITEM (Safe Delete)
+export const deleteMenuItem = async (req, res) => {
+    try {
+        const { itemId } = req.params;
+        const venueId = req.user.venueId;
+
+        // 1. Find the specific menu item
+        const item = await MenuItem.findByPk(itemId);
+        
+        if (!item) {
+            return res.status(404).json({ message: "Item not found." });
+        }
+
+        // 2. Relational Security Check: Verify the venue owns this item's category
+        const category = await MenuCategory.findByPk(item.category_id);
+        
+        if (!category || category.venue_id !== venueId) {
+            return res.status(403).json({ message: "Unauthorized to delete this item." });
+        }
+
+        // 3. Attempt the Safe Delete
+        try {
+            await item.destroy(); 
+            res.status(200).json({ message: "Item deleted successfully." });
+            
+        } catch (dbError) {
+            // Safety Check: Is it linked to past orders in the OrderItems table?
+            if (dbError.name === 'SequelizeForeignKeyConstraintError') {
+                return res.status(400).json({ 
+                    message: "Cannot delete this item because it is linked to past orders and receipts. Please mark it as 'Sold Out' (Unavailable) instead to preserve your accounting history." 
+                });
+            }
+            throw dbError; // Pass other DB errors to the outer catch block
+        }
+        
+    } catch (error) {
+        console.error("Delete Menu Item Error:", error);
+        res.status(500).json({ message: "Failed to delete menu item." });
+    }
+};

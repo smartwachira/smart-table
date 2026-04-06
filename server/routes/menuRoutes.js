@@ -18,13 +18,9 @@ router.post('/categories', menuController.createCategory);
 
 //3. Menu Item Routes
 router.get('/items', menuController.getMenuItems);
-
-// ⚡ The crucial part: upload.single('image') intercepts the request, saves the file to disk, 
-// and attaches the file data to req.file before passing it to createMenuItem.
-// 'image' MUST exactly match the key used in React: payload.append('image', imageFile)
 router.post('/items', upload.single('image'), menuController.createMenuItem);
-
-// PATCH is better than PUT for partial updates (like just toggling availability)
 router.patch('/items/:itemId',upload.single('image'), menuController.updatedMenuItem);
+router.delete('/categories/:categoryId', protect, menuController.deleteCategory);
+router.delete('/items/:itemId', protect, menuController.deleteMenuItem);
 
 export default router;
