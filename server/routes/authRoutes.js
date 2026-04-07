@@ -17,5 +17,10 @@ router.post('/login/staff',authController.staffLogin);
 router.post('/register/staff', protect, authorize('OWNER', 'MANAGER'), authController.registerStaff);
 router.get('/staff',protect,authController.getStaff);
 router.patch('/staff/:staffId/status',protect,authorize,authController.toggleStaffStatus)
+// Update Staff Member Details (Role / Username)
+router.patch('/staff/:id', protect, authorize('OWNER', 'MANAGER'), authController.updateStaff);
+
+// Delete Staff Member Permanently
+router.delete('/staff/:id', protect, authorize('OWNER', 'MANAGER'), authController.deleteStaff);
 
 export default router;

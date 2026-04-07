@@ -297,3 +297,56 @@ export const toggleStaffStatus = async (req, res) => {
         res.status(500).json({ message: "Failed to update staff status." });
     }
 };
+
+// ⚡ UPDATE STAFF DETAILS
+export const updateStaff = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { username, role } = req.body;
+        const venueId = req.user.venueId;
+
+        const staffMember = await User.findOne({ where: { user_id: id, venue_id: venueId } });
+        if (!staffMember) return res.status(404).json({ message: 'Staff member not found.' });
+
+        // Enterprise Safeguard: Managers cannot edit Owners
+        if (staffMember.role === 'OWNER' && req.user.role !== 'OWNER') {
+            return res.status(403).json({ message: 'Unauthorized. Only Owners can edit Owners.' });
+        }
+
+        staffMember.username = username || staffMember.username;
+        if (role) staffMember.role = role;
+
+        await staffMember.save();
+        res.status(200).json({ message: 'Staff updated successfully.', user: staffMember });
+    } catch (error) {
+        console.error('Error updating staff:', error);
+        res.status(500).json({ message: 'Server error updating staff.' });
+    }
+};
+
+// ⚡ DELETE STAFF
+export const deleteStaff = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const venueId = req.user.venueId;
+
+        // Enterprise Safeguard: Prevent self-deletion
+        if (id === req.user.id || id === req.user.userId) {
+            return res.status(400).json({ message: 'You cannot delete your own account.' });
+        }
+
+        const staffMember = await User.findOne({ where: { user_id: id, venue_id: venueId } });
+        if (!staffMember) return res.status(404).json({ message: 'Staff member not found.' });
+
+        // Enterprise Safeguard: Managers cannot delete Owners
+        if (staffMember.role === 'OWNER' && req.user.role !== 'OWNER') {
+            return res.status(403).json({ message: 'Unauthorized. You cannot delete an Owner account.' });
+        }
+
+        await staffMember.destroy();
+        res.status(200).json({ message: 'Staff member deleted permanently.' });
+    } catch (error) {
+        console.error('Error deleting staff:', error);
+        res.status(500).json({ message: 'Server error deleting staff.' });
+    }
+};
