@@ -16,11 +16,12 @@ router.post('/login/staff',authController.staffLogin);
 // Protected Routes (Requires a valid JWT + specific role)
 router.post('/register/staff', protect, authorize('OWNER', 'MANAGER'), authController.registerStaff);
 router.get('/staff',protect,authController.getStaff);
-router.patch('/staff/:staffId/status',protect,authorize,authController.toggleStaffStatus)
-// Update Staff Member Details (Role / Username)
+router.patch('/staff/:id/status', protect, authorize('OWNER', 'MANAGER'), authController.toggleStaffStatus);
+
+// 2. PIN reset must be SECOND
+router.patch('/staff/:id/pin', protect, authorize('OWNER', 'MANAGER'), authController.resetStaffPin);
+
+// 3. General update must be LAST
 router.patch('/staff/:id', protect, authorize('OWNER', 'MANAGER'), authController.updateStaff);
-
-// Delete Staff Member Permanently
 router.delete('/staff/:id', protect, authorize('OWNER', 'MANAGER'), authController.deleteStaff);
-
 export default router;

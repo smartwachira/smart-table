@@ -253,46 +253,57 @@ export const getStaff = async (req, res) =>{
 export const toggleStaffStatus = async (req, res) => {
     try {
         const managerVenueId = req.user.venueId;
-        const executingUserId = req.user.userId;
-        const { staffId } = req.params;       // The UUID from the URL
-        const { is_active } = req.body;       // 🌟 The new boolean sent from your React frontend
-
-        // 1. Find the user (FIXED: Changed 'user_id' to 'id' to match your DB)
-        const staff = await User.findOne({ 
-            where: { id: staffId, venue_id: managerVenueId } 
-        });
+        const executingUserId = req.user.userId || req.user.id; 
         
-        if (!staff) return res.status(404).json({ message: 'Staff member not found.' });
+        // ⚡ FIX 1: Catch the ID no matter what you named it in authRoutes.js
+        const targetId = req.params.id || req.params.staffId;       
+        const { is_active } = req.body;       
 
-        // SAFEGUARD 1: Cannot suspend yourself (FIXED: staff.id)
-        if (staff.id === executingUserId){
-            return res.status(403).json({ message: 'You cannot suspend your own account.' })
+        console.log(`\n--- 🛑 SUSPEND ACCESS DEBUG ---`);
+        console.log(`Targeting User ID:`, targetId);
+        console.log(`Requested Status:`, is_active);
+
+        if (!targetId) {
+            return res.status(400).json({ message: "Critical Error: No user ID reached the controller." });
         }
 
-        // SAFEGUARD 2: Nobody can suspend the Master Owner (Added toUpperCase for safety)
-        if (staff.role.toUpperCase() === 'OWNER'){
+        // Find the user to check safeguards
+        const staff = await User.findOne({ 
+            where: { user_id: targetId, venue_id: managerVenueId } 
+        });
+        
+        if (!staff) {
+            console.log(`❌ User not found in DB!`);
+            return res.status(404).json({ message: 'Staff member not found.' });
+        }
+
+        // SAFEGUARDS
+        if (staff.user_id === executingUserId) {
+            return res.status(403).json({ message: 'You cannot suspend your own account.' });
+        }
+        if (staff.role.toUpperCase() === 'OWNER') {
             return res.status(403).json({ message: 'The Master Owner account cannot be suspended.' });
         }
 
-        // SAFEGUARD 3: Managers cannot suspend other Managers (Only Owners can)
-        if(staff.role.toUpperCase() === 'MANAGER' && req.user.role.toUpperCase() !== 'OWNER'){
-            return res.status(403).json({ message: "Only Owners can suspend Manager accounts." });
+        // ⚡ FIX 2: Force a direct SQL update to bypass any Sequelize instance caching bugs
+        const [updatedRows] = await User.update(
+            { is_active: is_active },
+            { where: { user_id: targetId, venue_id: managerVenueId } }
+        );
+
+        console.log(`✅ Database Rows Updated:`, updatedRows);
+        console.log(`------------------------------\n`);
+
+        if (updatedRows === 0) {
+            return res.status(500).json({ message: "Database received the command but failed to modify the row." });
         }
-        
-        // 2. Apply the targeted state (Fallback to simple toggle if frontend didn't send it)
-        staff.is_active = is_active !== undefined ? is_active : !staff.is_active;
-        
-        // 3. Save to database (FIXED: staff.save() instead of staffMember.save())
-        await staff.save();
 
         res.status(200).json({ 
-            // 4. Formatted string (FIXED: using staff.is_active)
-            message: `Staff member is now ${staff.is_active ? 'Active' : 'Suspended'}`,
-            is_active: staff.is_active
+            message: `Staff member is now ${is_active ? 'Active' : 'Suspended'}`,
+            is_active: is_active
         });
 
     } catch (error) {
-        // 🌟 THE LIFESAVER: This prevents the server from crashing!
         console.error("Toggle Status Error:", error);
         res.status(500).json({ message: "Failed to update staff status." });
     }
@@ -302,7 +313,7 @@ export const toggleStaffStatus = async (req, res) => {
 export const updateStaff = async (req, res) => {
     try {
         const { id } = req.params;
-        const { username, role } = req.body;
+        const { username, role,email,password,pin } = req.body;
         const venueId = req.user.venueId;
 
         const staffMember = await User.findOne({ where: { user_id: id, venue_id: venueId } });
@@ -311,6 +322,43 @@ export const updateStaff = async (req, res) => {
         // Enterprise Safeguard: Managers cannot edit Owners
         if (staffMember.role === 'OWNER' && req.user.role !== 'OWNER') {
             return res.status(403).json({ message: 'Unauthorized. Only Owners can edit Owners.' });
+        }
+
+        const isCurrentlyManager = ['MANAGER','OWNER'].includes(staffMember.role);
+        const isBecomingManager = ['MANAGER','OWNER'].includes(role);
+
+        //1. Handle Promotion (Waiter -> Manager)
+        if (!isCurrentlyManager && isBecomingManager){
+            if (!email || !password) return res.status(400).json({ message: 'Email and password are required for Dashboard access.'});
+
+            const emailExists = await User.findOne({ where: { email }});
+            if (emailExists) return res.status(400).json({ message: 'Email already in use.'});
+
+            staffMember.email = email;
+            const salt = await bcrypt.genSalt(10);
+            staffMember.password = await bcrypt.hash(password, salt);
+            staffMember.pin = null;
+        }
+        //2 Handle Demotion (Manager-> Waiter)
+        if (isCurrentlyManager && !isBecomingManager){
+            if (!pin || pin.length !==4) return res.status(400).json({ message: 'A 4-digit PIN is required for POS/KDS access.'});
+
+            staffMember.pin = pin;
+            staffMember.email = null;
+            staffMember.password_hash = null;
+        }
+
+        // 3. Handle Same-Role Updates (Manager to Manager)
+        if (isCurrentlyManager && isBecomingManager) {
+            if (email && email !== staffMember.email) {
+                const emailExists = await User.findOne({ where: { email } });
+                if (emailExists && emailExists.user_id !== id) return res.status(400).json({ message: 'Email already in use.' });
+                staffMember.email = email;
+            }
+            if (password) { // Only hash and save if they explicitly typed a new password
+                const salt = await bcrypt.genSalt(10);
+                staffMember.password = await bcrypt.hash(password, salt);
+            }
         }
 
         staffMember.username = username || staffMember.username;
@@ -350,3 +398,29 @@ export const deleteStaff = async (req, res) => {
         res.status(500).json({ message: 'Server error deleting staff.' });
     }
 };
+
+// ⚡ RESET ACCESS PIN
+export const resetStaffPin = async (req, res) =>{
+    try{
+        const {id} = req.params;
+        const { pin } = req.body;
+        const venueId = req.user.venueId;
+
+        if (!pin || pin.length !== 4) return res.status(400).json({ message: "A valid 4-digits PIN is required."});
+
+        const staffMember = await User.findOne({ where: { user_id: id,venue_id: venueId}});
+        if (!staffMember) return res.status(404).json({ message: "Staff member not found."});
+
+        if (['MANAGER', 'OWNER'].includes(staffMember.role)) {
+            return res.status(400).json({ message: 'Managers and Owners use Passwords, not PINs.' });
+        }
+
+        staffMember.pin = pin;
+        await staffMember.save();
+
+        res.status(200).json({ message: 'Access PIN reset successfully.', newPin: pin });
+    } catch (error) {
+        console.error('Error resetting PIN:', error);
+        res.status(500).json({ message: 'Server error resetting PIN.' });
+    }
+}
