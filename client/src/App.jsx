@@ -26,7 +26,8 @@ import LiveOrders from "./components/dashboard/LiveOrders";
 import OrderHistory from "./components/dashboard/OrderHistory";
 import MenuManagement from "./components/dashboard/MenuManagement";
 import QRGenerator from "./components/dashboard/QRGenerator";
-import Settings from "./components/dashboard/Settings"
+import Settings from "./components/dashboard/Settings";
+import QRGateway from "./components/QRGateway";
 
 // --- Terminal Components ---
 import Kitchen from "./components/Kitchen";
@@ -42,7 +43,8 @@ function App() {
             {/* ==========================================
                 PUBLIC CUSTOMER FLOW (Mobile First)
             ========================================== */}
-            <Route path="/menu/:venueId" element={<Menu />} />
+            <Route path="/q/:venueId/:tableName" element={<QRGateway />} />
+            <Route path="/menu" element={<Menu/>}/>
             <Route path="/checkout/:venueId" element={<Checkout />} />
             <Route path="/order-status/:orderId" element={<OrderStatus />} />
 

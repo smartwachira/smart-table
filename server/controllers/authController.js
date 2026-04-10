@@ -424,3 +424,47 @@ export const resetStaffPin = async (req, res) =>{
         res.status(500).json({ message: 'Server error resetting PIN.' });
     }
 }
+
+// ⚡ GENERATE GUEST SESSION FROM QR SCAN
+export const generateGuestSession = async (req, res) => {
+    try {
+        const { venueId, tableName, mode } = req.body;
+
+        if (!venueId || !tableName) {
+            return res.status(400).json({ message: "Invalid QR Code payload." });
+        }
+
+        // Verify the venue actually exists
+        const venue = await Venue.findByPk(venueId);
+        if (!venue) {
+            return res.status(404).json({ message: "Venue not found." });
+        }
+
+        // Create a specialized Guest JWT payload
+        // We set the role to 'GUEST' so middleware knows this isn't a staff member
+        const guestPayload = {
+            role: 'GUEST',
+            venueId: venueId,
+            tableName: tableName,
+            orderMode: mode === 'k' ? 'KIOSK' : 'TAB', // 'k' = Kiosk, 't' = Tab
+            sessionStart: new Date().getTime()
+        };
+
+        // Guest tokens usually expire quickly (e.g., 4 hours) to prevent link sharing later
+        const guestToken = jwt.sign(
+            guestPayload, 
+            process.env.JWT_SECRET || "YOUR_SECRET_KEY", 
+            { expiresIn: '4h' }
+        );
+
+        res.status(200).json({
+            message: "Guest session initialized.",
+            token: guestToken,
+            venueName: venue.name
+        });
+
+    } catch (error) {
+        console.error("Guest Session Error:", error);
+        res.status(500).json({ message: "Failed to initialize ordering session." });
+    }
+};

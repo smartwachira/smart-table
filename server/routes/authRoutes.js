@@ -11,6 +11,7 @@ import { protect, authorize } from "../middleware/authMiddleware.js";
 router.post('/register/venue',authController.registerVenue);
 router.post('/login/manager',authController.managerLogin)
 router.post('/login/staff',authController.staffLogin);
+router.post('/guest-session',authController.generateGuestSession)
 
 
 // Protected Routes (Requires a valid JWT + specific role)
