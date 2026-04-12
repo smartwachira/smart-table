@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams,useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { Search, ShoppingBag, Plus, Minus, Info, UtensilsCrossed, AlertCircle, Moon, Smartphone } from 'lucide-react';
@@ -12,6 +12,7 @@ export default function Menu() {
   const { venueId: urlVenueId } = useParams();
   const [searchParams] = useSearchParams();
   const urlTable = searchParams.get('table');
+  const navigate = useNavigate();
 
   const { cart, updateQuantity, cartTotals, setIsCartOpen, venueConfig, setVenueConfig } = useCart();
 
@@ -75,13 +76,12 @@ export default function Menu() {
         // If after a tiny delay no venueId is found (no URL param & no Token), show error
         const timer = setTimeout(() => {
             if (!venueId) {
-                setError("No active session found. Please scan the QR code on your table.");
-                setIsLoading(false);
+                navigate('/scan',{ replace: true});
             }
         }, 500);
         return () => clearTimeout(timer);
     }
-  }, [fetchMenu, venueId]);
+  }, [fetchMenu, venueId,navigate]);
 
   const filteredItems = items.filter(item => {
     const matchesCat = activeCategory === 'all' || item.category_id === activeCategory;
