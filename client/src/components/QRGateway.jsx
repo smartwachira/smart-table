@@ -24,17 +24,15 @@ export default function QRGateway() {
                 });
 
                 // Save the Guest Token to localStorage
-                localStorage.setItem('token', res.data.token);
+                localStorage.setItem('guest_token', res.data.token);
                 
                 // Optional: If you want to store the venue name for UI purposes
                 if (res.data.venueName) {
                     localStorage.setItem('venueName', res.data.venueName);
-                }
-
-                // Introduce a tiny artificial delay so the animation feels deliberate
-                setTimeout(() => {
-                    navigate('/menu', { replace: true });
-                }, 800);
+                };
+                
+                navigate('/menu', { replace: true });
+                
 
             } catch (err) {
                 console.error("Failed to initialize session:", err);

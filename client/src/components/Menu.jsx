@@ -1,24 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useSearchParams,useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom'; // ⚡ Removed useParams and useSearchParams
 import axios from 'axios';
 import { toast } from 'sonner';
 import { Search, ShoppingBag, Plus, Minus, Info, UtensilsCrossed, AlertCircle, Moon, Smartphone } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import FloatingCart from './FloatingCart.jsx';
-import { jwtDecode } from 'jwt-decode'; // ⚡ NEW: Added to securely read the Guest Session
+import { jwtDecode } from 'jwt-decode';
 
 export default function Menu() {
-  // 1. Grab legacy URL parameters (Fallback for old printed QR codes)
-  const { venueId: urlVenueId } = useParams();
-  const [searchParams] = useSearchParams();
-  const urlTable = searchParams.get('table');
   const navigate = useNavigate();
-
   const { cart, updateQuantity, cartTotals, setIsCartOpen, venueConfig, setVenueConfig } = useCart();
 
-  // 2. Local state to hold the finalized parameters
-  const [venueId, setVenueId] = useState(urlVenueId || null);
-  const [tableNumber, setTableNumber] = useState(urlTable || 'Takeaway');
+  // ⚡ Local state exclusively populated by the token
+  const [venueId, setVenueId] = useState(null);
+  const [tableNumber, setTableNumber] = useState('');
   const [orderMode, setOrderMode] = useState('TAB');
 
   const [categories, setCategories] = useState([]);
@@ -29,40 +24,45 @@ export default function Menu() {
   const [activeCategory, setActiveCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // ⚡ NEW: Extract secure session data from the JWT Token
+  // ⚡ Extract secure session data from the JWT Token immediately on mount
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-        try {
-            const decoded = jwtDecode(token);
-            // If it's a customer who scanned the new QR Gateway
-            if (decoded.role === 'GUEST') {
-                setVenueId(decoded.venueId);
-                setTableNumber(decoded.tableName);
-                setOrderMode(decoded.orderMode || 'TAB');
-            } 
-            // If it's a Staff Member previewing the menu without a URL parameter
-            else if (!urlVenueId) {
-                setVenueId(decoded.venueId);
-            }
-        } catch (e) {
-            console.error("Session decode failed", e);
-        }
+    const token = localStorage.getItem('guest_token');
+    
+    if (!token) {
+        // No token? Boot them immediately. No 500ms delay needed.
+        navigate('/scan', { replace: true });
+        return;
     }
-  }, [urlVenueId]);
+
+    try {
+        const decoded = jwtDecode(token);
+        if (decoded.role === 'GUEST') {
+            setVenueId(decoded.venueId);
+            setTableNumber(decoded.tableName);
+            setOrderMode(decoded.orderMode || 'TAB');
+        } else {
+            // Invalid role
+            navigate('/scan', { replace: true });
+        }
+    } catch (e) {
+        console.error("Session decode failed", e);
+        navigate('/scan', { replace: true });
+    }
+  }, [navigate]);
 
   const fetchMenu = useCallback(async () => {
-    if (!venueId) return; // Wait until venueId is securely resolved
+    if (!venueId) return; 
     
     setIsLoading(true);
     setError(null);
     try {
-      const res = await axios.get(`/api/menu/public/${venueId}`);
+      // ⚡ ZERO-TRUST: No venueId in the URL! The backend extracts it from the token.
+      const res = await axios.get(`/api/menu/public`); 
       setCategories(res.data.categories);
       setItems(res.data.items);
       setVenueConfig(res.data.venue);
     } catch (err) {
-      setError("Failed to load the menu. The venue might be offline.");
+      setError("Failed to load the menu. Your session may have expired.");
       console.log("Error loading the menu", err);
     } finally {
       setIsLoading(false);
@@ -72,16 +72,8 @@ export default function Menu() {
   useEffect(() => {
     if (venueId) {
         fetchMenu();
-    } else {
-        // If after a tiny delay no venueId is found (no URL param & no Token), show error
-        const timer = setTimeout(() => {
-            if (!venueId) {
-                navigate('/scan',{ replace: true});
-            }
-        }, 500);
-        return () => clearTimeout(timer);
     }
-  }, [fetchMenu, venueId,navigate]);
+  }, [fetchMenu, venueId]);
 
   const filteredItems = items.filter(item => {
     const matchesCat = activeCategory === 'all' || item.category_id === activeCategory;
@@ -95,13 +87,15 @@ export default function Menu() {
         <AlertCircle className="text-red-500 mb-4 w-12 h-12" />
         <h2 className="text-xl font-black text-slate-900 mb-2">Oops!</h2>
         <p className="text-slate-600 font-medium max-w-sm">{error}</p>
+        <button onClick={() => navigate('/scan')} className="mt-6 px-6 py-2 bg-slate-900 text-white rounded-full font-bold">
+            Scan New QR Code
+        </button>
       </div>
     );
   }
 
-  if (isLoading) return <MenuSkeleton />;
+  if (isLoading || !venueId) return <MenuSkeleton />;
 
-  // ⚡ THE MASTER LOCK: Check if venue is accepting orders
   if (venueConfig && !venueConfig.is_accepting_orders) {
       return (
           <div className="min-h-[100dvh] bg-slate-900 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-500">
@@ -117,17 +111,13 @@ export default function Menu() {
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-32">
 
-      {/* Slide-out Cart Drawer */}
-      <FloatingCart tableNumber={tableNumber} venueId={venueId} orderMode={orderMode} />
+      <FloatingCart tableNumber={tableNumber} orderMode={orderMode} />
 
-      {/* HERO HEADER */}
       <header className="bg-white px-4 md:px-8 pt-8 pb-6 md:pb-8 rounded-b-[2.5rem] shadow-sm relative z-10">
           <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-end justify-between gap-6 md:gap-12">
               
-              {/* LEFT ZONE: Identity (Logo, Name, Table) */}
               <div className="flex flex-col items-center md:items-start text-center md:text-left gap-4 md:flex-row md:gap-6">
                   
-                  {/* Logo */}
                   <div className="shrink-0">
                       {venueConfig?.logo_url ? (
                           <img 
@@ -142,7 +132,6 @@ export default function Menu() {
                       )}
                   </div>
 
-                  {/* Typography */}
                   <div className="flex flex-col justify-center space-y-1">
                       <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight leading-none">
                           {venueConfig?.name}
@@ -154,7 +143,6 @@ export default function Menu() {
                               {tableNumber}
                           </span>
                           
-                          {/* Info Button */}
                           <button className="w-8 h-8 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center text-slate-600 transition-colors" aria-label="Venue Information">
                               <Info size={16}/>
                           </button>
@@ -162,7 +150,6 @@ export default function Menu() {
                   </div>
               </div>
 
-              {/* RIGHT ZONE: Actions (Search) */}
               <div className="w-full md:max-w-md md:shrink-0 relative">
                   <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
                   <input 
@@ -176,7 +163,6 @@ export default function Menu() {
           </div>
       </header>
 
-      {/* STICKY CATEGORY NAV */}
       <div className="sticky top-0 z-20 bg-slate-50/90 backdrop-blur-md pt-5 pb-3 border-b border-slate-200 shadow-sm">
         <div className="flex overflow-x-auto px-4 gap-3 custom-scrollbar pb-2">
           <button
@@ -199,7 +185,6 @@ export default function Menu() {
         </div>
       </div>
 
-      {/* MENU ITEMS FEED */}
       <main className="px-4 py-6 space-y-4 max-w-6xl mx-auto">
         {filteredItems.length === 0 ? (
           <div className="text-center py-12 flex flex-col items-center">
@@ -272,14 +257,12 @@ export default function Menu() {
         )}
       </main>
 
-      {/* Footer Branding */}
       <div className="py-12 mt-8 flex flex-col items-center justify-center text-slate-300 opacity-60">
           <Smartphone size={24} className="mb-2" />
           <span className="text-[10px] font-black uppercase tracking-widest">Powered by</span>
           <span className="text-sm font-black tracking-tight text-slate-400">Smart Table</span>
       </div>
 
-      {/* FLOATING ACTION BAR */}
       {cartTotals.count > 0 && (
         <div className="fixed bottom-6 left-4 right-4 md:left-auto md:right-8 md:w-96 z-40 animate-in slide-in-from-bottom-10 fade-in duration-300">
           <button onClick={()=>setIsCartOpen(true)} className="w-full bg-slate-900 text-white p-4 rounded-3xl shadow-2xl flex items-center justify-between active:scale-[0.98] transition-transform border border-slate-800">

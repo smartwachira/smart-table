@@ -51,3 +51,37 @@ export const authorize = (...roles)=>{
         next();
     };
 };
+
+// ⚡ NEW: GUEST PROTECTION MIDDLEWARE
+export const protectGuest = async (req, res, next) => {
+    let token;
+
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+        try {
+            token = req.headers.authorization.split(' ')[1];
+
+            // Verify the token signature
+            const decoded = jwt.verify(token, JWT_SECRET);
+
+            // Ensure this is actually a Guest token, not a Staff token trying to hit guest routes
+            if (decoded.role !== 'GUEST') {
+                return res.status(403).json({ message: 'Not authorized as a guest.' });
+            }
+
+            // Attach the verified guest data directly to the request!
+            // No database lookup needed because guests are stateless.
+            req.guest = {
+                venueId: decoded.venueId,
+                tableName: decoded.tableName,
+                orderMode: decoded.orderMode
+            };
+
+            next();
+        } catch (error) {
+            console.error("Guest Auth Error:", error.message);
+            res.status(401).json({ message: 'Session expired or invalid. Please rescan the QR code.' });
+        }
+    } else {
+        res.status(401).json({ message: 'Not authorized, no session found.' });
+    }
+};

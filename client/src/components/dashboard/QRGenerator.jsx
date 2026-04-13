@@ -29,7 +29,7 @@ export default function QRGenerator() {
     const [isControlsOpen, setIsControlsOpen] = useState(false);
 
     useEffect(() => {
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('auth_token');
         if (token) {
             try {
                 const decoded = jwtDecode(token);

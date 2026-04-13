@@ -16,7 +16,7 @@ router.post('/guest-session',authController.generateGuestSession)
 
 // Protected Routes (Requires a valid JWT + specific role)
 router.post('/register/staff', protect, authorize('OWNER', 'MANAGER'), authController.registerStaff);
-router.get('/staff',protect,authController.getStaff);
+router.get('/staff',protect,authorize('OWNER', 'MANAGER'),authController.getStaff);
 router.patch('/staff/:id/status', protect, authorize('OWNER', 'MANAGER'), authController.toggleStaffStatus);
 
 // 2. PIN reset must be SECOND

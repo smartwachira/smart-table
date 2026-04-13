@@ -1,15 +1,16 @@
 import express from 'express';
-import { protect,authorize } from '../middleware/authMiddleware.js';
+import { protect,authorize,protectGuest } from '../middleware/authMiddleware.js';
 import { upload  } from '../middleware/uploadMiddleware.js';
 
 const router = express.Router();
 import * as menuController from '../controllers/menuController.js';
 
 //PUBLIC ROUTE: 
-router.get('/public/:venueId',menuController.getPublicMenu)
+router.get('/public',protectGuest,menuController.getPublicMenu)
 
 // 1. Secure all menu routes - only logged-in staff/managers can access
-router.use(protect)
+router.use(protect);
+router.use(authorize('OWNER', 'MANAGER'));
 
 
 // 2. Category Routes

@@ -42,7 +42,7 @@ export default function LiveOrders() {
 
     const fetchOrders = useCallback(async (signal) => {
         try {
-            const token = localStorage.getItem('token');
+            const token = localStorage.getItem('auth_token');
             if (!token) return navigate('/login');
 
             const response = await axios.get('/api/orders/live', {
@@ -103,7 +103,7 @@ export default function LiveOrders() {
 
     const updateStatus = async (orderId, newStatus) => {
         try {
-            const token = localStorage.getItem('token');
+            const token = localStorage.getItem('auth_token');
             if (!token) return;
 
             setOrders(prev => prev.map(o => o.order_id === orderId ? { ...o, status: newStatus } : o));
@@ -121,7 +121,7 @@ export default function LiveOrders() {
 
     const handleCancel = async () => {
         try {
-            const token = localStorage.getItem('token');
+            const token = localStorage.getItem('auth_token');
             await axios.patch(`/api/orders/${cancelModal.orderId}/status`, 
                 { status: 'CANCELLED', cancelReason: cancelReason }, 
                 { headers: { Authorization: `Bearer ${token}` } }
@@ -140,7 +140,7 @@ export default function LiveOrders() {
         if (!window.confirm("Confirm you have received the cash for this order?")) return;
         
         try {
-            const token = localStorage.getItem('token');
+            const token = localStorage.getItem('auth_token');
             
             setOrders(prev => prev.map(o => o.order_id === orderId ? { 
                 ...o, 

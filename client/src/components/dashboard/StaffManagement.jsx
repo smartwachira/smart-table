@@ -27,7 +27,7 @@ export default function StaffManagement() {
     // ⚡ FIX: Use a dynamic getter for config to completely prevent stale token/venueId bugs 
     // and eliminate the useMemo crash.
     const getConfig = () => ({
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` },
         venueId: user?.venueId
     });
 

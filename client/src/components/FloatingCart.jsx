@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { X, Minus, Plus, ShoppingBag, ArrowRight } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 
-export default function FloatingCart({ tableNumber, venueId }) {
+export default function FloatingCart({ tableNumber }) {
     const { cart, updateQuantity, cartTotals, isCartOpen, setIsCartOpen } = useCart();
     const navigate = useNavigate();
 
@@ -12,7 +12,7 @@ export default function FloatingCart({ tableNumber, venueId }) {
     const handleCheckout = () => {
         setIsCartOpen(false);
         // Navigate to checkout, passing the venue ID and table number
-        navigate(`/checkout/${venueId}?table=${encodeURIComponent(tableNumber)}`);
+        navigate(`/checkout/?table=${encodeURIComponent(tableNumber)}`);
     };
 
     return (

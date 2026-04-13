@@ -137,16 +137,16 @@ export const updatedMenuItem = async (req,res)=>{
 // ---PUBLIC CUSTOMER MENU ---
 export const getPublicMenu = async (req,res)=>{
     try {
-        const { venueId } = req.params;
+        const venueId = req.guest.venueId;
+
+        if (!venueId) {
+            return res.status(400).json({ message: "Invalid session context." });
+        }
 
         //1. Fetch Venue Setting  FIRST
         const venue = await Venue.findByPk(venueId, {
             attributes: ['name','is_accepting_orders','tax_rate','allow_cash_payments','logo_url']
         });
-
-        if (!venue){
-            return res.status(404).json({ message: "Venue not found or inactive."});
-        }
 
         //2. Fetch Categories for this venue
         const categories = await MenuCategory.findAll({

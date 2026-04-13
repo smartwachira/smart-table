@@ -41,20 +41,36 @@ function AxiosInterceptor({ children }) {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const interceptor = axios.interceptors.response.use(
+    // 1. REQUEST INTERCEPTOR: Attach the correct token before sending
+    const reqInterceptor = axios.interceptors.request.use((config) =>{
+      // Check if the user is currently navigating the public menu
+      const isPublicMenuPath = window.location.pathname.includes('/menu') || window.location.pathname.includes('/checkout');
+
+      //Grab the appropriate token
+      const token = isPublicMenuPath
+        ? localStorage.getItem('guest_token')
+        : localStorage.getItem('auth_token');
+
+      if (token){
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+      return config
+    })
+
+    // 2. RESPONSE INTERCEPTOR: Handle 401s properly based on context
+    const resInterceptor = axios.interceptors.response.use(
       (response) => response, 
       (error) => {
         // If the backend says the token is dead or invalid
         if (error.response && error.response.status === 401) {
-          
-          localStorage.removeItem('token'); // Wipe dead token
-          
           const currentPath = window.location.pathname;
           
           // Route based on context
           if (currentPath.includes('/menu') || currentPath.includes('/checkout')) {
+            localStorage.removeItem('guest_token');
             navigate('/scan', { replace: true });
           } else if (currentPath.includes('/dashboard') || currentPath.includes('/kitchen')) {
+            localStorage.removeItem('auth_token');
             navigate('/login', { replace: true });
           }
         }
@@ -63,7 +79,10 @@ function AxiosInterceptor({ children }) {
     );
 
     // Cleanup on unmount
-    return () => axios.interceptors.response.eject(interceptor);
+    return () => {
+      axios.interceptors.response.eject(reqInterceptor);
+      axios.interceptors.response.eject(resInterceptor)
+    };
   }, [navigate]);
 
   return children; 
@@ -87,7 +106,7 @@ export default function App() {
               <Route path="/q/:venueId/:tableName" element={<QRGateway />} />
               <Route path="/menu" element={<Menu/>}/>
               <Route path="/scan" element={<ScanPage/>}/>
-              <Route path="/checkout/:venueId" element={<Checkout />} />
+              <Route path="/checkout" element={<Checkout />} />
               <Route path="/order-status/:orderId" element={<OrderStatus />} />
 
               {/* ==========================================

@@ -218,7 +218,7 @@ export default function DashboardOverview() {
 
     // ⚡ Network Resilience: AbortController integrated
     const fetchDashboardData = useCallback(async (isSilent = false, signal) => {
-        const token = localStorage.getItem('token');
+        ///const token = localStorage.getItem('auth_token');
         if (!isSilent) setIsLoading(true);
         setErrorMsg(null);
         
@@ -262,7 +262,6 @@ export default function DashboardOverview() {
             }
             
             const res = await axios.get(`/api/dashboard/overview`, {
-                headers: { Authorization: `Bearer ${token}` },
                 params: { startDate: startDateStr.toISOString(), endDate: endDateStr.toISOString() },
                 signal // ⚡ Pass the abort signal to Axios
             });

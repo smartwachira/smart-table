@@ -50,7 +50,7 @@ export default function OrderHistory() {
     const fetchHistory = useCallback(async (signal) => {
         setIsLoading(true);
         try {
-            const token = localStorage.getItem('token');
+            const token = localStorage.getItem('auth_token');
             if (!token) return navigate('/login');
 
             const now = new Date();

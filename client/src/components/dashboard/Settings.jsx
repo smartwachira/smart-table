@@ -15,7 +15,7 @@ export default function Settings(){
     const [isUploadingLogo, setIsUploadingLogo] = useState(false)
 
 
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('auth_token');
     const {user} = useAuth();
 
     //Form State

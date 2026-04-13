@@ -1,31 +1,54 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 import { io } from 'socket.io-client';
+import { jwtDecode } from 'jwt-decode'; // ⚡ NEW: Import jwtDecode
 import { 
     ArrowLeft, Clock, ChefHat, 
     BellRing, CheckCircle2, Receipt
 } from 'lucide-react';
 
 // Connect to your backend socket server
-// In production, replace this with your actual deployed backend URL
 const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000');
 
 export default function OrderStatus() {
-    const { orderId } = useParams();
-    const [searchParams] = useSearchParams();
-    const venueId = searchParams.get('venue');
+    const { orderId } = useParams(); // Only orderId stays in the URL!
     const navigate = useNavigate();
+
+    // ⚡ 1. State for Token Data
+    const [venueId, setVenueId] = useState(null);
 
     const [order, setOrder] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
 
+    // ⚡ 2. Extract Data from Token on Mount
+    useEffect(() => {
+        const token = localStorage.getItem('guest_token');
+        if (token) {
+            try {
+                const decoded = jwtDecode(token);
+                if (decoded.role === 'GUEST') {
+                    setVenueId(decoded.venueId);
+                } else {
+                    navigate('/scan', { replace: true });
+                }
+            } catch (error) {
+                console.error("Token decoding failed", error);
+                navigate('/scan', { replace: true });
+            }
+        } else {
+            navigate('/scan', { replace: true });
+        }
+    }, [navigate]);
+
     // Fetch Initial Order Data
     useEffect(() => {
         const fetchOrder = async () => {
+            if (!venueId || !orderId) return; // Wait until secure session loads
+
             try {
-                // Notice we are fetching the full order details here to show the receipt
+                // The global Axios interceptor handles attaching the guest token
                 const res = await axios.get(`/api/orders/${orderId}/status`);
                 setOrder(res.data);
             } catch (err) {
@@ -36,14 +59,14 @@ export default function OrderStatus() {
             }
         };
 
-        if (orderId) fetchOrder();
-    }, [orderId]);
+        fetchOrder();
+    }, [orderId, venueId]);
 
     // Set up Real-Time Socket Listeners
     useEffect(() => {
         if (!venueId || !orderId) return;
 
-        // 1. Join the specific venue's room to listen for updates
+        // 1. Join the specific venue's room using the secure venueId from the token
         socket.emit('join_venue', venueId);
 
         // 2. Listen for 'orderUpdated' events emitted by the kitchen or M-Pesa webhook
@@ -62,7 +85,7 @@ export default function OrderStatus() {
     }, [venueId, orderId]);
 
 
-    if (isLoading) {
+    if (isLoading || !venueId) {
         return (
             <div className="min-h-screen bg-slate-50 flex items-center justify-center">
                 <div className="animate-spin text-indigo-600"><Clock size={32} /></div>
@@ -76,8 +99,8 @@ export default function OrderStatus() {
                 <CheckCircle2 size={48} className="text-slate-300 mb-4" />
                 <h2 className="text-xl font-bold text-slate-900 mb-2">Order Not Found</h2>
                 <p className="text-slate-500 mb-6">{error}</p>
-                <button onClick={() => navigate(-1)} className="px-6 py-3 bg-slate-900 text-white rounded-full font-bold">
-                    Go Back
+                <button onClick={() => navigate('/menu')} className="px-6 py-3 bg-slate-900 text-white rounded-full font-bold transition-transform active:scale-95">
+                    Return to Menu
                 </button>
             </div>
         );
@@ -93,7 +116,6 @@ export default function OrderStatus() {
 
     // Calculate current progress index
     const currentStepIndex = steps.findIndex(s => s.id === order.status);
-    // If status is somehow not in the array (like CANCELLED), default to 0 to avoid breaking UI
     const activeIndex = currentStepIndex >= 0 ? currentStepIndex : 0; 
 
     return (
@@ -102,8 +124,9 @@ export default function OrderStatus() {
             {/* Header */}
             <header className="bg-white px-4 pt-6 pb-4 border-b border-slate-200 flex items-center justify-between sticky top-0 z-10">
                 <button 
-                    onClick={() => navigate(`/menu/${venueId}?table=${order.table_number}`)}
-                    className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-600"
+                    // ⚡ NEW: Simply navigate back to /menu. The Menu component will read the JWT context automatically!
+                    onClick={() => navigate(`/menu`)}
+                    className="w-10 h-10 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center text-slate-600 transition-colors active:scale-95"
                 >
                     <ArrowLeft size={20} />
                 </button>

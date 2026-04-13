@@ -15,7 +15,7 @@ export default function MenuManagement() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('auth_token');
   const {user} = useAuth();
   const config = { headers: {
       Authorization: `Bearer ${token}`},
@@ -72,7 +72,7 @@ export default function MenuManagement() {
   };
 
   const handleSaveItem = async (formData,imageFile) => {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('auth_token');
     try {
         const payload = new FormData();
         payload.append('name',formData.name);

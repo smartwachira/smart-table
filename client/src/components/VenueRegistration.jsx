@@ -32,7 +32,7 @@ export default function VenueRegistration() {
             // Re-integrated Axios
             const res = await axios.post('/api/auth/register/venue', formData);
             
-            localStorage.setItem('token', res.data.token);
+            localStorage.setItem('auth_token', res.data.token);
             
             // Premium Toast Notification
             toast.success('Workspace Deployed', {

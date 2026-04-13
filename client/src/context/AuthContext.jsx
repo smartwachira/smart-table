@@ -15,7 +15,7 @@ export const AuthProvider = ({ children }) =>{
     
    
     const login = async (token) =>{
-        localStorage.setItem('token',token);
+        localStorage.setItem('auth_token',token);
         const decoded = jwtDecode(token);
         try {
 
@@ -32,13 +32,13 @@ export const AuthProvider = ({ children }) =>{
         } 
     }
     const logout = () => {
-    localStorage.removeItem('token');
+    localStorage.removeItem('auth_token');
     setUser(null);
     };
 
     useEffect(()=>{
         const initializeWorkspace = () => {
-            const token = localStorage.getItem('token');
+            const token = localStorage.getItem('auth_token');
             if (token){
                 try {
                     const decoded = jwtDecode(token);

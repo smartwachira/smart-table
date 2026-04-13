@@ -1,22 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
+import { jwtDecode } from 'jwt-decode'; // ⚡ NEW: Import jwtDecode
 import axios from 'axios';
 import { toast } from 'sonner';
 import { 
     ArrowLeft, ShieldCheck, Smartphone, 
-    Receipt, Loader2, CheckCircle2, User, Banknote,XCircle,
+    Receipt, Loader2, CheckCircle2, User, Banknote, XCircle,
     Currency
 } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 
 export default function Checkout() {
-    const { venueId } = useParams();
-    const [searchParams] = useSearchParams();
-    const tableNumber = searchParams.get('table') || 'Takeaway';
     const navigate = useNavigate();
-    
-    const { cart, cartTotals, clearCart,venueConfig } = useCart();
+    const { cart, cartTotals, clearCart, venueConfig } = useCart();
     const cartItems = Object.values(cart);
+
+    // ⚡ 1. State for Token Data
+    const [venueId, setVenueId] = useState(null);
+    const [tableNumber, setTableNumber] = useState('');
+    const [orderMode, setOrderMode] = useState('TAB'); // KIOSK or TAB
 
     // Form State
     const [customerName, setCustomerName] = useState('');
@@ -25,38 +27,60 @@ export default function Checkout() {
     
     // Process State
     const [isProcessing, setIsProcessing] = useState(false);
-    const [paymentStatus, setPaymentStatus] = useState('idle'); // idle, pending, success,failed
+    const [paymentStatus, setPaymentStatus] = useState('idle'); // idle, pending, success, failed
     const [pollingOrderId, setPollingOrderId] = useState(null);
 
+    // ⚡ 2. Extract Data from Token on Mount
     useEffect(() => {
-        if (cartItems.length === 0 && paymentStatus === 'idle') {
-            navigate(`/menu/${venueId}?table=${tableNumber}`);
+        const token = localStorage.getItem('guest_token');
+        if (token) {
+            try {
+                const decoded = jwtDecode(token);
+                if (decoded.role === 'GUEST') {
+                    setVenueId(decoded.venueId);
+                    setTableNumber(decoded.tableName);
+                    setOrderMode(decoded.orderMode || 'TAB');
+                } else {
+                    navigate('/scan', { replace: true });
+                }
+            } catch (error) {
+                console.error("Token decoding failed", error);
+                navigate('/scan', { replace: true });
+            }
+        } else {
+            navigate('/scan', { replace: true });
         }
-    }, [cartItems, navigate, venueId, tableNumber, paymentStatus]);
+    }, [navigate]);
 
+    // Handle Empty Cart (Redirects to clean /menu URL)
+    useEffect(() => {
+        if (venueId && cartItems.length === 0 && paymentStatus === 'idle') {
+            navigate(`/menu`); 
+        }
+    }, [cartItems, navigate, venueId, paymentStatus]);
 
     // --- ⚡ THE SHORT POLLING ENGINE ⚡ ---
-    useEffect(()=>{
+    useEffect(() => {
         let pollInterval;
 
         // Only run the poller if we are waiting for an M-Pesa response
         if (paymentStatus === 'pending' && pollingOrderId){
-            pollInterval = setInterval(async ()=>{
+            pollInterval = setInterval(async () => {
                 try {
                     // Ping the database
                     const res = await axios.get(`/api/orders/${pollingOrderId}/status`);
                     const currentStatus = res.data.payment_status;
 
                     if (currentStatus === "PAID"){
-                        //Success! Stop polling and transition UI
+                        // Success! Stop polling and transition UI
                         clearInterval(pollInterval);
                         setPaymentStatus('success');
                         toast.success("Payment confirmed!");
 
-                        setTimeout(()=>{
+                        setTimeout(() => {
                             clearCart();
-                            navigate(`/order-status/${pollingOrderId}?venue=${venueId}`)
-                        }, 2000)
+                            navigate(`/order-status/${pollingOrderId}`); // ⚡ Removed venueId from URL
+                        }, 2000);
                     } else if (currentStatus === 'FAILED' || res.data.status === 'CANCELLED'){
                         // Failure! Stop polling, reset UI and alert user
                         clearInterval(pollInterval);
@@ -64,19 +88,20 @@ export default function Checkout() {
                         setIsProcessing(false);
                         toast.error("Payment failed, timed out, or was cancelled.");
 
-                        //Let them try again after 3 seconds
-                        setTimeout(()=> setPaymentStatus('idle'),3000);
+                        // Let them try again after 3 seconds
+                        setTimeout(() => setPaymentStatus('idle'), 3000);
                     }
                 } catch (error){
                     console.error("Polling error:", error);
                 }
-            }, 3000)
+            }, 3000);
         }
+        
         // Cleanup function to prevent memory leaks if component unmounts
         return () => {
             if (pollInterval) clearInterval(pollInterval);
         };
-    },[paymentStatus,pollingOrderId,navigate,clearCart,venueId])
+    }, [paymentStatus, pollingOrderId, navigate, clearCart]);
 
     const handlePhoneChange = (e) => {
         setPhone(e.target.value.replace(/\D/g, ''));
@@ -95,6 +120,8 @@ export default function Checkout() {
         try {
             // STEP 1: CREATE THE ORDER FIRST
             const orderPayload = {
+                // Note: The backend 'protectGuest' middleware will likely extract venue_id 
+                // and table_number directly from the token, but we can pass them here just in case.
                 venue_id: venueId,
                 table_number: tableNumber,
                 customer_name: customerName,
@@ -120,7 +147,7 @@ export default function Checkout() {
                 
                 setTimeout(() => {
                     clearCart();
-                    navigate(`/order-status/${orderId}?venue=${venueId}`);
+                    navigate(`/order-status/${orderId}`); // ⚡ Removed venueId from URL
                 }, 2000);
 
             } else {
@@ -130,7 +157,6 @@ export default function Checkout() {
                 
                 //⚡ Start the Polling Engine!
                 setPollingOrderId(orderId);
-                setPaymentStatus('pending');
             }
 
         } catch (error) {
@@ -140,6 +166,15 @@ export default function Checkout() {
             setIsProcessing(false);
         }
     };
+
+    // Prevent rendering until the token is decoded
+    if (!venueId) {
+        return (
+            <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+                <Loader2 size={32} className="animate-spin text-indigo-600" />
+            </div>
+        );
+    }
 
     if (cartItems.length === 0 && paymentStatus === 'idle') return null;
 
@@ -183,7 +218,6 @@ export default function Checkout() {
                             <span>Subtotal</span>
                             <span>{cartTotals.subtotal.toLocaleString('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 })}</span>
                         </div>
-                        {/* NEW: Only show tax row if tax is greater than 0  */}
                         {cartTotals.taxAmount > 0 && (
                             <div className="flex justify-between text-slate-500 font-medium text-sm">
                                 <span>Taxes & Fees</span>
