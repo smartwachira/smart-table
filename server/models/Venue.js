@@ -47,6 +47,14 @@ const Venue = sequelize.define('Venue',{
     allow_cash_payments:{
         type: DataTypes.BOOLEAN,
         defaultValue: true
+    },
+    wifi_ssid: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    wifi_password: {
+        type: DataTypes.STRING,
+        allowNull: true
     }
 }, {
     timestamps: true, // Adds createdAt and updateAt automatically

@@ -18,7 +18,7 @@ export const getVenueSettings = async (req, res) =>{
 export const updateVenueSettings = async (req, res) =>{
     try {
         const venueId = req.user.venueId;
-        const { name, location,phone_number, tax_rate, is_accepting_orders,allow_cash_payments} = req.body;
+        const { name, location,phone_number, tax_rate, is_accepting_orders,allow_cash_payments,wifi_ssid,wifi_password} = req.body;
 
         const venue = await Venue.findByPk(venueId);
         if (!venue) return res.status(404).json({ message: "Venue not found"});
@@ -30,6 +30,8 @@ export const updateVenueSettings = async (req, res) =>{
         venue.tax_rate = tax_rate !== undefined ? tax_rate: venue.tax_rate
         venue.is_accepting_orders = is_accepting_orders !== undefined ? is_accepting_orders: venue.is_accepting_orders
         venue.allow_cash_payments = allow_cash_payments !== undefined ? allow_cash_payments: venue.allow_cash_payments;
+        venue.wifi_ssid = wifi_ssid !== undefined ? wifi_ssid: venue.wifi_ssid
+        venue.wifi_password = wifi_password !== undefined ? wifi_password: venue.wifi_password
 
         await venue.save();
 
