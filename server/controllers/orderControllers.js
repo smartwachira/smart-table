@@ -100,8 +100,8 @@ export const getOrders = async (req, res) => {
     try {
         const venueId = req.user.venueId; 
         
-        const startOfToday = new Date();
-        startOfToday.setHours(0, 0, 0, 0);
+        const rollingWindow = new Date();
+        rollingWindow.setHours(rollingWindow.getHours() - 14);
 
         const orders = await Order.findAll({
             where: {
@@ -111,8 +111,8 @@ export const getOrders = async (req, res) => {
                         [Op.or]: [
                             { status: { [Op.in]: ['PENDING', 'PREPARING', 'READY'] } },
                             { 
-                                status: 'COMPLETED',
-                                updatedAt: { [Op.gte]: startOfToday } // Only fetch completed orders from today
+                                status: { [Op.in]: ['COMPLETED', 'CANCELLED'] },
+                                updatedAt: { [Op.gte]: rollingWindow } 
                             }
                         ]
                     },

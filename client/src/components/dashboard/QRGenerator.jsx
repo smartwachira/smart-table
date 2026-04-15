@@ -3,7 +3,7 @@ import { QRCodeCanvas } from 'qrcode.react';
 import { jwtDecode } from 'jwt-decode';
 import { toast } from 'sonner';
 import axios from 'axios';
-import html2canvas from 'html2canvas'; // ⚡ NEW: Added for beautiful card snapshots
+import html2canvas from 'html2canvas'; 
 import { 
     QrCode, Printer, Download, Plus, Trash2, 
     Settings2, Grid3X3, ChevronDown, ChevronUp, Image as ImageIcon, Store, Wifi, UtensilsCrossed
@@ -98,12 +98,11 @@ export default function QRGenerator() {
 
     const handlePrint = () => window.print();
 
-    // ⚡ NEW: Download the entire styled card
     const downloadFullCard = async (tableName) => {
         const cardElement = document.getElementById(`card-${tableName}`);
         if (!cardElement) return;
 
-        // Temporarily hide the action buttons so they don't appear in the screenshot
+        // Hide action buttons during snapshot
         const actionOverlays = cardElement.querySelectorAll('.action-overlay');
         const originalStyles = [];
         actionOverlays.forEach(el => {
@@ -111,11 +110,15 @@ export default function QRGenerator() {
             el.style.display = 'none';
         });
 
+        // ⚡ FIX: Added slight padding to the capture to ensure rounded corners aren't clipped
+        cardElement.style.padding = '32px'; 
+        cardElement.style.borderRadius = '32px';
+
         try {
             const canvas = await html2canvas(cardElement, {
-                scale: 3, // Very high resolution for crisp printing
+                scale: 3, 
                 backgroundColor: '#ffffff',
-                useCORS: true // Ensures the logo loads correctly from the backend
+                useCORS: true
             });
             const pngUrl = canvas.toDataURL("image/png");
             const downloadLink = document.createElement("a");
@@ -129,14 +132,15 @@ export default function QRGenerator() {
             console.error("Failed to generate card image", err);
             toast.error("Failed to download image.");
         } finally {
-            // Restore the buttons immediately after capture
+            // Restore styles
+            cardElement.style.padding = '';
+            cardElement.style.borderRadius = '';
             actionOverlays.forEach((el, i) => {
                 el.style.display = originalStyles[i];
             });
         }
     };
 
-    // ⚡ NEW: Download individual QR codes isolated
     const downloadSingleQR = (tableName, type) => {
         const canvasId = type === 'WIFI' ? `qr-wifi-${tableName}` : `qr-menu-${tableName}`;
         const canvas = document.getElementById(canvasId);
@@ -214,29 +218,19 @@ export default function QRGenerator() {
                                 <span className={`inline-block h-4 w-4 mt-1 transform rounded-full bg-white transition-transform ${includeLogo && venueSettings?.logo_url ? 'translate-x-6' : 'translate-x-1'}`} />
                             </button>
                         </div>
-                        
-                        <div className={`p-4 rounded-2xl border flex items-start gap-3 ${hasWifiConfig ? 'bg-emerald-50 border-emerald-100' : 'bg-slate-50 border-slate-200'}`}>
-                            <Wifi className={hasWifiConfig ? 'text-emerald-500' : 'text-slate-400'} size={20} />
-                            <div>
-                                <p className={`text-sm font-bold ${hasWifiConfig ? 'text-emerald-900' : 'text-slate-700'}`}>
-                                    {hasWifiConfig ? 'WiFi Auto-Connect Active' : 'WiFi Not Configured'}
-                                </p>
-                                <p className="text-[10px] text-slate-500 mt-1">
-                                    {hasWifiConfig ? `Network: ${venueSettings.wifi_ssid}` : 'Add WiFi in Settings to generate Dual-QRs.'}
-                                </p>
-                            </div>
-                        </div>
                     </div>
                 </div>
 
                 <div className="p-4 md:p-6 border-t border-slate-200 bg-slate-50 shrink-0 space-y-3 pb-safe">
                     <button onClick={handlePrint} disabled={tables.length === 0} className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg active:scale-95">
-                        <Printer size={20} /> Print Codes
+                        <Printer size={20} /> Print Cards
                     </button>
                 </div>
             </aside>
 
-            <main className={`flex-1 overflow-y-auto p-4 pt-[88px] md:pt-6 md:p-8 print:p-0 print:pt-0 print:m-0 print:w-[210mm] print:overflow-visible print:bg-white bg-slate-50/50 custom-scrollbar ${isControlsOpen ? 'hidden md:block' : 'block'}`}>
+            {/* ⚡ FIX 3: Strict Print Layouts. 
+                Using `print:grid-cols-2` and `print:gap-12` ensures exactly two cards fit perfectly on an A4 page without clipping. */}
+            <main className={`flex-1 overflow-y-auto p-4 pt-[88px] md:pt-6 md:p-8 print:p-8 print:m-0 print:w-full print:bg-white bg-slate-50/50 custom-scrollbar ${isControlsOpen ? 'hidden md:block' : 'block'}`}>
                 
                 {tables.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center text-slate-400 print:hidden px-4 text-center">
@@ -244,93 +238,105 @@ export default function QRGenerator() {
                         <h3 className="text-xl font-black text-slate-800">Blank Canvas</h3>
                     </div>
                 ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 print:grid-cols-2 gap-4 md:gap-6 print:gap-8 pb-10">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 print:grid-cols-2 gap-4 md:gap-6 print:gap-12 pb-10">
                         {tables.map((table) => {
                             const qrPayload = `${BASE_QR_URL}/${venueId}/${encodeURIComponent(table)}?m=${orderingMode === 'TAB' ? 't' : 'k'}`;
 
                             return (
-                                <div key={table} id={`card-${table}`} className="bg-white rounded-[2rem] border border-slate-200 shadow-sm print:shadow-none print:border-2 print:border-slate-300 overflow-hidden flex flex-col items-center p-6 md:p-8 transition-all hover:shadow-md page-break-inside-avoid relative group">
+                                /* ⚡ FIX 4: Added `print:break-inside-avoid` to ensure cards never get split across two physical pages */
+                                <div key={table} id={`card-${table}`} className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm print:shadow-none print:border-[3px] print:border-slate-800 overflow-hidden flex flex-col items-center p-6 md:p-10 transition-all hover:shadow-md page-break-inside-avoid relative group print:break-inside-avoid print:bg-white print:color-adjust-exact">
                                     
-                                    <h3 className="text-xl md:text-3xl font-black text-slate-900 mb-6 uppercase tracking-widest text-center">
+                                    {/* Brand Header */}
+                                    {venueSettings?.name && (
+                                         <p className="text-sm font-black text-slate-400 uppercase tracking-widest text-center mb-2 print:text-black">
+                                            {venueSettings.name}
+                                         </p>
+                                    )}
+
+                                    <h3 className="text-3xl md:text-4xl font-black text-slate-900 mb-8 uppercase tracking-widest text-center print:text-black">
                                         {table}
                                     </h3>
 
-                                    <div className="flex flex-col items-center w-full gap-8 relative z-0">
+                                    <div className="flex flex-col items-center w-full gap-10 relative z-0">
                                         
                                         {hasWifiConfig && (
-                                            <div className="flex flex-col items-center w-full pb-8 border-b-2 border-dashed border-slate-200">
-                                                <div className="flex items-center gap-2 mb-3">
-                                                    <span className="w-6 h-6 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-black">1</span>
-                                                    <span className="font-bold text-slate-500 uppercase tracking-widest text-sm">Need WiFi?</span>
+                                            <div className="flex flex-col items-center w-full pb-10 border-b-[3px] border-dashed border-slate-200 print:border-slate-400">
+                                                <div className="flex items-center gap-3 mb-4">
+                                                    <span className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center text-sm font-black print:bg-black">1</span>
+                                                    <span className="font-black text-slate-600 uppercase tracking-[0.2em] text-sm print:text-black">Need WiFi?</span>
                                                 </div>
-                                                <div className="p-3 bg-white border-2 border-slate-100 rounded-2xl">
+                                                <div className="p-4 bg-white border-2 border-slate-100 rounded-3xl print:border-none print:p-0">
                                                     <QRCodeCanvas
-                                                        id={`qr-wifi-${table}`} // ⚡ ID for isolated download
+                                                        id={`qr-wifi-${table}`} 
                                                         value={getWifiPayload()}
-                                                        size={120}
+                                                        size={140}
                                                         bgColor={"#ffffff"}
-                                                        fgColor={"#0f172a"}
-                                                        level={"L"} 
+                                                        fgColor={qrColor} // ⚡ FIX 1: Applied custom color to WiFi QR!
+                                                        level={"M"} 
+                                                        imageSettings={includeLogo && venueSettings?.logo_url ? { // ⚡ FIX 2: Applied custom logo to WiFi QR!
+                                                            src: getFormattedLogoUrl(), 
+                                                            height: 32,
+                                                            width: 32,
+                                                            excavate: true,
+                                                            crossOrigin: "anonymous"
+                                                        } : undefined}
                                                     />
                                                 </div>
-                                                <p className="text-xs font-bold text-slate-400 mt-3">Scan to Auto-Connect</p>
+                                                <p className="text-xs font-black text-slate-400 mt-4 uppercase tracking-widest print:text-black">Scan to Auto-Connect</p>
                                             </div>
                                         )}
 
                                         <div className="flex flex-col items-center w-full">
                                             {hasWifiConfig && (
-                                                <div className="flex items-center gap-2 mb-4">
-                                                    <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">2</span>
-                                                    <span className="font-black text-indigo-600 uppercase tracking-widest text-sm">Order Food</span>
+                                                <div className="flex items-center gap-3 mb-5">
+                                                    <span className="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center text-sm font-black print:bg-black print:text-white">2</span>
+                                                    <span className="font-black text-indigo-600 uppercase tracking-[0.2em] text-sm print:text-black">Order Food</span>
                                                 </div>
                                             )}
-                                            <div className="p-4 bg-white rounded-[2rem] shadow-inner border border-slate-100 print:shadow-none print:border-none flex justify-center w-full aspect-square">
+                                            <div className="p-5 bg-white rounded-[2.5rem] shadow-inner border border-slate-100 print:shadow-none print:border-none flex justify-center w-full aspect-square">
                                                 <QRCodeCanvas
-                                                    id={`qr-menu-${table}`} // ⚡ ID for isolated download
+                                                    id={`qr-menu-${table}`} 
                                                     value={qrPayload}
-                                                    size={hasWifiConfig ? 220 : 280} 
-                                                    style={{ width: '100%', height: '100%', maxWidth: hasWifiConfig ? '220px' : '280px', maxHeight: hasWifiConfig ? '220px' : '280px' }}
+                                                    size={hasWifiConfig ? 200 : 280} 
+                                                    style={{ width: '100%', height: '100%', maxWidth: hasWifiConfig ? '200px' : '280px', maxHeight: hasWifiConfig ? '200px' : '280px' }}
                                                     bgColor={"#ffffff"}
                                                     fgColor={qrColor}
                                                     level={"H"}
                                                     imageSettings={includeLogo && venueSettings?.logo_url ? {
                                                         src: getFormattedLogoUrl(), 
-                                                        height: hasWifiConfig ? 40 : 56,
-                                                        width: hasWifiConfig ? 40 : 56,
+                                                        height: hasWifiConfig ? 48 : 64,
+                                                        width: hasWifiConfig ? 48 : 64,
                                                         excavate: true,
                                                         crossOrigin: "anonymous"
                                                     } : undefined}
                                                 />
                                             </div>
-                                            {!hasWifiConfig && (
-                                                <p className="text-center text-sm font-bold text-slate-400 uppercase tracking-widest mt-6">
-                                                    Scan to Order
-                                                </p>
-                                            )}
+                                            <p className="text-center text-sm font-black text-slate-400 uppercase tracking-[0.2em] mt-6 print:text-black">
+                                                Scan to View Menu
+                                            </p>
                                         </div>
                                     </div>
 
-                                    {/* ⚡ DESKTOP ACTION OVERLAY (Uses html2canvas + isolated downloads) */}
-                                    <div className="hidden md:flex absolute inset-0 bg-slate-900/80 backdrop-blur-sm opacity-0 group-hover:opacity-100 flex-col items-center justify-center gap-3 transition-opacity print:hidden focus-within:opacity-100 rounded-[2rem] z-10 action-overlay">
-                                        <button onClick={() => downloadFullCard(table)} className="w-48 py-3 bg-white text-slate-900 hover:bg-indigo-50 hover:text-indigo-600 rounded-xl font-black flex items-center justify-center gap-2 transition-colors">
-                                            <Download size={18} /> Save Full Card
+                                    {/* Action Overlays */}
+                                    <div className="hidden md:flex absolute inset-0 bg-slate-900/80 backdrop-blur-sm opacity-0 group-hover:opacity-100 flex-col items-center justify-center gap-3 transition-opacity print:hidden focus-within:opacity-100 rounded-[2.5rem] z-10 action-overlay">
+                                        <button onClick={() => downloadFullCard(table)} className="w-56 py-3.5 bg-white text-slate-900 hover:bg-indigo-50 hover:text-indigo-600 rounded-xl font-black flex items-center justify-center gap-2 transition-colors shadow-lg">
+                                            <Download size={20} /> Save Full Card
                                         </button>
-                                        <div className="flex gap-2 w-48">
+                                        <div className="flex gap-2 w-56">
                                             {hasWifiConfig && (
-                                                <button onClick={() => downloadSingleQR(table, 'WIFI')} className="flex-1 py-2 bg-slate-800 text-white hover:bg-slate-700 rounded-xl text-xs font-bold flex flex-col items-center gap-1 transition-colors">
-                                                    <Wifi size={14} /> WiFi QR
+                                                <button onClick={() => downloadSingleQR(table, 'WIFI')} className="flex-1 py-2.5 bg-slate-800 text-white hover:bg-slate-700 rounded-xl text-xs font-bold flex flex-col items-center gap-1 transition-colors">
+                                                    <Wifi size={16} /> WiFi QR
                                                 </button>
                                             )}
-                                            <button onClick={() => downloadSingleQR(table, 'MENU')} className="flex-1 py-2 bg-slate-800 text-white hover:bg-slate-700 rounded-xl text-xs font-bold flex flex-col items-center gap-1 transition-colors">
-                                                <UtensilsCrossed size={14} /> Menu QR
+                                            <button onClick={() => downloadSingleQR(table, 'MENU')} className="flex-1 py-2.5 bg-slate-800 text-white hover:bg-slate-700 rounded-xl text-xs font-bold flex flex-col items-center gap-1 transition-colors">
+                                                <UtensilsCrossed size={16} /> Menu QR
                                             </button>
                                         </div>
-                                        <button onClick={() => removeTable(table)} className="w-48 py-2 bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors mt-2">
-                                            <Trash2 size={16} /> Delete Table
+                                        <button onClick={() => removeTable(table)} className="w-56 py-2.5 bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors mt-2">
+                                            <Trash2 size={18} /> Delete Table
                                         </button>
                                     </div>
 
-                                    {/* ⚡ MOBILE ACTION OVERLAY */}
                                     <div className="md:hidden flex flex-col w-full gap-2 mt-8 pt-6 border-t border-slate-100 print:hidden relative z-10 action-overlay">
                                         <button onClick={() => downloadFullCard(table)} className="w-full py-3 bg-indigo-50 text-indigo-700 rounded-xl text-sm font-black flex justify-center items-center gap-2 active:bg-indigo-100">
                                             <Download size={16}/> Save Full Card
