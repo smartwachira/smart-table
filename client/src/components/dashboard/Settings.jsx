@@ -242,6 +242,30 @@ export default function Settings() {
                                     </div>
                                 </div>
 
+                                {/* Shift Management Section */}
+                                <div>
+                                    <h2 className="text-xl font-black text-slate-900 border-b border-slate-100 pb-4 mb-6">Shift Management</h2>
+                                    <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
+                                        <label className="text-sm font-bold text-slate-700 block mb-3">Shift Duration (Rolling Window)</label>
+                                        <div className="flex items-center gap-4">
+                                            <input 
+                                                type="range" 
+                                                name="shift_duration_hours" 
+                                                min="4" max="24" 
+                                                value={formData.shift_duration_hours || 14} 
+                                                onChange={handleChange} 
+                                                className="flex-1 accent-indigo-600"
+                                            />
+                                            <span className="font-black text-indigo-600 bg-indigo-100 px-4 py-2 rounded-xl text-center min-w-[80px] border border-indigo-200 shadow-sm">
+                                                {formData.shift_duration_hours || 14} hrs
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-slate-500 mt-3 font-medium">
+                                            This controls how far back your Dashboard stats and Live Orders history will look. (Set this to cover your longest possible operational shift).
+                                        </p>
+                                    </div>
+                                </div>
+
                                 <div>
                                     <h2 className="text-xl font-black text-slate-900 border-b border-slate-100 pb-4 mb-6">Store Status</h2>
                                     <label className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 border border-slate-200 rounded-2xl cursor-pointer hover:bg-slate-50 transition-colors">

@@ -100,8 +100,12 @@ export const getOrders = async (req, res) => {
     try {
         const venueId = req.user.venueId; 
         
+        //Fetch the venue's custom rolling window setting
+        const venue = await Venue.findByPk(venueId, { attributes: ['shift_duration_hours'] });
+        const shiftHours = venue?.shift_duration_hours || 14; // Fallback to 14 if undefined
+        
         const rollingWindow = new Date();
-        rollingWindow.setHours(rollingWindow.getHours() - 14);
+        rollingWindow.setHours(rollingWindow.getHours() - shiftHours);
 
         const orders = await Order.findAll({
             where: {

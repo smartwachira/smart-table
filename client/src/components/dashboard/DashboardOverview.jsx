@@ -158,7 +158,6 @@ const SkeletonLoader = () => (
     </div>
 );
 
-// ⚡ The 'Cold Start' Onboarding Component
 const OnboardingChecklist = () => (
     <div className="bg-white border border-indigo-100 rounded-[1.5rem] sm:rounded-3xl p-6 sm:p-10 shadow-lg shadow-indigo-50/50 max-w-4xl mx-auto mt-4 sm:mt-8 animate-in fade-in slide-in-from-bottom-4">
         <div className="text-center mb-8">
@@ -196,7 +195,8 @@ const OnboardingChecklist = () => (
 );
 
 export default function DashboardOverview() {
-    const [dateRange, setDateRange] = useState({ label: 'Today', preset: 'today', start: '', end: '' });
+    // ⚡ FIX: Changed default preset to 'shift'
+    const [dateRange, setDateRange] = useState({ label: 'Current Shift', preset: 'shift', start: '', end: '' });
     const [customStart, setCustomStart] = useState('');
     const [customEnd, setCustomEnd] = useState('');
     const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
@@ -216,54 +216,71 @@ export default function DashboardOverview() {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // ⚡ Network Resilience: AbortController integrated
     const fetchDashboardData = useCallback(async (isSilent = false, signal) => {
-        ///const token = localStorage.getItem('auth_token');
         if (!isSilent) setIsLoading(true);
         setErrorMsg(null);
         
         try {
-            const now = new Date();
-            let startDateStr = new Date();
-            let endDateStr = new Date(now);
+            let startDateStr = null; // Let the backend default handles 'shift' logic
+            let endDateStr = null;
 
             if (dateRange.preset === 'custom') {
                 const startObj = new Date(dateRange.start);
                 startObj.setHours(0,0,0,0);
-                startDateStr = startObj;
+                startDateStr = startObj.toISOString();
 
                 const endObj = new Date(dateRange.end);
                 endObj.setHours(23,59,59,999);
-                endDateStr = endObj; 
+                endDateStr = endObj.toISOString(); 
             } else {
+                const now = new Date();
+                let tempStart = new Date();
+
                 switch (dateRange.preset) {
+                    case 'shift':
+                        // ⚡ FIX: We pass nothing. The backend will calculate the shift correctly based on Venue settings.
+                        break;
                     case 'yesterday':
-                        startDateStr.setDate(now.getDate() - 1);
-                        startDateStr.setHours(0,0,0,0);
-                        endDateStr = new Date(startDateStr);
-                        endDateStr.setHours(23,59,59,999);
+                        tempStart.setDate(now.getDate() - 1);
+                        tempStart.setHours(0,0,0,0);
+                        startDateStr = tempStart.toISOString();
+                        
+                        let tempEnd = new Date(tempStart);
+                        tempEnd.setHours(23,59,59,999);
+                        endDateStr = tempEnd.toISOString();
                         break;
                     case '7days':
-                        startDateStr.setDate(now.getDate() - 7);
+                        tempStart.setDate(now.getDate() - 7);
+                        startDateStr = tempStart.toISOString();
+                        endDateStr = now.toISOString();
                         break;
                     case 'thisMonth':
-                        startDateStr = new Date(now.getFullYear(), now.getMonth(), 1);
+                        startDateStr = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+                        endDateStr = now.toISOString();
                         break;
                     case 'lastMonth':
-                        startDateStr = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                        endDateStr = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+                        startDateStr = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+                        endDateStr = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59).toISOString();
                         break;
                     case 'ytd':
-                        startDateStr = new Date(now.getFullYear(), 0, 1);
+                        startDateStr = new Date(now.getFullYear(), 0, 1).toISOString();
+                        endDateStr = now.toISOString();
                         break;
-                    default: 
-                        startDateStr.setHours(0,0,0,0);
+                    default:
+                        break;
                 }
             }
             
+            // Only attach query params if they exist
+            const params = {};
+            if (startDateStr && endDateStr) {
+                params.startDate = startDateStr;
+                params.endDate = endDateStr;
+            }
+            
             const res = await axios.get(`/api/dashboard/overview`, {
-                params: { startDate: startDateStr.toISOString(), endDate: endDateStr.toISOString() },
-                signal // ⚡ Pass the abort signal to Axios
+                params,
+                signal
             });
 
             if (typeof res.data === 'string' && res.data.includes('<!DOCTYPE html>')) {
@@ -283,14 +300,12 @@ export default function DashboardOverview() {
     }, [dateRange]);
 
     useEffect(() => {
-        // ⚡ Create the AbortController for this render cycle
         const controller = new AbortController();
         
         fetchDashboardData(false, controller.signal);
         
         const interval = setInterval(() => fetchDashboardData(true, controller.signal), 60000);
         
-        // ⚡ Cleanup: Abort any pending requests when the component unmounts or dateRange changes
         return () => {
             clearInterval(interval);
             controller.abort();
@@ -322,8 +337,6 @@ export default function DashboardOverview() {
     const { granularity, kpis, livePulse, salesTrends, paymentBreakdown, topItems, categoryBreakdown } = data;
     const hasOrders = kpis.orders?.value > 0;
     
-    // ⚡ 'Cold Start' Detection Logic
-    // If there is no lifetime revenue, we assume it's a brand new account needing onboarding
     const isColdStart = !hasOrders && (data.kpis.revenue?.value === 0);
 
     const sanitizedCategoryBreakdown = (categoryBreakdown || []).map(item => ({
@@ -334,7 +347,6 @@ export default function DashboardOverview() {
     return (
         <div className="p-3 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-4 sm:space-y-6 bg-slate-50 min-h-screen animate-in fade-in duration-500">
             
-            {/* Header & Filters */}
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3 sm:gap-4 mb-2">
                 <div>
                     <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Dashboard Overview</h1>
@@ -348,7 +360,6 @@ export default function DashboardOverview() {
                         </button>
                     )}
 
-                    {/* Custom Date Range Picker */}
                     <div className="relative w-full sm:w-56" ref={datePickerRef}>
                         <button 
                             onClick={() => setIsDatePickerOpen(!isDatePickerOpen)}
@@ -361,8 +372,9 @@ export default function DashboardOverview() {
                         {isDatePickerOpen && (
                             <div className="absolute top-full left-0 sm:left-auto right-0 mt-2 w-full sm:w-80 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2">
                                 <div className="p-2 border-b border-slate-100 grid grid-cols-2 gap-1">
+                                    {/* ⚡ FIX: Updated drop-down list to reflect the Shift setting */}
                                     {[
-                                        { label: 'Today', preset: 'today' }, { label: 'Yesterday', preset: 'yesterday' },
+                                        { label: 'Current Shift', preset: 'shift' }, { label: 'Yesterday', preset: 'yesterday' },
                                         { label: 'Last 7 Days', preset: '7days' }, { label: 'This Month', preset: 'thisMonth' },
                                         { label: 'Last Month', preset: 'lastMonth' }, { label: 'Year to Date', preset: 'ytd' }
                                     ].map(item => (
@@ -396,7 +408,6 @@ export default function DashboardOverview() {
                 </div>
             </div>
 
-            {/* LIVE PULSE BANNER */}
             <div className="bg-slate-900 rounded-[1.5rem] sm:rounded-[2rem] p-5 sm:p-8 text-white shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-5 sm:gap-6 relative overflow-hidden border border-slate-800">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse"></div>
                 <div className="relative z-10">
@@ -418,7 +429,6 @@ export default function DashboardOverview() {
                 </div>
             </div>
 
-            {/* ⚡ Actionable 'Smart Alerts' */}
             {livePulse?.averageFulfillmentTime > 20 && (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start sm:items-center gap-3 animate-in fade-in slide-in-from-top-2">
                     <div className="text-red-500 shrink-0"><AlertTriangle size={20} /></div>
@@ -432,7 +442,6 @@ export default function DashboardOverview() {
             {isColdStart ? (
                 <OnboardingChecklist />
             ) : !hasOrders ? (
-                /* Quiet Day Empty State */
                 <div className="bg-white border border-slate-200 rounded-[1.5rem] sm:rounded-[2rem] p-6 sm:p-12 text-center shadow-sm max-w-3xl mx-auto mt-4 sm:mt-8 animate-in fade-in">
                     <div className="w-16 h-16 sm:w-24 sm:h-24 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6"><Activity size={32} className="text-indigo-300 sm:w-12 sm:h-12" /></div>
                     <h2 className="text-xl sm:text-2xl font-black text-slate-900 mb-2">No orders found for this period</h2>
@@ -440,7 +449,6 @@ export default function DashboardOverview() {
                 </div>
             ) : (
                 <>
-                    {/* KPI Grid - Wrapped in React Router Links */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                         <StatCard title="Gross Revenue" value={formatCurrency(kpis.revenue?.value)} trend={kpis.revenue?.trend} icon={DollarSign} LinkTo="/dashboard/orders" />
                         <StatCard title="Total Orders" value={kpis.orders?.value || 0} trend={kpis.orders?.trend} icon={ShoppingBag} LinkTo="/dashboard/orders" />
@@ -452,7 +460,6 @@ export default function DashboardOverview() {
                         </div>
                     </div>
 
-                    {/* Comparative Line Chart */}
                     <div className="bg-white p-4 sm:p-6 rounded-[1.5rem] sm:rounded-3xl border border-slate-200 shadow-sm">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 gap-3 sm:gap-4">
                             <h3 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">Revenue Trend</h3>
@@ -490,9 +497,7 @@ export default function DashboardOverview() {
                         </div>
                     </div>
 
-                    {/* Bottom Row Charts */}
                     <div className="flex flex-col lg:flex-row gap-4 sm:gap-6">
-                        {/* Doughnut Chart */}
                         <div className="bg-white p-4 sm:p-6 rounded-[1.5rem] sm:rounded-3xl border border-slate-200 shadow-sm flex flex-col lg:w-1/3">
                             <h3 className="text-base sm:text-lg font-black text-slate-900 mb-2 tracking-tight">Gateways</h3>
                             <div className="flex-1 w-full relative h-[200px] sm:h-[250px]">
@@ -515,7 +520,6 @@ export default function DashboardOverview() {
                             </div>
                         </div>
 
-                        {/* Category Breakdown Bar Chart */}
                         <div className="bg-white p-4 sm:p-6 rounded-[1.5rem] sm:rounded-3xl border border-slate-200 shadow-sm flex-1">
                             <h3 className="text-base sm:text-lg font-black text-slate-900 mb-4 sm:mb-6 tracking-tight">Sales by Category</h3>
                             <div className="h-[250px] sm:h-[250px] w-full">
@@ -536,11 +540,9 @@ export default function DashboardOverview() {
                         </div>
                     </div>
 
-                    {/* Top Items Table */}
                     <div className="bg-white rounded-[1.5rem] sm:rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
                         <div className="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center">
                             <h3 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">Top Performing Items</h3>
-                            {/* ⚡ Actionable Routing: Send them to the menu editor */}
                             <Link to="/dashboard/menu" className="text-indigo-600 font-bold hover:underline text-xs sm:text-sm">Manage Menu &rarr;</Link>
                         </div>
                         <div className="overflow-x-auto custom-scrollbar flex-1 max-h-[300px]">

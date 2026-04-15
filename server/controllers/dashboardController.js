@@ -3,32 +3,27 @@ import Order from '../models/Order.js';
 import OrderItem from '../models/OrderItem.js';
 import MenuItem from '../models/MenuItem.js';
 import MenuCategory from '../models/MenuCategory.js';
+import Venue from '../models/Venue.js'; 
 
-// ⚡ ENTERPRISE UPGRADE: Dynamic Temporal Calculator
-const calculateDynamicDataRanges = (startDateQuery, endDateQuery) => {
+const calculateDynamicDataRanges = (startDateQuery, endDateQuery, shiftHours) => {
     let startDate, endDate;
 
-    // ⚡ FIX 1: Corrected JS conditional logic
     if (startDateQuery && endDateQuery){
         startDate = new Date(startDateQuery);
         endDate = new Date(endDateQuery);
     } else {
         const now = new Date();
-        startDate = new Date(now);
-        startDate.setHours(0,0,0,0); //Start of today
-        endDate = now; //Right now
+        endDate = now;
+        startDate = new Date(now.getTime() - (shiftHours * 60 * 60 * 1000));
     }
 
     const durationMs = endDate.getTime() - startDate.getTime();
 
-    // Previous period is the exact identical duration immediately preceding the start date
     const previousStartDate = new Date(startDate.getTime() - durationMs);
     const previousEndDate = new Date(endDate.getTime() - durationMs);
 
-    // Determine Granularity for PostgreSQL DATE_TRUNC
     const durationDays = durationMs / (1000 * 60 * 60 * 24);
     
-    // ⚡ FIX 2: Corrected spelling to match frontend expectations
     let granularity = 'hour';
 
     if (durationDays > 60){
@@ -49,19 +44,33 @@ export const getDashboardOverview = async (req, res) => {
     try {
         const venueId = req.user.venueId;
         const { startDate: queryStart, endDate: queryEnd } = req.query;
-        // ⚡ FIX: Receiving the correctly spelled 'granularity'
-        const { startDate, endDate, previousStartDate, previousEndDate, durationMs, granularity } = calculateDynamicDataRanges(queryStart,queryEnd);
 
+        const venue = await Venue.findByPk(venueId, { attributes: ['shift_duration_hours'] });
+        const shiftHours = venue?.shift_duration_hours || 14;
+
+        const { startDate, endDate, previousStartDate, previousEndDate, durationMs, granularity } = calculateDynamicDataRanges(queryStart, queryEnd, shiftHours);
+
+        // ⚡ THE FIX: Define what constitutes a "Valid" order to prevent ghost orders from inflating stats
+        const validPaymentCondition = {
+            [Op.or]: [
+                { payment_status: 'PAID' },
+                { payment_method: 'CASH' }
+            ]
+        };
+
+        // ⚡ THE FIX: Apply the valid payment condition to ALL historical queries (Revenue, Trends, etc.)
         const currentWhere = {
             venue_id: venueId,
             status: { [Op.notIn]: ['CANCELLED'] },
-            createdAt: { [Op.between]: [startDate, endDate] }
+            createdAt: { [Op.between]: [startDate, endDate] },
+            ...validPaymentCondition
         };
 
         const previousWhere = {
             venue_id: venueId,
-            status: { [Op.notIn]: ["CANCELLED"]}, // ⚡ FIX: Corrected spelling of CANCELLED to match standard
-            createdAt: { [Op.between]: [previousStartDate, previousEndDate]}
+            status: { [Op.notIn]: ["CANCELLED"]}, 
+            createdAt: { [Op.between]: [previousStartDate, previousEndDate]},
+            ...validPaymentCondition
         };
 
         const [
@@ -86,7 +95,6 @@ export const getDashboardOverview = async (req, res) => {
                 raw: true
             }),
             
-            // ⚡ FIX: Injecting the properly spelled `granularity`
             Order.findAll({
                 where: currentWhere,
                 attributes: [
@@ -95,7 +103,7 @@ export const getDashboardOverview = async (req, res) => {
                     [fn('COUNT',col('order_id')),'orders']
                 ],
                 group: [fn("DATE_TRUNC", granularity, col('createdAt'))],
-                order: [[fn("DATE_TRUNC", granularity, col('createdAt')), 'ASC']], // ⚡ Ensure ascending order for charts
+                order: [[fn("DATE_TRUNC", granularity, col('createdAt')), 'ASC']], 
                 raw: true
             }),
             
@@ -127,11 +135,12 @@ export const getDashboardOverview = async (req, res) => {
                 raw: true
             }),
             
+            // ⚡ THE FIX: Apply the valid payment condition to the Live Pulse count so it matches the kitchen exactly!
             Order.count({
                 where: {
                     venue_id: venueId,
                     status: { [Op.in]: ['PENDING', 'PREPARING', 'READY'] },
-                    createdAt: { [Op.gte]: new Date(new Date().setHours(0,0,0,0)) }
+                    ...validPaymentCondition
                 }
             }),
             
@@ -217,7 +226,7 @@ export const getDashboardOverview = async (req, res) => {
         const salesTrends = Object.values(unifiedTrendsMap).sort((a,b) => new Date(a.timeLabel) - new Date(b.timeLabel));
 
         res.status(200).json({
-            granularity, // ⚡ Correctly spelled! The frontend will now format perfectly.
+            granularity, 
             kpis: {
                 revenue: { value: totalRevenue, trend: calculateTrend(totalRevenue, prevRevenue) },
                 orders: { value: totalOrders, trend: calculateTrend(totalOrders, prevTotalOrders) },

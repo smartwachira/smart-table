@@ -55,6 +55,11 @@ const Venue = sequelize.define('Venue',{
     wifi_password: {
         type: DataTypes.STRING,
         allowNull: true
+    },
+    shift_duration_hours: {
+        type: DataTypes.INTEGER,
+        defaultValue: 14,
+        allowNull: false
     }
 }, {
     timestamps: true, // Adds createdAt and updateAt automatically
