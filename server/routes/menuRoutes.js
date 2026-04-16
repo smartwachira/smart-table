@@ -1,27 +1,29 @@
 import express from 'express';
-import { protect,authorize,protectGuest } from '../middleware/authMiddleware.js';
-import { upload  } from '../middleware/uploadMiddleware.js';
-
-const router = express.Router();
+import { protect, authorize, protectGuest } from '../middleware/authMiddleware.js';
+import { upload } from '../middleware/uploadMiddleware.js';
 import * as menuController from '../controllers/menuController.js';
 
-//PUBLIC ROUTE: 
-router.get('/public',protectGuest,menuController.getPublicMenu)
+const router = express.Router();
 
-// 1. Secure all menu routes - only logged-in staff/managers can access
+// PUBLIC ROUTE (Guests via QR Code)
+router.get('/public', protectGuest, menuController.getPublicMenu);
+
+// 1. Secure all subsequent routes - must have a valid staff token
 router.use(protect);
-router.use(authorize('OWNER', 'MANAGER'));
 
+// ==========================================
+// 📖 READ ROUTES (Waiters, Kitchen, Managers, Owners)
+// ==========================================
+router.get('/categories', authorize('OWNER', 'MANAGER', 'WAITER', 'KITCHEN_STAFF'), menuController.getCategories);
+router.get('/items', authorize('OWNER', 'MANAGER', 'WAITER', 'KITCHEN_STAFF'), menuController.getMenuItems);
 
-// 2. Category Routes
-router.get('/categories',menuController.getCategories)
-router.post('/categories', menuController.createCategory);
-
-//3. Menu Item Routes
-router.get('/items', menuController.getMenuItems);
-router.post('/items', upload.single('image'), menuController.createMenuItem);
-router.patch('/items/:itemId',upload.single('image'), menuController.updatedMenuItem);
-router.delete('/categories/:categoryId', protect, menuController.deleteCategory);
-router.delete('/items/:itemId', protect, menuController.deleteMenuItem);
+// ==========================================
+// ✍️ WRITE ROUTES (Managers & Owners ONLY)
+// ==========================================
+router.post('/categories', authorize('OWNER', 'MANAGER'), menuController.createCategory);
+router.post('/items', authorize('OWNER', 'MANAGER'), upload.single('image'), menuController.createMenuItem);
+router.patch('/items/:itemId', authorize('OWNER', 'MANAGER'), upload.single('image'), menuController.updatedMenuItem);
+router.delete('/categories/:categoryId', authorize('OWNER', 'MANAGER'), menuController.deleteCategory);
+router.delete('/items/:itemId', authorize('OWNER', 'MANAGER'), menuController.deleteMenuItem);
 
 export default router;

@@ -10,8 +10,34 @@ export const createOrder = async (req, res) => {
     const t = await sequelize.transaction(); // Start a "Safety Net"
 
     try {
-        // Collect data from request
-        const { venue_id, table_number, items, payment_method, customer_name, phone_number } = req.body;
+        // ⚡ We NO LONGER extract venue_id and table_number blindly from the body!
+        const { items, payment_method, customer_name, phone_number } = req.body;
+
+        let venue_id;
+        let table_number;
+        let staffId = null;
+
+        // ⚡ ZERO-TRUST POLYMORPHIC IDENTITY CHECK
+        if (req.guest) {
+            // 1. The request came from a customer scanning a QR code
+            // We completely ignore req.body and trust ONLY the cryptographically signed token
+            venue_id = req.guest.venueId;
+            table_number = req.guest.tableName;
+            
+        } else if (req.user && ['WAITER', 'MANAGER', 'OWNER', 'KITCHEN_STAFF'].includes(req.user.role)) {
+            // 2. The request came from a staff member using the POS
+            venue_id = req.user.venueId; // Enforce staff can only order for their employed venue
+            table_number = req.body.table_number; // Staff must specify which table they are serving
+            staffId = req.user.userId || req.user.id; // Log the audit trail
+            
+        } else {
+            // 3. Unrecognized or missing identity
+            return res.status(403).json({ message: "Unauthorized order request." });
+        }
+
+        if (!venue_id || !table_number) {
+            return res.status(400).json({ message: "Missing venue or table identification." });
+        }
 
         // STRICT VALIDATION AGAINST VENUE SETTINGS
         const venue = await Venue.findByPk(venue_id);
@@ -29,14 +55,12 @@ export const createOrder = async (req, res) => {
             return res.status(400).json({ message: "Cannot place empty order" });
         }
 
-        // Fetch all requested items from the database to verify prices
+        // Fetch all requested items from the database to verify prices securely
         const itemIds = items.map(item => item.item_id);
         const dbItems = await MenuItem.findAll({ where: { item_id: itemIds } });
 
-        // Calculate the TRUE total amount on the server
         let trueTotalAmount = 0;
 
-        // Prepare the Items Data
         const validatedItems = items.map((clientItem) => {
             const realItem = dbItems.find(dbI => dbI.item_id === clientItem.item_id);
             if (!realItem) throw new Error(`Item ${clientItem.item_id} not found`);
@@ -52,14 +76,15 @@ export const createOrder = async (req, res) => {
 
         // Create the Main Order Record
         const newOrder = await Order.create({
-            venue_id,
-            customer_name: customer_name || `Guest (table ${table_number})`,
-            table_number,
+            venue_id, // Safely extracted from token
+            staff_id: staffId, // Null for guests, populated for staff
+            customer_name: customer_name || (staffId ? `Walk-in (Staff)` : `Guest (table ${table_number})`),
+            table_number, // Safely extracted from token OR staff input
             phone_number,
             total_amount: trueTotalAmount,
             payment_method,
             status: 'PENDING',
-            payment_status: payment_method === 'CASH' ? 'PENDING' : 'PENDING' // Assuming MPesa updates this later
+            payment_status: payment_method === 'CASH' ? 'PENDING' : 'PENDING'
         }, { transaction: t });
 
         const orderItemsData = validatedItems.map(item => ({
@@ -84,7 +109,7 @@ export const createOrder = async (req, res) => {
 
         res.status(201).json({
             message: 'Order placed successfully',
-            orderId: newOrder.order_id,
+            orderId: newOrder.order_id || newOrder.getDataValue('order_id'),
             amount: trueTotalAmount
         });
 

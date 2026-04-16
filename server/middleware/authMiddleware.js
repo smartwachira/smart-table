@@ -1,11 +1,9 @@
-//This code is the Middleware (the "Bouncer") for your backend.
 import jwt from "jsonwebtoken";
 import dotenv from 'dotenv';
 dotenv.config(); //Ensure env vars are loaded
 const JWT_SECRET = process.env.JWT_SECRET || "YOUR_SECRET_KEY";
 
 // Authentication (Who are you? Which Venue are you in?)
-
 export const protect = (req, res, next) => {
     try {
         let token;
@@ -24,7 +22,7 @@ export const protect = (req, res, next) => {
 
         // Bind strict context to the request object
         req.user = {
-            userId: decoded.userId,
+            userId: decoded.userId || decoded.id,
             role: decoded.role,
             name: decoded.name,
             venueId: decoded.venueId // CRITICAL: Implicit Multi-tenant boundary
@@ -45,14 +43,14 @@ export const authorize = (...roles)=>{
 
         if (!roles.includes(req.user.role)){
             return res.status(403).json({
-                message: `Role (${req.user.role} is not authorized to access this resource.)`
+                message: `Role (${req.user.role}) is not authorized to access this resource.`
             });
         }
         next();
     };
 };
 
-// ⚡ NEW: GUEST PROTECTION MIDDLEWARE
+// GUEST PROTECTION MIDDLEWARE
 export const protectGuest = async (req, res, next) => {
     let token;
 
@@ -63,13 +61,12 @@ export const protectGuest = async (req, res, next) => {
             // Verify the token signature
             const decoded = jwt.verify(token, JWT_SECRET);
 
-            // Ensure this is actually a Guest token, not a Staff token trying to hit guest routes
+            // Ensure this is actually a Guest token
             if (decoded.role !== 'GUEST') {
                 return res.status(403).json({ message: 'Not authorized as a guest.' });
             }
 
             // Attach the verified guest data directly to the request!
-            // No database lookup needed because guests are stateless.
             req.guest = {
                 venueId: decoded.venueId,
                 tableName: decoded.tableName,
@@ -83,5 +80,46 @@ export const protectGuest = async (req, res, next) => {
         }
     } else {
         res.status(401).json({ message: 'Not authorized, no session found.' });
+    }
+};
+
+// ⚡ NEW: UNIVERSAL PROTECTION MIDDLEWARE (For Polymorphic Routes)
+// This lets BOTH Staff and Guests through, appropriately tagging them.
+export const protectUniversal = (req, res, next) => {
+    let token;
+    const authHeader = req.headers.authorization;
+
+    if (authHeader && authHeader.startsWith('Bearer')) {
+        token = authHeader.split(' ')[1];
+    }
+
+    if (!token) {
+        return res.status(401).json({ message: 'Not authorized, no token provided.' });
+    }
+
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+
+        if (decoded.role === 'GUEST') {
+            // It's a Customer! Attach to req.guest
+            req.guest = {
+                venueId: decoded.venueId,
+                tableName: decoded.tableName,
+                orderMode: decoded.orderMode
+            };
+        } else {
+            // It's a Staff Member! Attach to req.user
+            req.user = {
+                userId: decoded.userId || decoded.id,
+                role: decoded.role,
+                name: decoded.name,
+                venueId: decoded.venueId 
+            };
+        }
+
+        next();
+    } catch (error) {
+        console.error("Universal Auth Error:", error.message);
+        res.status(401).json({ message: 'Session expired or invalid token.' });
     }
 };

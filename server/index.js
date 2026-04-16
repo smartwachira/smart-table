@@ -118,6 +118,7 @@ OrderItem.belongsTo(Order, {foreignKey: "order_id"});
 MenuItem.hasMany(OrderItem, {foreignKey: 'item_id'});
 OrderItem.belongsTo(MenuItem, {foreignKey: 'item_id'});
 
+Order.belongsTo(User, { as: 'Creator', foreignKey: 'staff_id'});
 
 
 Venue.hasMany(User, { 

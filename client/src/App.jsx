@@ -31,6 +31,7 @@ import OrderHistory from "./components/dashboard/OrderHistory";
 import MenuManagement from "./components/dashboard/MenuManagement";
 import QRGenerator from "./components/dashboard/QRGenerator";
 import Settings from "./components/dashboard/Settings";
+import POS from './components/dashboard/POS';
 
 // --- Terminal Components ---
 import Kitchen from "./components/Kitchen";
@@ -42,20 +43,24 @@ function AxiosInterceptor({ children }) {
 
   useEffect(() => {
     // 1. REQUEST INTERCEPTOR: Attach the correct token before sending
-    const reqInterceptor = axios.interceptors.request.use((config) =>{
-      // Check if the user is currently navigating the public menu
-      const isPublicMenuPath = window.location.pathname.includes('/menu') || window.location.pathname.includes('/checkout');
+    const reqInterceptor = axios.interceptors.request.use((config) => {
+      const currentPath = window.location.pathname;
 
-      //Grab the appropriate token
-      const token = isPublicMenuPath
+      // ⚡ FIX: Use startsWith to prevent /dashboard/menu from colliding with /menu
+      const isGuestRoute = currentPath.startsWith('/menu') || 
+                           currentPath.startsWith('/checkout') || 
+                           currentPath.startsWith('/order-status');
+
+      // Grab the appropriate token
+      const token = isGuestRoute
         ? localStorage.getItem('guest_token')
         : localStorage.getItem('auth_token');
 
       if (token){
         config.headers.Authorization = `Bearer ${token}`;
       }
-      return config
-    })
+      return config;
+    });
 
     // 2. RESPONSE INTERCEPTOR: Handle 401s properly based on context
     const resInterceptor = axios.interceptors.response.use(
@@ -65,11 +70,18 @@ function AxiosInterceptor({ children }) {
         if (error.response && error.response.status === 401) {
           const currentPath = window.location.pathname;
           
-          // Route based on context
-          if (currentPath.includes('/menu') || currentPath.includes('/checkout')) {
+          // ⚡ FIX: Use startsWith for precise routing bounds
+          const isGuestRoute = currentPath.startsWith('/menu') || 
+                               currentPath.startsWith('/checkout') || 
+                               currentPath.startsWith('/order-status');
+                               
+          const isStaffRoute = currentPath.startsWith('/dashboard') || 
+                               currentPath.startsWith('/kitchen');
+          
+          if (isGuestRoute) {
             localStorage.removeItem('guest_token');
             navigate('/scan', { replace: true });
-          } else if (currentPath.includes('/dashboard') || currentPath.includes('/kitchen')) {
+          } else if (isStaffRoute) {
             localStorage.removeItem('auth_token');
             navigate('/login', { replace: true });
           }
@@ -80,8 +92,9 @@ function AxiosInterceptor({ children }) {
 
     // Cleanup on unmount
     return () => {
-      axios.interceptors.response.eject(reqInterceptor);
-      axios.interceptors.response.eject(resInterceptor)
+      // ⚡ FIX: Corrected typo. reqInterceptor must be ejected from .request!
+      axios.interceptors.request.eject(reqInterceptor);
+      axios.interceptors.response.eject(resInterceptor);
     };
   }, [navigate]);
 
@@ -124,6 +137,7 @@ export default function App() {
                   <Route index element={<DashboardOverview/>}/>
                   <Route path="staff" element={<StaffManagement />} />
                   <Route path="orders" element={<LiveOrders />} />
+                  <Route path='pos' element={<POS />}/>
                   <Route path="history" element={<OrderHistory />} />
                   <Route path="menu" element={<MenuManagement />} />
                   <Route path="qr" element={<QRGenerator />} />

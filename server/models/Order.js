@@ -55,7 +55,16 @@ const Order = sequelize.define ('Order', {
     cash_collected_by: {
         type: DataTypes.UUID,
         allowNull:true
-    }
+    },
+    staff_id: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        references: {
+            model: 'users',
+            key: 'user_id'
+        },
+        comment: 'The ID of the staff member who manually punched in this order via the POS'
+    },
 
 
 }, {

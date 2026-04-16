@@ -11,7 +11,8 @@ import {
     History,
     Store,
     Smartphone,
-    Menu,   
+    Menu, 
+    MonitorSmartphone,  
     X,
     ChefHat // ⚡ Imported ChefHat for the Live Orders tab
 } from 'lucide-react';
@@ -48,7 +49,7 @@ export default function DashboardLayout() {
 
     const navItems = [
         { path: '/dashboard', icon: LayoutDashboard, label: 'Overview' },
-        // ⚡ Fixed Label and Icon for Live Orders
+        { path: '/dashboard/pos', icon: MonitorSmartphone, label: 'POS Terminal'},
         { path: '/dashboard/orders', icon: ChefHat, label: 'Live Orders' }, 
         { path: '/dashboard/history', icon: History, label: 'Order History' }, 
         { path: '/dashboard/menu', icon: MenuSquare, label: 'Menu Engineering' },
