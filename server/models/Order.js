@@ -65,8 +65,6 @@ const Order = sequelize.define ('Order', {
         },
         comment: 'The ID of the staff member who manually punched in this order via the POS'
     },
-
-
 }, {
     timestamps: true, // Adds createdAt and updateAt automatically
     tableName: 'Orders' 

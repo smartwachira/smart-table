@@ -32,6 +32,7 @@ import MenuManagement from "./components/dashboard/MenuManagement";
 import QRGenerator from "./components/dashboard/QRGenerator";
 import Settings from "./components/dashboard/Settings";
 import POS from './components/dashboard/POS';
+import MyOrders from './components/dashboard/MyOrders';
 
 // --- Terminal Components ---
 import Kitchen from "./components/Kitchen";
@@ -138,6 +139,7 @@ export default function App() {
                   <Route path="staff" element={<StaffManagement />} />
                   <Route path="orders" element={<LiveOrders />} />
                   <Route path='pos' element={<POS />}/>
+                  <Route path='my-orders' element={<MyOrders/>}/>
                   <Route path="history" element={<OrderHistory />} />
                   <Route path="menu" element={<MenuManagement />} />
                   <Route path="qr" element={<QRGenerator />} />

@@ -166,10 +166,11 @@ export default function LiveOrders() {
         if (!searchQuery.trim()) return true;
         
         const query = searchQuery.toLowerCase().trim();
-        const shortId = order.order_id ? order.order_id.slice(0, 4).toLowerCase() : '';
-        const fullId = order.order_id ? order.order_id.toLowerCase() : '';
-        const customer = order.customer_name ? order.customer_name.toLowerCase() : '';
-        const table = order.table_number ? order.table_number.toLowerCase() : '';
+        // ⚡ FIX: Wrap order_id and table_number in String() to prevent .slice() and .includes() TypeErrors
+        const shortId = order.order_id ? String(order.order_id).slice(0, 4).toLowerCase() : '';
+        const fullId = order.order_id ? String(order.order_id).toLowerCase() : '';
+        const customer = order.customer_name ? String(order.customer_name).toLowerCase() : '';
+        const table = order.table_number ? String(order.table_number).toLowerCase() : '';
         const itemNames = order.OrderItems ? order.OrderItems.map(i => (i.MenuItem?.name || i.name || '').toLowerCase()).join(' ') : '';
 
         return shortId.includes(query) || 
@@ -182,7 +183,6 @@ export default function LiveOrders() {
     const pendingOrders = filteredOrders.filter(o => o.status === 'PENDING');
     const preparingOrders = filteredOrders.filter(o => o.status === 'PREPARING');
     const readyOrders = filteredOrders.filter(o => o.status === 'READY');
-    // ⚡ FIX: Recall now includes CANCELLED orders from the backend query
     const recallOrders = filteredOrders.filter(o => ['COMPLETED', 'CANCELLED'].includes(o.status));
 
     if (loading) {
@@ -200,19 +200,19 @@ export default function LiveOrders() {
         const isPaymentPending = order.payment_status === 'PENDING';
         const isCancelled = order.status === 'CANCELLED';
         
-        const shortOrderId = order.order_id ? order.order_id.slice(0, 4).toUpperCase() : 'N/A';
+        // ⚡ FIX: Wrap in String() before slicing
+        const shortOrderId = order.order_id ? String(order.order_id).slice(0, 4).toUpperCase() : 'N/A';
         
         let slaColor = 'bg-white border-slate-200';
         let headerColor = 'bg-slate-50 text-slate-700';
         let timeColor = 'text-slate-500';
         let isExtremeOverdue = false;
 
-        // ⚡ THE TEMPORAL WARNING SYSTEM
         if (isRecall) {
             slaColor = isCancelled ? 'bg-slate-50 border-red-200 opacity-70' : 'bg-slate-50 border-slate-200 opacity-80';
             headerColor = isCancelled ? 'bg-red-50 text-red-500 line-through' : 'bg-slate-200 text-slate-500';
         } else if (order.status !== 'READY') {
-            if (elapsedMins >= 120) { // 2 Hours = Orphaned/Extreme Warning!
+            if (elapsedMins >= 120) { 
                 isExtremeOverdue = true;
                 slaColor = 'bg-red-50 border-red-500 shadow-red-200 animate-pulse-slow border-4';
                 headerColor = 'bg-red-600 text-white';
@@ -231,14 +231,12 @@ export default function LiveOrders() {
         return (
             <div ref={isFirst ? newOrderScrollRef : null} className={`flex flex-col rounded-2xl shadow-sm border-2 overflow-hidden transition-all hover:shadow-md shrink-0 relative ${slaColor}`}>
                 
-                {/* ⚡ EXTREME OVERDUE WARNING BANNER */}
                 {isExtremeOverdue && (
                     <div className="bg-red-600 text-white text-[10px] font-black uppercase tracking-widest text-center py-1 flex items-center justify-center gap-2">
                         <AlertOctagon size={12} /> Orphaned Ticket Alert <AlertOctagon size={12} />
                     </div>
                 )}
 
-                {/* Header */}
                 <div className={`p-3 md:p-4 flex justify-between items-start ${headerColor}`}>
                     <div>
                         <div className="flex items-center gap-2 mb-1">
@@ -264,7 +262,6 @@ export default function LiveOrders() {
                     </div>
                 </div>
 
-                {/* Payment Status Banner */}
                 <div className="px-3 md:px-4 py-2 border-b border-slate-100 bg-white/50 flex justify-between items-center">
                     <span className="text-xs font-bold text-slate-500">Total: {Number(order.total_amount).toLocaleString('en-KE')} KES</span>
                     {isCashPending && !isCancelled ? (
@@ -279,7 +276,6 @@ export default function LiveOrders() {
                     )}
                 </div>
 
-                {/* Items List */}
                 <div className={`p-3 md:p-4 flex-1 space-y-3 bg-white/40 ${isCancelled ? 'grayscale opacity-50' : ''}`}>
                     {order.OrderItems?.map((item, idx) => (
                         <div key={idx} className="flex gap-2 md:gap-3 text-xs md:text-sm">
@@ -296,7 +292,6 @@ export default function LiveOrders() {
                             </div>
                         </div>
                     ))}
-                    {/* Display Cancellation Reason if it exists */}
                     {isCancelled && order.notes && (
                          <div className="mt-4 p-2 bg-red-50 border border-red-100 rounded text-[10px] font-bold text-red-600">
                              {order.notes}
@@ -304,7 +299,6 @@ export default function LiveOrders() {
                     )}
                 </div>
                 
-                {/* Actions */}
                 {!isCancelled && (
                     <div className="p-2 md:p-3 bg-white/60 border-t border-slate-100 flex flex-col gap-2">
                         {isCashPending && ['MANAGER', 'OWNER', 'STAFF'].includes(userRole) && (
@@ -378,7 +372,6 @@ export default function LiveOrders() {
     return (
         <div className="max-w-[1800px] mx-auto p-3 md:p-6 lg:h-[100dvh] flex flex-col bg-slate-100 overflow-hidden">
             
-            {/* Header with Search */}
             <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center bg-white p-4 md:p-5 rounded-2xl shadow-sm border border-slate-200 mb-4 shrink-0 gap-4">
                 <div>
                     <h1 className="text-xl md:text-2xl lg:text-3xl font-black text-slate-900 flex items-center gap-2 md:gap-3 tracking-tight">
@@ -412,7 +405,6 @@ export default function LiveOrders() {
                 </div>
             </div>
 
-            {/* MOBILE TABS */}
             <div className="flex lg:hidden bg-slate-200/50 p-1.5 rounded-2xl gap-1 mb-4 overflow-x-auto custom-scrollbar snap-x shrink-0">
                 {[
                     { id: 'PENDING', label: 'New', count: pendingOrders.length, icon: BellRing, color: 'text-amber-600' },
@@ -432,7 +424,6 @@ export default function LiveOrders() {
                 ))}
             </div>
 
-            {/* THE KANBAN BOARD */}
             {filteredOrders.length === 0 ? (
                 <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-3xl border border-dashed border-slate-300 m-2 min-h-[50vh]">
                     <div className="w-16 h-16 md:w-24 md:h-24 bg-slate-50 text-slate-300 rounded-full flex items-center justify-center mb-4 md:mb-6">
@@ -509,7 +500,6 @@ export default function LiveOrders() {
                 </div>
             )}
 
-            {/* Cancellation Modal */}
             {cancelModal.isOpen && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setCancelModal({ isOpen: false, orderId: null })}></div>
