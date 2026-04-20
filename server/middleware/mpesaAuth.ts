@@ -1,9 +1,15 @@
 import axios from 'axios';
+import { Request, Response, NextFunction } from 'express';
 
-export const generateMpesaToken = async (req, res, next)=>{
+// 🛡️ We extend the base Express Request to include our custom property
+export interface MpesaRequest extends Request {
+    mpesaToken?: string;
+}
+
+export const generateMpesaToken = async (req: MpesaRequest, res: Response, next: NextFunction):Promise<void> =>{
     try {
-        const consumerKey = process.env.DARAJA_CONSUMER_KEY;
-        const consumerSecret = process.env.DARAJA_CONSUMER_SECRET;
+        const consumerKey = process.env.DARAJA_CONSUMER_KEY as string;
+        const consumerSecret = process.env.DARAJA_CONSUMER_SECRET as string;
         const environment = process.env.DARAJA_ENVIRONMENT || 'sandbox';
 
         //1. Daraja requires Base64 encoding of 'key:secret'
@@ -28,7 +34,7 @@ export const generateMpesaToken = async (req, res, next)=>{
         //Move to the next function (the STK Push controller)
         next();
 
-    } catch (error){
+    } catch (error: any){
         console.error('Daraja Auth Error:',error?.response?.data || error.message);
         res.status(500).json({
             message: 'Failed to authenticate with safaricom Daraja',

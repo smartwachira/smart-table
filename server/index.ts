@@ -1,9 +1,9 @@
-import express from "express"; //handles API requests
+import express, {Request,Response} from "express"; //handles API requests
 import cors from 'cors';
 import dotenv from 'dotenv';
 import sequelize from './config/db.js';
 import http from 'http';
-import { Server } from 'socket.io';
+import { Server,Socket } from 'socket.io';
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -61,22 +61,22 @@ app.use('/api/settings',settingsRoutes);
 app.use('/api/dashboard',dashboardRoutes)
 
 // Socket Connection Logic
-io.on('connection',(socket)=>{
+io.on('connection',(socket: Socket)=>{
   console.log(`⚡: New Client Connected (${socket.id})`);
 
   //Join a specific "Room" based on Venue ID
-  socket.on("join_venue", (venueId) =>{
+  socket.on("join_venue", (venueId: string) =>{
     socket.join(venueId);
     console.log(`User joined venue room: ${venueId}`)
   });
 
   //Listen for "New Order" event from Customer
-  socket.on('new_order',(data)=>{
+  socket.on('new_order',(data: { venueId: string; [key: string]: any})=>{
     io.to(data.venueId).emit("receive_order", data);
   });
 
   //Listen for "Order Update" event from Kitchen
-  socket.on("update-order-status", (data)=>{
+  socket.on("update-order-status", (data: { venueId: string; [key: string]: any})=>{
     io.to(data.venueId).emit(`orderUpdated`, data)
   })
 
@@ -92,54 +92,77 @@ const PORT = process.env.PORT || 5000;
 
 
 // Define Associations (Relationships)
+// ==========================================
+// Define Associations (Relationships)
+// ==========================================
+
 Venue.hasMany(MenuCategory,{
   foreignKey: 'venue_id',
+  sourceKey: 'venue_id',
   onDelete: 'CASCADE'
-
 });
 MenuCategory.belongsTo(Venue,{
-  foreignKey: 'venue_id'
+  foreignKey: 'venue_id',
+  targetKey: 'venue_id'
 });
 
 MenuCategory.hasMany(MenuItem,{
   foreignKey: 'category_id',
+  sourceKey: 'category_id',
   onDelete: 'CASCADE'
 });
 MenuItem.belongsTo(MenuCategory, {
-  foreignKey: 'category_id'
+  foreignKey: 'category_id',
+  targetKey: 'category_id'
 });
 
-Venue.hasMany(Order, {foreignKey: "venue_id"});
-Order.belongsTo(Venue, {foreignKey: "venue_id"});
+Venue.hasMany(Order, { foreignKey: "venue_id", sourceKey: 'venue_id' });
+Order.belongsTo(Venue, { foreignKey: "venue_id", targetKey: 'venue_id' });
 
-Order.hasMany(OrderItem, {foreignKey: "order_id"});
-OrderItem.belongsTo(Order, {foreignKey: "order_id"});
+Order.hasMany(OrderItem, { foreignKey: "order_id", sourceKey: 'order_id' });
+OrderItem.belongsTo(Order, { foreignKey: "order_id", targetKey: 'order_id' });
 
-MenuItem.hasMany(OrderItem, {foreignKey: 'item_id'});
-OrderItem.belongsTo(MenuItem, {foreignKey: 'item_id'});
-
+MenuItem.hasMany(OrderItem, { foreignKey: 'item_id', sourceKey: 'item_id' });
+OrderItem.belongsTo(MenuItem, { foreignKey: 'item_id', targetKey: 'item_id' });
 
 Venue.hasMany(User, { 
   foreignKey: 'venue_id',
+  sourceKey: 'venue_id',
   onDelete: 'CASCADE',
   as: 'staff'
 });
 User.belongsTo(Venue, {
   foreignKey: "venue_id",
+  targetKey: 'venue_id',
   as: 'venue'
-})
+});
 
+// ⚡ THE FIX: Explicitly mapping the User keys prevents the SQL crashes
 User.hasMany(Order, {
   foreignKey: 'cash_collected_by',
+  sourceKey: 'user_id',
   as: 'CollectedOrders'
-})
+});
 Order.belongsTo(User, {
   foreignKey: 'cash_collected_by',
+  targetKey: 'user_id',
   as: 'CashCollector'
-})
+});
+
+// ⚡ Adding the Creator association for the POS
+User.hasMany(Order, {
+  foreignKey: 'staff_id',
+  sourceKey: 'user_id',
+  as: 'CreatedOrders'
+});
+Order.belongsTo(User, {
+  foreignKey: 'staff_id',
+  targetKey: 'user_id',
+  as: 'Creator'
+});
 
 //Routes
-app.get('/', (req, res) =>{
+app.get('/', (req:Request, res:Response) =>{
     res.json({ message: "SmartTable API is running"});
 });
 
@@ -153,7 +176,7 @@ const startServer = async () => {
 
     //2. Sync models to database
     // This creates the tables if they don't exit
-    await sequelize.sync({force: false, alter: true});
+    await sequelize.sync({force: false,alert: true});
     console.log('✅ Database synced.')
 
     //3. start listening if DB connects

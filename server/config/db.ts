@@ -3,10 +3,17 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// Ensure the environment variable exists to satisfy TypeScript
+const databaseUrl = process.env.DATABASE_URL as string;
+
+if (!databaseUrl){
+    throw new Error("❌ DATABASE_URL is not defined in your .env file");
+}
+
 //Create the sequelize instance
 const sequelize = new Sequelize(
     //The security Layer (Environment Variables): "All-in -one Connection String"
-    process.env.DATABASE_URL,
+    databaseUrl,
     {
         //The Location & Language
         dialect: "postgres",
