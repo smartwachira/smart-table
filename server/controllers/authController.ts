@@ -84,6 +84,7 @@ export const registerVenue = async (req: Request<{}, {}, RegisterVenueBody>, res
             location: location,
             contact_email: managerEmail,
             tax_rate: 0,
+            shift_duration_hours: 14,
             is_accepting_orders: true,
             allow_cash_payments: true
         }, { transaction: t });

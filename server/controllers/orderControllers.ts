@@ -1,4 +1,6 @@
-import Order from '../models/Order.js';
+import { Request, Response} from 'express';
+import { Server } from 'socket.io';
+import Order, { OrderStatus} from '../models/Order.js';
 import OrderItem from '../models/OrderItem.js';
 import MenuItem from '../models/MenuItem.js';
 import sequelize from '../config/db.js';
@@ -6,15 +8,40 @@ import { Op } from 'sequelize';
 import Venue from '../models/Venue.js';
 import User from '../models/User.js';
 
-export const createOrder = async (req, res) => {
+// 🛡️ Strict Payload Definitions
+interface OrderItemPayload {
+    item_id: string;
+    quantity: number;
+}
+
+interface CreateOrderBody {
+    items: OrderItemPayload[];
+    payment_method: string;
+    customer_name?: string;
+    phone_number?: string;
+    table_number?: string;
+}
+
+interface updateOrderStatusBody {
+    status: OrderStatus | string;
+    cancelReason?: string;
+
+}
+// 🛡️ Note: Query parameters are always strings or undefined in Express
+interface HistoricalOrdersQuery {
+    startDate?: string;
+    endDate?: string;
+}
+
+export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Response): Promise<Response | void> => {
     const t = await sequelize.transaction(); // Start a "Safety Net"
 
     try {
         const { items, payment_method, customer_name, phone_number } = req.body;
 
-        let venue_id;
-        let table_number;
-        let staffId = null;
+        let venue_id: string;
+        let table_number: string;
+        let staffId: string | null = null;
 
         // ⚡ ZERO-TRUST POLYMORPHIC IDENTITY CHECK
         if (req.guest) {
@@ -22,8 +49,8 @@ export const createOrder = async (req, res) => {
             table_number = req.guest.tableName;
         } else if (req.user && ['WAITER', 'MANAGER', 'OWNER', 'KITCHEN_STAFF'].includes(req.user.role)) {
             venue_id = req.user.venueId; 
-            table_number = req.body.table_number; 
-            staffId = req.user.userId || req.user.id; 
+            table_number = req.body.table_number as string; 
+            staffId = req.user.userId ; 
         } else {
             return res.status(403).json({ message: "Unauthorized order request." });
         }
@@ -61,7 +88,7 @@ export const createOrder = async (req, res) => {
             return {
                 item_id: realItem.item_id,
                 quantity: clientItem.quantity,
-                price_at_time: realItem.price
+                price_at_time: realItem.price || 0
             };
         });
 
@@ -77,6 +104,8 @@ export const createOrder = async (req, res) => {
             payment_status: 'PENDING'
         }, { transaction: t });
 
+
+        // 🛡️ Map the associated foreign key before bulk insertion
         const orderItemsData = validatedItems.map(item => ({
             ...item,
             order_id: newOrder.order_id || newOrder.getDataValue('order_id')
@@ -99,16 +128,16 @@ export const createOrder = async (req, res) => {
             amount: trueTotalAmount
         });
 
-    } catch (error) {
+    } catch (error: any) {
         await t.rollback(); 
         console.error('❌ Order Error:', error);
         res.status(500).json({ message: 'Failed to place order', error: error.message });
     }
 };
 
-export const getOrders = async (req, res) => {
+export const getOrders = async (req: Request, res: Response): Promise<Response | void> =>{
     try {
-        const venueId = req.user?.venueId; 
+        const venueId = req.user!.venueId; 
         
         // ⚡ FIX 1: Removed strict attributes to prevent "Column does not exist" crashes
         const venue = await Venue.findByPk(venueId);
@@ -137,7 +166,7 @@ export const getOrders = async (req, res) => {
                         ]
                     }
                 ]
-            },
+            } as any,
             include: [
                 {
                     model: OrderItem,
@@ -154,7 +183,7 @@ export const getOrders = async (req, res) => {
 
         // Ensure the frontend always gets the 'name' property it expects without crashing SQL
         const safeOrders = orders.map(order => {
-            const orderJson = order.toJSON();
+            const orderJson = order.toJSON() as any;
             if (orderJson.CashCollector) {
                 orderJson.CashCollector.name = orderJson.CashCollector.name || orderJson.CashCollector.username || 'Staff';
             }
@@ -169,11 +198,11 @@ export const getOrders = async (req, res) => {
     }
 };
 
-export const updateOrderStatus = async (req, res) => {
+export const updateOrderStatus = async (req: Request<{orderId: string}, {}, updateOrderStatusBody>, res: Response) => {
     try {
         const { orderId } = req.params;
         const { status, cancelReason } = req.body;
-        const venueId = req.user.venueId;
+        const venueId = req.user!.venueId;
 
         const validStates = ['PENDING', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED'];
         
@@ -199,7 +228,7 @@ export const updateOrderStatus = async (req, res) => {
             });
         }
 
-        if (upperStatus === 'CANCELLED' && !['MANAGER', 'OWNER'].includes(req.user.role)) {
+        if (upperStatus === 'CANCELLED' && !['MANAGER', 'OWNER'].includes(req.user!.role)) {
             return res.status(403).json({ message: "Only managers can cancel active orders." });
         }
 
@@ -228,7 +257,7 @@ export const updateOrderStatus = async (req, res) => {
     }
 };
 
-export const getOrderStatus = async (req, res) => {
+export const getOrderStatus = async (req: Request<{orderId: string}, {}>, res: Response): Promise<Response | void> => {
     try {
         const { orderId } = req.params;
         const order = await Order.findByPk(orderId, {
@@ -243,11 +272,11 @@ export const getOrderStatus = async (req, res) => {
     }
 };
 
-export const markCashCollected = async (req, res) => {
+export const markCashCollected = async (req: Request<{orderId: string}, {}>, res: Response): Promise<Response | void> => {
     try {
         const { orderId } = req.params;
-        const venueId = req.user.venueId;
-        const staffId = req.user.userId || req.user.id; 
+        const venueId = req.user!.venueId;
+        const staffId = req.user!.userId 
 
         const order = await Order.findOne({ where: { order_id: orderId, venue_id: venueId } });
 
@@ -261,8 +290,8 @@ export const markCashCollected = async (req, res) => {
         // ⚡ FIX 3: Removed strict username mapping
         const staffMember = await User.findByPk(staffId);
 
-        const updatedOrderData = order.toJSON();
-        updatedOrderData.CashCollector = { name: staffMember?.name || staffMember?.username || 'Unknown Staff' };
+        const updatedOrderData = order.toJSON() as any;
+        updatedOrderData.CashCollector = {name: staffMember?.username || 'Unknown Staff' };
         
         await order.save();
 
@@ -279,9 +308,9 @@ export const markCashCollected = async (req, res) => {
     }
 };
 
-export const getHistoricalOrders = async (req, res) => {
+export const getHistoricalOrders = async (req: Request<{}, {}, {}, HistoricalOrdersQuery>, res: Response): Promise<Response | void> => {
     try {
-        const venueId = req.user.venueId;
+        const venueId = req.user!.venueId;
         const { startDate, endDate } = req.query;
 
         let dateFilter = {};
@@ -313,7 +342,7 @@ export const getHistoricalOrders = async (req, res) => {
         });
 
         const safeOrders = orders.map(order => {
-            const orderJson = order.toJSON();
+            const orderJson = order.toJSON() as any;
             if (orderJson.CashCollector) {
                 orderJson.CashCollector.name = orderJson.CashCollector.name || orderJson.CashCollector.username || 'Staff';
             }

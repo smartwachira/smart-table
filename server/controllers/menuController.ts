@@ -1,13 +1,23 @@
+import { Request, Response } from 'express';
 import MenuCategory from '../models/MenuCategory.js';
 import MenuItem from '../models/MenuItem.js';
 import Venue from '../models/Venue.js'
-//import { v4 as uuidv4 } from 'uuid';
+
+interface CreateCategoryBody { name: string}
+
+interface MenuPayloadBody {
+    name: string;
+    price: string | number;
+    description?: string;
+    category_id: string;
+    is_available: string |  boolean
+}
 
 // --- CATEGORY MANAGEMENT ---
 
-export const getCategories = async (req,res) =>{
+export const getCategories = async (req: Request, res: Response): Promise<Response | void> =>{
     try {
-        const venueId = req.user.venueId;
+        const venueId = req.user!.venueId;
         const categories = await MenuCategory.findAll({
             where: { venue_id: venueId},
             order: [['createdAt', 'ASC']]
@@ -20,9 +30,9 @@ export const getCategories = async (req,res) =>{
     }
 }
 
-export const createCategory =async (req,res)=>{
+export const createCategory =async (req: Request<{}, {}, CreateCategoryBody>, res: Response): Promise<Response | void> =>{
     try{
-        const venueId = req.user.venueId;
+        const venueId = req.user!.venueId;
         const { name } = req.body;
 
         if (!name) return res.status(400).json({ message: "Category name is required."});
@@ -37,9 +47,9 @@ export const createCategory =async (req,res)=>{
 };
 
 // --- MENU ITEM MANAGEMENT ---
-export const getMenuItems = async (req, res) => {
+export const getMenuItems = async (req: Request, res: Response): Promise<Response | void> => {
     try {
-        const venueId = req.user.venueId;
+        const venueId = req.user!.venueId;
 
         //Fetch items by joining with Categories to ensure we only get this venue's items
         const items = await MenuItem.findAll({
@@ -57,9 +67,9 @@ export const getMenuItems = async (req, res) => {
     }
 };
 
-export const createMenuItem = async (req,res)=>{
+export const createMenuItem = async (req: Request<{}, {}, MenuPayloadBody>, res: Response): Promise<Response | void> =>{
     try{
-        const venueId = req.user.venueId;
+        const venueId = req.user!.venueId;
         const { name, price, description, category_id, is_available} = req.body;
 
         //Security Check: Prevent IDOR by ensuring the category belongs to this venue
@@ -77,7 +87,7 @@ export const createMenuItem = async (req,res)=>{
 
         const newItem = await MenuItem.create({
             name,
-            price: parseFloat(price),
+            price: Number(price),
             description,
             category_id,
             // Multer form-data converts booleans to strings ("true"/"false")
@@ -92,9 +102,9 @@ export const createMenuItem = async (req,res)=>{
     }
 };
 
-export const updatedMenuItem = async (req,res)=>{
+export const updatedMenuItem = async (req: Request<{itemId: string}, {}, MenuPayloadBody>, res: Response): Promise<Response | void> =>{
     try {
-        const venueId = req.user.venueId;
+        const venueId = req.user!.venueId;
         const { itemId } = req.params;
         const { name,price, description, category_id,is_available} = req.body;
 
@@ -111,7 +121,7 @@ export const updatedMenuItem = async (req,res)=>{
 
         //Update fields if they were provided
         if (name) item.name = name;
-        if (price) item.price = parseFloat(price);
+        if (price) item.price = Number(price);
         if (description) item.description = description;
         if (category_id) item.category_id = category_id;
 
@@ -135,9 +145,9 @@ export const updatedMenuItem = async (req,res)=>{
 }
 
 // ---PUBLIC CUSTOMER MENU ---
-export const getPublicMenu = async (req,res)=>{
+export const getPublicMenu = async (req: Request, res: Response): Promise<Response | void> =>{
     try {
-        const venueId = req.guest.venueId;
+        const venueId = req.guest!.venueId;
 
         if (!venueId) {
             return res.status(400).json({ message: "Invalid session context." });
@@ -173,10 +183,10 @@ export const getPublicMenu = async (req,res)=>{
 }
 
 // ⚡ DELETE CATEGORY (Only if empty)
-export const deleteCategory = async (req, res) => {
+export const deleteCategory =  async (req: Request<{categoryId: string}, {}>, res: Response): Promise<Response | void> =>{
     try {
         const { categoryId } = req.params;
-        const venueId = req.user.venueId;
+        const venueId = req.user!.venueId;
 
         // 1. Find the category and verify ownership securely
         const category = await MenuCategory.findByPk(categoryId);
@@ -210,10 +220,10 @@ export const deleteCategory = async (req, res) => {
 };
 
 // ⚡ DELETE MENU ITEM (Safe Delete)
-export const deleteMenuItem = async (req, res) => {
+export const deleteMenuItem = async (req: Request<{itemId: string}, {}>, res: Response) : Promise<Response | void> =>{
     try {
         const { itemId } = req.params;
-        const venueId = req.user.venueId;
+        const venueId = req.user!.venueId;
 
         // 1. Find the specific menu item
         const item = await MenuItem.findByPk(itemId);
@@ -234,7 +244,7 @@ export const deleteMenuItem = async (req, res) => {
             await item.destroy(); 
             res.status(200).json({ message: "Item deleted successfully." });
             
-        } catch (dbError) {
+        } catch (dbError: any) {
             // Safety Check: Is it linked to past orders in the OrderItems table?
             if (dbError.name === 'SequelizeForeignKeyConstraintError') {
                 return res.status(400).json({ 

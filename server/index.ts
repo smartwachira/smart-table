@@ -176,7 +176,7 @@ const startServer = async () => {
 
     //2. Sync models to database
     // This creates the tables if they don't exit
-    await sequelize.sync({force: false,alert: true});
+    await sequelize.sync({force: false, alter: true});
     console.log('✅ Database synced.')
 
     //3. start listening if DB connects

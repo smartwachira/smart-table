@@ -13,6 +13,7 @@ export interface VenueAttributes {
     tax_rate: number;
     is_accepting_orders: boolean;
     allow_cash_payments: boolean;
+    shift_duration_hours: number;
     wifi_ssid?: string | null;
     wifi_password?: string | null;
 }
@@ -34,6 +35,7 @@ class Venue extends Model<VenueAttributes, VenueCreationAttributes> implements V
     public tax_rate!: number;
     public is_accepting_orders!: boolean;
     public allow_cash_payments!: boolean;
+    public shift_duration_hours!: number;
     public wifi_ssid!: string | null;
     public wifi_password!: string | null;
 
@@ -87,6 +89,10 @@ Venue.init({
     allow_cash_payments: {
         type: DataTypes.BOOLEAN,
         defaultValue: true
+    },
+    shift_duration_hours: {
+        type: DataTypes.INTEGER,
+        defaultValue: 0.00
     },
     wifi_ssid: {
         type: DataTypes.STRING,
