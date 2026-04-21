@@ -1,38 +1,63 @@
 // This  manages your global multi-tenant state.
 
-import { createContext,useContext, useState, useEffect } from 'react';
+import React, { createContext,useContext, useState, useEffect, ReactNode } from 'react';
 import { jwtDecode } from 'jwt-decode';
 import axios from 'axios';
 import { toast } from 'sonner';
 
+// 🛡️ Strict Types
+export type UserRole = 'OWNER' | 'MANAGER' | 'KITCHEN_STAFF' | 'WAITER' | 'GUEST';
 
-const AuthContext = createContext();
+export interface User {
+    userId: string;
+    role: UserRole;
+    venueId: string;
+    name?: string;
+}
 
-export const AuthProvider = ({ children }) =>{
+interface JwtDecodedPayload {
+    userId: string;
+    role: string;
+    venueId: string;
+    name?: string;
+    exp: number;
+}
+
+interface AuthContextType {
+    user: User | null;
+    isLoading: boolean;
+    login: (token: string) => Promise<void>;
+    logout: () => void;
+}
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>{
     const [user, setUser] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
     
     
    
-    const login = async (token) =>{
+    const login = async (token: string) =>{
         localStorage.setItem('auth_token',token);
-        const decoded = jwtDecode(token);
+        
         try {
-
+            const decoded = jwtDecode<JwtDecodedPayload>(token);
             setUser({
-            userId: decoded.userId,
+            userId: decoded.userId ,
             role: decoded.role,
             venueId: decoded.venueId,
             name:decoded.name
         });
-
+        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
         } catch (error) {
             toast.error('Failed to login staff');
-            console.error('Failed to login staff:',error)
+            console.error('Failed to process login token:', error);
         } 
     }
+
     const logout = () => {
     localStorage.removeItem('auth_token');
+    delete axios.defaults.headers.common['Authorization'];
     setUser(null);
     };
 
@@ -41,7 +66,7 @@ export const AuthProvider = ({ children }) =>{
             const token = localStorage.getItem('auth_token');
             if (token){
                 try {
-                    const decoded = jwtDecode(token);
+                    const decoded = jwtDecode<JwtDecodedPayload>(token);
                     // Check if the token has expired
                     if (decoded.exp * 1000 < Date.now()){
                         console.warn("Session expired.")

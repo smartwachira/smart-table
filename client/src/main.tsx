@@ -1,31 +1,31 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import CartProvider from './context/CartContext.jsx'
-import App from './App.js'
-import './index.css'
-import axios from 'axios';
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { CartProvider } from './context/CartContext.tsx';
+import App from './App.tsx';
+import './index.css';
+import axios, { InternalAxiosRequestConfig } from 'axios';
 
-axios.interceptors.request.use((config)=>{
-  const token = localStorage.getItem('token');
-  if (token){
+// 🛡️ Typed Axios Interceptor
+axios.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  const token = localStorage.getItem('auth_token'); // Ensure this matches your AuthContext key
+  if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
-}, (error)=>{
+}, (error) => {
   return Promise.reject(error);
-})
+});
 
-//Set the Base URL dynamically
-//If we are in production (Vercel), use the Environment Variable
-//If we are in development (Localhost), use nothing (relies on proxy)
-if (import.meta.env.VITE_API_URL){
+// Set the Base URL dynamically
+if (import.meta.env.VITE_API_URL) {
   axios.defaults.baseURL = import.meta.env.VITE_API_URL;
 }
 
-createRoot(document.getElementById('root')).render(
+// 🛡️ The ! tells TypeScript we guarantee this element exists in index.html
+createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <CartProvider>
       <App />
     </CartProvider>
   </StrictMode>,
-)
+);
