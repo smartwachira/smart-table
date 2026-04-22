@@ -19,18 +19,35 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
-export default function DashboardLayout() {
+// 🛡️ Strict Interface for the Venue Settings payload
+
+interface VenueSettings {
+    name: string;
+    logo_url?: string |null
+}
+
+// 🛡️ Define the exact shape of a Navigation Link
+interface NavItem {
+    path: string;
+    label: string;
+    icon: React.ElementType; 
+    roles: string[]
+}
+
+
+
+const DashboardLayout: React.FC = () => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { logout } = useAuth();
+    const { logout, user } = useAuth();
     
-    const [venue, setVenue] = useState(null);
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
+    const [venue, setVenue] = useState<VenueSettings | null>(null);
+    const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false); 
 
     useEffect(() => {
         const fetchVenueForSidebar = async () => {
             try {
-                const res = await axios.get('/api/settings/venue');
+                const res = await axios.get<VenueSettings>('/api/settings/venue');
                 setVenue(res.data);
             } catch (error) {
                 console.error("Failed to fetch venue data for sidebar:", error);
@@ -48,16 +65,17 @@ export default function DashboardLayout() {
         navigate('/login');
     };
 
-    const navItems = [
-        { path: '/dashboard', icon: LayoutDashboard, label: 'Overview' },
-        { path: '/dashboard/pos', icon: MonitorSmartphone, label: 'POS Terminal'},
-        { path: '/dashboard/my-orders', icon: ClipboardList ,label: 'My Orders'},
-        { path: '/dashboard/orders', icon: ChefHat, label: 'Live Orders' }, 
-        { path: '/dashboard/history', icon: History, label: 'Order History' }, 
-        { path: '/dashboard/menu', icon: MenuSquare, label: 'Menu Engineering' },
-        { path: '/dashboard/staff', icon: Users, label: 'Staff' },
-        { path: '/dashboard/qr', icon: QrCode, label: 'QR Codes' },
-        { path: '/dashboard/settings', icon: Settings, label: 'Settings' },
+    // 🛡️ RBAC (Role-Based Access Control) Navigation Array
+    const navLinks: NavItem[] = [
+        { path: '/dashboard', label: 'Overview', icon: LayoutDashboard, roles: ['OWNER', 'MANAGER'] },
+        { path: '/dashboard/orders', label: 'Live Orders', icon: ChefHat, roles: ['OWNER', 'MANAGER', 'KITCHEN_STAFF', 'WAITER'] },
+        { path: '/dashboard/pos', label: 'POS Terminal', icon: MonitorSmartphone, roles: ['OWNER', 'MANAGER', 'WAITER'] },
+        { path: '/dashboard/my-orders', label: 'My Orders', icon: ClipboardList, roles: ['OWNER', 'MANAGER', 'WAITER'] },
+        { path: '/dashboard/history', label: 'Order History', icon: History, roles: ['OWNER', 'MANAGER'] },
+        { path: '/dashboard/menu', label: 'Menu Management', icon: MenuSquare, roles: ['OWNER', 'MANAGER'] },
+        { path: '/dashboard/staff', label: 'Staff Roster', icon: Users, roles: ['OWNER', 'MANAGER'] },
+        { path: '/dashboard/qr', label: 'QR Codes', icon: QrCode, roles: ['OWNER', 'MANAGER'] },
+        { path: '/dashboard/settings', label: 'Settings', icon: Settings, roles: ['OWNER', 'MANAGER'] },
     ];
 
     return (
@@ -80,7 +98,7 @@ export default function DashboardLayout() {
                                     src={`http://localhost:5000${venue.logo_url}`} 
                                     alt="Venue Logo" 
                                     className="w-full h-full object-cover animate-in fade-in duration-500" 
-                                    onError={(e) => { e.target.onerror = null; e.target.src = ''; }}
+                                    onError={(e: any) => { e.target.onerror = null; e.target.src = ''; }}
                                 />
                             ) : (
                                 <Store size={24} className="text-indigo-400" />
@@ -103,14 +121,17 @@ export default function DashboardLayout() {
                 </div>
 
                 <nav className="flex-1 px-4 space-y-1 overflow-y-auto custom-scrollbar">
-                    {navItems.map((item) => {
-                        const Icon = item.icon;
-                        const isActive = location.pathname === item.path || (location.pathname.startsWith(item.path) && item.path !== '/dashboard');
+                    {navLinks.map((link) => {
+                        // 🛡️ Filter links based on strictly typed UserRole
+                        if (user?.role && !link.roles.includes(user.role)) return null;
+
+                        const Icon = link.icon;
+                        const isActive = location.pathname === link.path || (location.pathname.startsWith(link.path) && link.path !== '/dashboard');
                         
                         return (
                             <Link 
-                                key={item.path} 
-                                to={item.path}
+                                key={link.path} 
+                                to={link.path}
                                 className={`flex items-center gap-3 px-4 py-3.5 rounded-xl font-bold transition-all duration-200 group ${
                                     isActive 
                                     ? 'bg-indigo-500/15 text-indigo-400' 
@@ -118,7 +139,7 @@ export default function DashboardLayout() {
                                 }`}
                             >
                                 <Icon size={20} className={`${isActive ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-300'} transition-colors`} />
-                                {item.label}
+                                {link.label}
                             </Link>
                         );
                     })}
@@ -162,3 +183,5 @@ export default function DashboardLayout() {
         </div>
     );
 }
+
+export default DashboardLayout;
