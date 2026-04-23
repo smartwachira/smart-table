@@ -1,36 +1,52 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { Building2, MapPin, User, Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, CheckCircle2 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 
+// 🛡️ Explicit interface for the API response
+interface RegistrationResponse {
+    token: string;
+    message?: string;
+    user?: any;
+}
+
 export default function VenueRegistration() {
+    // 🛡️ Strictly type the form data object
     const [formData, setFormData] = useState({
-        venueName: '', location: '', managerName: '', managerEmail: '', managerPassword: ''
+        venueName: '', 
+        location: '', 
+        managerName: '', 
+        managerEmail: '', 
+        managerPassword: ''
     });
-    const [showPassword, setShowPassword] = useState(false);
-    const [isLoading, setIsLoading] = useState(false);
+    const [showPassword, setShowPassword] = useState<boolean>(false);
+    const [isLoading, setIsLoading] = useState<boolean>(false);
     const navigate = useNavigate();
 
-    const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+    // 🛡️ Type the input change event
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setFormData({ ...formData, [e.target.name]: e.target.value });
+    };
 
-    // Calculate simple password strength (0-3)
-    const getPasswordStrength = (pass) => {
+    // 🛡️ Type the string parameter and ensure it returns a number
+    const getPasswordStrength = (pass: string): number => {
         let score = 0;
         if (pass.length > 7) score++;
         if (/[A-Z]/.test(pass) && /[0-9]/.test(pass)) score++;
         if (/[^A-Za-z0-9]/.test(pass)) score++;
         return score;
     };
+    
     const strength = getPasswordStrength(formData.managerPassword);
 
-    const handleSubmit = async (e) => {
+    // 🛡️ Type the form submission event
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsLoading(true);
         
         try {
-            // Re-integrated Axios
-            const res = await axios.post('/api/auth/register/venue', formData);
+            const res = await axios.post<RegistrationResponse>('/api/auth/register/venue', formData);
             
             localStorage.setItem('auth_token', res.data.token);
             
@@ -44,8 +60,10 @@ export default function VenueRegistration() {
             setTimeout(() => navigate('/dashboard'), 1500);
             
         } catch (err) {
+            // 🛡️ Safely cast the error to extract the backend message
+            const axiosError = err as AxiosError<{ message: string }>;
             toast.error('Deployment Failed', {
-                description: err.response?.data?.message || 'An unexpected error occurred.',
+                description: axiosError.response?.data?.message || 'An unexpected error occurred.',
             });
         } finally {
             setIsLoading(false);

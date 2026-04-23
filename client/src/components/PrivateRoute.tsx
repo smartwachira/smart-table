@@ -1,9 +1,14 @@
+import React from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, UserRole } from '../context/AuthContext';
 import { Loader2 } from 'lucide-react';
 
+interface PrivateRouteProps {
+    allowedRoles?: UserRole[]
+}
+
 //This component acts as a bouncer
-export default function PrivateRoute({ allowedRoles }){
+const PrivateRoute: React.FC<PrivateRouteProps> = ({ allowedRoles }) =>{
     const { user, isLoading } = useAuth();
     const location = useLocation();
 
@@ -36,3 +41,4 @@ export default function PrivateRoute({ allowedRoles }){
     return <Outlet/>
 };
 
+export default PrivateRoute;

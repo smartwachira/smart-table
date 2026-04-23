@@ -3,7 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { X, Minus, Plus, ShoppingBag, ArrowRight } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 
-export default function FloatingCart({ tableNumber }) {
+// 🛡️ Strict typing for component props
+interface FloatingCartProps {
+    tableNumber?: string;
+}
+
+const FloatingCart: React.FC<FloatingCartProps> = ({ tableNumber }) => {
     const { cart, updateQuantity, cartTotals, isCartOpen, setIsCartOpen } = useCart();
     const navigate = useNavigate();
 
@@ -11,8 +16,9 @@ export default function FloatingCart({ tableNumber }) {
 
     const handleCheckout = () => {
         setIsCartOpen(false);
-        // Navigate to checkout, passing the venue ID and table number
-        navigate(`/checkout/?table=${encodeURIComponent(tableNumber)}`);
+        // Navigate to checkout, passing the venue ID and table number safely
+        const queryParam = tableNumber ? `?table=${encodeURIComponent(tableNumber)}` : '';
+        navigate(`/checkout/${queryParam}`);
     };
 
     return (
@@ -37,7 +43,9 @@ export default function FloatingCart({ tableNumber }) {
                             <ShoppingBag className="text-indigo-600" size={24} />
                             Your Order
                         </h2>
-                        <p className="text-sm font-semibold text-slate-500 mt-1">{tableNumber}</p>
+                        {tableNumber && (
+                            <p className="text-sm font-semibold text-slate-500 mt-1">{tableNumber}</p>
+                        )}
                     </div>
                     <button 
                         onClick={() => setIsCartOpen(false)}
@@ -107,4 +115,6 @@ export default function FloatingCart({ tableNumber }) {
             </div>
         </>
     );
-}
+};
+
+export default FloatingCart;

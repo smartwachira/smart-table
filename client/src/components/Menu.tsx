@@ -1,47 +1,77 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom'; // ⚡ Removed useParams and useSearchParams
+import { useNavigate } from 'react-router-dom'; 
 import axios from 'axios';
 import { toast } from 'sonner';
 import { Search, ShoppingBag, Plus, Minus, Info, UtensilsCrossed, AlertCircle, Moon, Smartphone } from 'lucide-react';
 import { useCart } from '../context/CartContext';
-import FloatingCart from './FloatingCart.jsx';
+import FloatingCart from './FloatingCart'; 
 import { jwtDecode } from 'jwt-decode';
+
+// 🛡️ 1. Strict TypeScript Interfaces for the Menu Data
+interface GuestJwtPayload {
+    role: string;
+    venueId: string;
+    tableName: string;
+    orderMode: 'KIOSK' | 'TAB';
+    exp: number;
+}
+
+export interface MenuCategoryType {
+    category_id: string;
+    name: string;
+    venue_id: string;
+}
+
+export interface MenuItemType {
+    item_id: string;
+    name: string;
+    price: string | number;
+    description?: string;
+    image_url?: string;
+    is_available: boolean;
+    category_id: string;
+    MenuCategory?: MenuCategoryType;
+}
+
+interface MenuResponse {
+    categories: MenuCategoryType[];
+    items: MenuItemType[];
+    venue: any; // Maps to the VenueConfig in CartContext
+}
 
 export default function Menu() {
   const navigate = useNavigate();
   const { cart, updateQuantity, cartTotals, setIsCartOpen, venueConfig, setVenueConfig } = useCart();
 
-  // ⚡ Local state exclusively populated by the token
-  const [venueId, setVenueId] = useState(null);
-  const [tableNumber, setTableNumber] = useState('');
-  const [orderMode, setOrderMode] = useState('TAB');
+  // 🛡️ 2. Strictly Typed Local State
+  const [venueId, setVenueId] = useState<string | null>(null);
+  const [tableNumber, setTableNumber] = useState<string>('');
+  const [orderMode, setOrderMode] = useState<'KIOSK' | 'TAB'>('TAB');
 
-  const [categories, setCategories] = useState([]);
-  const [items, setItems] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [categories, setCategories] = useState<MenuCategoryType[]>([]);
+  const [items, setItems] = useState<MenuItemType[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const [activeCategory, setActiveCategory] = useState('all');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [activeCategory, setActiveCategory] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   // ⚡ Extract secure session data from the JWT Token immediately on mount
   useEffect(() => {
     const token = localStorage.getItem('guest_token');
     
     if (!token) {
-        // No token? Boot them immediately. No 500ms delay needed.
         navigate('/scan', { replace: true });
         return;
     }
 
     try {
-        const decoded = jwtDecode(token);
+        const decoded = jwtDecode<GuestJwtPayload>(token);
         if (decoded.role === 'GUEST') {
             setVenueId(decoded.venueId);
             setTableNumber(decoded.tableName);
             setOrderMode(decoded.orderMode || 'TAB');
         } else {
-            // Invalid role
             navigate('/scan', { replace: true });
         }
     } catch (e) {
@@ -56,8 +86,8 @@ export default function Menu() {
     setIsLoading(true);
     setError(null);
     try {
-      // ⚡ ZERO-TRUST: No venueId in the URL! The backend extracts it from the token.
-      const res = await axios.get(`/api/menu/public`); 
+      // ⚡ ZERO-TRUST: Backend extracts venueId from the token
+      const res = await axios.get<MenuResponse>(`/api/menu/public`); 
       setCategories(res.data.categories);
       setItems(res.data.items);
       setVenueConfig(res.data.venue);
@@ -111,7 +141,7 @@ export default function Menu() {
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-32">
 
-      <FloatingCart tableNumber={tableNumber} orderMode={orderMode} />
+      <FloatingCart tableNumber={tableNumber} />
 
       <header className="bg-white px-4 md:px-8 pt-8 pb-6 md:pb-8 rounded-b-[2.5rem] shadow-sm relative z-10">
           <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-end justify-between gap-6 md:gap-12">
@@ -198,7 +228,7 @@ export default function Menu() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredItems.map(item => {
                 const cartQty = cart[item.item_id]?.quantity || 0;
-                const formattedPrice = item.price.toLocaleString('en-KE',{ style: 'currency',currency:'KES',minimumFractionDigits: 0});
+                const formattedPrice = Number(item.price).toLocaleString('en-KE',{ style: 'currency',currency:'KES',minimumFractionDigits: 0});
 
                 return (
                   <div key={item.item_id} className="bg-white rounded-[1.5rem] p-3 flex gap-4 shadow-sm border border-slate-100 items-stretch hover:shadow-md transition-shadow">
@@ -230,7 +260,12 @@ export default function Menu() {
                         {cartQty === 0 ? (
                           <button
                             onClick={()=>{
-                              updateQuantity(item, 1);
+                              updateQuantity({
+                                item_id: item.item_id,
+                                name: item.name,
+                                price: Number(item.price),
+                                image_url: item.image_url
+                              }, 1);
                               toast.success(`Added ${item.name}`,{position:'top-center'})
                             }}
                             className='w-10 h-10 bg-slate-900 hover:bg-indigo-600 text-white rounded-xl flex items-center justify-center transition-colors shadow-sm active:scale-95'
@@ -239,11 +274,11 @@ export default function Menu() {
                           </button>
                         ) : (
                           <div className="flex items-center gap-3 bg-slate-100 rounded-xl p-1 border border-slate-200 shadow-inner">
-                            <button onClick={()=>updateQuantity(item,-1)} className="w-8 h-8 bg-white text-slate-700 rounded-lg flex items-center justify-center shadow-sm active:scale-95 transition-transform">
+                            <button onClick={()=>updateQuantity({ item_id: item.item_id, name: item.name, price: Number(item.price), image_url: item.image_url }, -1)} className="w-8 h-8 bg-white text-slate-700 rounded-lg flex items-center justify-center shadow-sm active:scale-95 transition-transform">
                               <Minus size={16}/>
                             </button>
                             <span className="font-black text-slate-900 w-4 text-center text-sm">{cartQty}</span>
-                            <button onClick={()=>updateQuantity(item,1)} className='w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center shadow-sm active:scale-95 transition-transform'>
+                            <button onClick={()=>updateQuantity({ item_id: item.item_id, name: item.name, price: Number(item.price), image_url: item.image_url }, 1)} className='w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center shadow-sm active:scale-95 transition-transform'>
                               <Plus size={16}/>
                             </button>
                           </div>
@@ -285,7 +320,8 @@ export default function Menu() {
   )
 };
 
-function MenuSkeleton() {
+// ⚡ STRICT TYPING: Convert to React.FC
+const MenuSkeleton: React.FC = () => {
     return (
         <div className="min-h-screen bg-slate-50 px-4 pt-8 pb-6 space-y-6 animate-pulse max-w-6xl mx-auto">
             <div className="h-40 bg-slate-200 rounded-[2.5rem] w-full"></div>
@@ -309,4 +345,4 @@ function MenuSkeleton() {
             </div>
         </div>
     );
-}
+};

@@ -3,21 +3,31 @@ import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Loader2, UtensilsCrossed, AlertTriangle } from 'lucide-react';
 
-export default function QRGateway() {
-    const { venueId, tableName } = useParams();
+// 🛡️ Strict Interface for the expected Backend Response
+interface GuestSessionResponse {
+    message: string;
+    token: string;
+    venueName?: string;
+}
+
+const QRGateway: React.FC = () =>{
+    const { venueId, tableName } = useParams<{ venueId: string; tableName: string }>();
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     
-    const [error, setError] = useState(null);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         const initializeSession = async () => {
             try {
+                if (!venueId || !tableName) {
+                    throw new Error("Invalid QR Code parameters.");
+                }
                 // Extract the mode from the URL query parameter (e.g., ?m=k)
                 const mode = searchParams.get('m') || 't'; 
 
                 // Hit the new backend endpoint
-                const res = await axios.post('/api/auth/guest-session', {
+                const res = await axios.post<GuestSessionResponse>('/api/auth/guest-session', {
                     venueId,
                     tableName: decodeURIComponent(tableName),
                     mode
@@ -34,7 +44,7 @@ export default function QRGateway() {
                 navigate('/menu', { replace: true });
                 
 
-            } catch (err) {
+            } catch (err: any) {
                 console.error("Failed to initialize session:", err);
                 setError(err.response?.data?.message || "This QR code appears to be invalid or expired.");
             }
@@ -74,4 +84,5 @@ export default function QRGateway() {
             <p className="text-indigo-200 font-medium mt-2">Preparing your digital menu.</p>
         </div>
     );
-}
+};
+export default QRGateway;

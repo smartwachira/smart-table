@@ -1,7 +1,7 @@
 import React from 'react';
-import { QrCode, UtensilsCrossed, ArrowRight, Smartphone } from 'lucide-react';
+import { QrCode, UtensilsCrossed} from 'lucide-react';
 
-export default function ScanPage() {
+const ScanPage: React.FC = () =>{
     return (
         <div className="min-h-[100dvh] bg-slate-900 flex flex-col relative overflow-hidden">
             {/* Background decorative elements */}
@@ -52,4 +52,5 @@ export default function ScanPage() {
             </footer>
         </div>
     );
-}
+};
+export default ScanPage;

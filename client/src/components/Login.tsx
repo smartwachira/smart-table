@@ -1,41 +1,66 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
-import { Mail, Lock, Building2, User, ArrowRight, Loader2, KeyRound, AlertCircle } from 'lucide-react';
+import axios, { AxiosError } from 'axios';
+import { Mail, Lock, User, ArrowRight, Loader2, KeyRound, AlertCircle } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { useAuth } from '../context/AuthContext';
 
+// 🛡️ Strict typing for the expected backend response
+interface LoginResponse {
+    token: string;
+    user: {
+        id: string;
+        name: string;
+        role: string;
+        venue_id: string;
+        [key: string]: any;
+    };
+    message: string;
+}
+
 export default function Login() {
-    const [loginType, setLoginType] = useState('STAFF'); // 'STAFF' | 'MANAGER'
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [username, setUsername] = useState('');
-    const [pin, setPin] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
+    // 🛡️ Enforce strict literal types on the login mode
+    const [loginType, setLoginType] = useState<'STAFF' | 'MANAGER'>('STAFF'); 
+    
+    const [email, setEmail] = useState<string>('');
+    const [password, setPassword] = useState<string>('');
+    const [username, setUsername] = useState<string>('');
+    const [pin, setPin] = useState<string>('');
+    const [isLoading, setIsLoading] = useState<boolean>(false);
+    
     const storedVenueId = localStorage.getItem('terminal_venue_id');
     
     const navigate = useNavigate();
-    const {login} = useAuth();
+    const { login } = useAuth();
 
-    const handlePinPress = (num) => { if (pin.length < 4) setPin(prev => prev + num); };
+    // 🛡️ Explicitly type the num parameter as a string
+    const handlePinPress = (num: string) => { 
+        if (pin.length < 4) setPin(prev => prev + num); 
+    };
+    
     const handleBackspace = () => setPin(prev => prev.slice(0, -1));
 
-    const handleLogin = async (e) => {
+    // 🛡️ Type the form event to prevent implicit 'any' errors
+    const handleLogin = async (e?: React.FormEvent) => {
         if (e) e.preventDefault();
         setIsLoading(true);
         
         const endpoint = loginType === 'MANAGER' ? '/api/auth/login/manager' : '/api/auth/login/staff';
-        const payload = loginType === 'MANAGER' ? { email, password } : { venue_id: localStorage.getItem('terminal_venue_id'), username, pin };
+        const payload = loginType === 'MANAGER' 
+            ? { email, password } 
+            : { venue_id: localStorage.getItem('terminal_venue_id'), username, pin };
 
         try {
-            const res = await axios.post(`http://localhost:5000${endpoint}`, payload);
-            login(res.data.token);
+            // 🛡️ Inject the LoginResponse interface into Axios
+            const res = await axios.post<LoginResponse>(`http://localhost:5000${endpoint}`, payload);
             
+            // Rehydrate context and local storage safely
+            await login(res.data.token);
             localStorage.setItem('user', JSON.stringify(res.data.user));
 
-            //PROVISION THE DEVICE: If a manager logs in, bond this device to their venue
-            if (loginType === 'MANAGER' && res.data.user?.venue_id){
-                localStorage.setItem('terminal_venue_id',res.data.user.venue_id);
+            // PROVISION THE DEVICE: If a manager logs in, bond this device to their venue
+            if (loginType === 'MANAGER' && res.data.user?.venue_id) {
+                localStorage.setItem('terminal_venue_id', res.data.user.venue_id);
             }
 
             toast.success('Authentication Verified', {
@@ -48,9 +73,12 @@ export default function Login() {
             }, 1000);
 
         } catch (err) {
+            // 🛡️ Safely cast the error to an AxiosError to access the response payload
+            const axiosError = err as AxiosError<{ message: string }>;
             toast.error('Access Denied', {
-                description: err.response?.data?.message || 'Invalid credentials provided.',
+                description: axiosError.response?.data?.message || 'Invalid credentials provided.',
             });
+            
             if (loginType === 'STAFF') setPin(''); // Instantly reset PIN on failure for fast retry
         } finally {
             setIsLoading(false);
@@ -163,7 +191,7 @@ export default function Login() {
                                 <button type="button" onClick={() => handlePinPress('0')} className="aspect-[4/3] rounded-2xl bg-white/5 border border-white/5 text-2xl font-light text-white hover:bg-white/10 active:bg-white/20 active:scale-95 transition-all duration-200 backdrop-blur-md">
                                     0
                                 </button>
-                                <button type="button" onClick={() => pin.length === 4 ? handleLogin() : null} disabled={isLoading} className={`flex items-center justify-center aspect-[4/3] rounded-2xl text-sm font-semibold transition-all duration-300 active:scale-95 ${pin.length === 4 ? 'bg-amber-500 text-black shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:bg-amber-400' : 'bg-white/5 border border-white/5 text-gray-600 cursor-not-allowed'}`}>
+                                <button type="button" onClick={() => pin.length === 4 ? handleLogin() : undefined} disabled={isLoading} className={`flex items-center justify-center aspect-[4/3] rounded-2xl text-sm font-semibold transition-all duration-300 active:scale-95 ${pin.length === 4 ? 'bg-amber-500 text-black shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:bg-amber-400' : 'bg-white/5 border border-white/5 text-gray-600 cursor-not-allowed'}`}>
                                     {isLoading ? <Loader2 size={20} className="animate-spin text-black" /> : 'GO'}
                                 </button>
                             </div>

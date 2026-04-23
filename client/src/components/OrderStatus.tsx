@@ -1,33 +1,55 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
-import { io } from 'socket.io-client';
-import { jwtDecode } from 'jwt-decode'; // ⚡ NEW: Import jwtDecode
+import { io, Socket } from 'socket.io-client';
+import { jwtDecode } from 'jwt-decode'; 
 import { 
     ArrowLeft, Clock, ChefHat, 
     BellRing, CheckCircle2, Receipt
 } from 'lucide-react';
 
-// Connect to your backend socket server
-const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000');
+// 🛡️ Connect to your backend socket server with an explicit type
+const socket: Socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000');
+
+// 🛡️ Interfaces for strict typing
+interface GuestJwtPayload {
+    role: string;
+    venueId: string;
+    tableName: string;
+    orderMode: 'KIOSK' | 'TAB';
+    exp: number;
+}
+
+export type OrderStatusType = 'PENDING' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED';
+
+interface OrderData {
+    order_id: string;
+    status: OrderStatusType;
+    [key: string]: any; // Allow other fields from DB without throwing errors
+}
+
+interface SocketUpdatePayload {
+    orderId: string;
+    status: OrderStatusType;
+}
 
 export default function OrderStatus() {
-    const { orderId } = useParams(); // Only orderId stays in the URL!
+    // 🛡️ Type the URL param
+    const { orderId } = useParams<{ orderId: string }>(); 
     const navigate = useNavigate();
 
-    // ⚡ 1. State for Token Data
-    const [venueId, setVenueId] = useState(null);
+    // 🛡️ State Typing
+    const [venueId, setVenueId] = useState<string | null>(null);
+    const [order, setOrder] = useState<OrderData | null>(null);
+    const [isLoading, setIsLoading] = useState<boolean>(true);
+    const [error, setError] = useState<string | null>(null);
 
-    const [order, setOrder] = useState(null);
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState(null);
-
-    // ⚡ 2. Extract Data from Token on Mount
+    // ⚡ Extract Data from Token on Mount
     useEffect(() => {
         const token = localStorage.getItem('guest_token');
         if (token) {
             try {
-                const decoded = jwtDecode(token);
+                const decoded = jwtDecode<GuestJwtPayload>(token);
                 if (decoded.role === 'GUEST') {
                     setVenueId(decoded.venueId);
                 } else {
@@ -45,11 +67,10 @@ export default function OrderStatus() {
     // Fetch Initial Order Data
     useEffect(() => {
         const fetchOrder = async () => {
-            if (!venueId || !orderId) return; // Wait until secure session loads
+            if (!venueId || !orderId) return; 
 
             try {
-                // The global Axios interceptor handles attaching the guest token
-                const res = await axios.get(`/api/orders/${orderId}/status`);
+                const res = await axios.get<OrderData>(`/api/orders/${orderId}/status`);
                 setOrder(res.data);
             } catch (err) {
                 console.error("Failed to fetch order:", err);
@@ -66,19 +87,17 @@ export default function OrderStatus() {
     useEffect(() => {
         if (!venueId || !orderId) return;
 
-        // 1. Join the specific venue's room using the secure venueId from the token
         socket.emit('join_venue', venueId);
 
-        // 2. Listen for 'orderUpdated' events emitted by the kitchen or M-Pesa webhook
-        const handleOrderUpdate = (data) => {
+        // 🛡️ Strongly type the incoming socket data
+        const handleOrderUpdate = (data: SocketUpdatePayload) => {
             if (data.orderId === orderId && data.status) {
-                setOrder(prev => ({ ...prev, status: data.status }));
+                setOrder(prev => prev ? { ...prev, status: data.status } : null);
             }
         };
 
         socket.on('orderUpdated', handleOrderUpdate);
 
-        // Cleanup listener when the user leaves the page
         return () => {
             socket.off('orderUpdated', handleOrderUpdate);
         };
@@ -114,7 +133,7 @@ export default function OrderStatus() {
         { id: 'COMPLETED', label: 'Served', icon: CheckCircle2 }
     ];
 
-    // Calculate current progress index
+    // Calculate current progress index safely
     const currentStepIndex = steps.findIndex(s => s.id === order.status);
     const activeIndex = currentStepIndex >= 0 ? currentStepIndex : 0; 
 
@@ -124,7 +143,6 @@ export default function OrderStatus() {
             {/* Header */}
             <header className="bg-white px-4 pt-6 pb-4 border-b border-slate-200 flex items-center justify-between sticky top-0 z-10">
                 <button 
-                    // ⚡ NEW: Simply navigate back to /menu. The Menu component will read the JWT context automatically!
                     onClick={() => navigate(`/menu`)}
                     className="w-10 h-10 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center text-slate-600 transition-colors active:scale-95"
                 >
