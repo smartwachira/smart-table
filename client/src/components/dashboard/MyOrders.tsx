@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { toast } from 'sonner';
-import io from 'socket.io-client';
+import io, { Socket } from 'socket.io-client';
 import { 
     CheckCircle2, Clock, Flame, ArrowRight, 
     Banknote, MonitorSmartphone 
@@ -10,15 +10,36 @@ import { useAuth } from '../../context/AuthContext';
 
 const BEEP_URL = 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3';
 
+// 🛡️ Strict typing for the order payload
+interface OrderItem {
+    name?: string;
+    quantity: number;
+    MenuItem?: {
+        name: string;
+    };
+}
+
+interface OrderData {
+    order_id: string;
+    table_number: string;
+    customer_name: string;
+    status: 'PENDING' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED';
+    payment_status: 'PENDING' | 'PAID' | 'FAILED';
+    payment_method: 'CASH' | 'M-PESA' | string;
+    total_amount: number | string;
+    staff_id: string;
+    OrderItems: OrderItem[];
+}
+
 export default function MyOrders() {
     const { user } = useAuth();
-    const [orders, setOrders] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState('READY'); 
+    const [orders, setOrders] = useState<OrderData[]>([]);
+    const [isLoading, setIsLoading] = useState<boolean>(true);
+    const [activeTab, setActiveTab] = useState<string>('READY'); 
 
     // ⚡ FIX: Use Refs to track state silently without triggering Infinite Loops
-    const previousReadyRef = useRef([]);
-    const isFirstLoadRef = useRef(true);
+    const previousReadyRef = useRef<string[]>([]);
+    const isFirstLoadRef = useRef<boolean>(true);
 
     const playSound = useCallback(() => {
         try {
@@ -29,15 +50,15 @@ export default function MyOrders() {
         }
     }, []);
 
-    const fetchOrders = useCallback(async (signal) => {
+    const fetchOrders = useCallback(async (signal?: AbortSignal) => {
         try {
             const token = localStorage.getItem('auth_token');
-            const response = await axios.get('/api/orders/live', {
+            const response = await axios.get<OrderData[]>('/api/orders/live', {
                 headers: { Authorization: `Bearer ${token}` },
                 signal
             });
 
-            const myId = user?.userId || user?.id; 
+            const myId = user?.userId; 
             
             const myOrdersOnly = (response.data || []).filter(o => String(o.staff_id) === String(myId));
 
@@ -67,13 +88,13 @@ export default function MyOrders() {
         } finally {
             setIsLoading(false);
         }
-    }, [user, playSound]); // ⚡ FIX: 'orders' and 'isLoading' are completely removed from dependencies!
+    }, [user, playSound]); 
 
     useEffect(() => {
         const controller = new AbortController();
         fetchOrders(controller.signal);
 
-        const socket = io(import.meta.env.VITE_API_URL || "http://localhost:5000");
+        const socket: Socket = io(import.meta.env.VITE_API_URL || "http://localhost:5000");
         if (user?.venueId) socket.emit('join_venue', user.venueId);
 
         socket.on('receive_order', () => fetchOrders(controller.signal));
@@ -85,7 +106,7 @@ export default function MyOrders() {
         };
     }, [fetchOrders, user?.venueId]);
 
-    const updateStatus = async (orderId, newStatus) => {
+    const updateStatus = async (orderId: string, newStatus: OrderData['status']) => {
         try {
             const token = localStorage.getItem('auth_token');
             setOrders(prev => prev.map(o => o.order_id === orderId ? { ...o, status: newStatus } : o));
@@ -95,12 +116,13 @@ export default function MyOrders() {
             });
             toast.success(`Order marked as ${newStatus}`);
         } catch (error) {
-            toast.error(error.response?.data?.message || "Failed to update ticket.");
+            const axiosError = error as AxiosError<{ message: string }>;
+            toast.error(axiosError.response?.data?.message || "Failed to update ticket.");
             fetchOrders(); 
         }
     };
 
-    const handleCollectCash = async (orderId) => {
+    const handleCollectCash = async (orderId: string) => {
         if (!window.confirm("Confirm you have received the cash for this order?")) return;
         try {
             const token = localStorage.getItem('auth_token');
@@ -131,7 +153,8 @@ export default function MyOrders() {
         );
     }
 
-    const OrderCard = ({ order }) => {
+    // 🛡️ Type the internal sub-component
+    const OrderCard: React.FC<{ order: OrderData }> = ({ order }) => {
         const isCashPending = order.payment_method === 'CASH' && order.payment_status === 'PENDING';
         
         return (

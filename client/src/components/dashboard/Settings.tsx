@@ -1,21 +1,39 @@
 import React, { useCallback, useState, useEffect } from "react";
-import axios from 'axios';
-import { toast } from 'sonner'
+import axios, { AxiosError } from 'axios';
+import { toast } from 'sonner';
 import { Store, CreditCard, Sliders, Save, Loader2, Power, ImagePlus, Wifi } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
+// 🛡️ Explicit Interfaces for Settings Data
+export interface VenueSettingsFormData {
+    name: string;
+    location: string;
+    contact_email: string;
+    phone_number: string;
+    tax_rate: number | string;
+    is_accepting_orders: boolean | string;
+    allow_cash_payments: boolean | string;
+    wifi_ssid: string;
+    wifi_password?: string;
+    shift_duration_hours?: number | string;
+    logo_url?: string;
+}
+
+type SettingsTab = 'profile' | 'operations' | 'billing';
+
 export default function Settings() {
-    const [activeTab, setActiveTab] = useState('profile');
-    const [isLoading, setIsLoading] = useState(true);
-    const [isSaving, setIsSaving] = useState(false);
-    const [logoPreview, setLogoPreview] = useState(null);
-    const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+    // 🛡️ Strictly Typed State
+    const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
+    const [isLoading, setIsLoading] = useState<boolean>(true);
+    const [isSaving, setIsSaving] = useState<boolean>(false);
+    const [logoPreview, setLogoPreview] = useState<string | null>(null);
+    const [isUploadingLogo, setIsUploadingLogo] = useState<boolean>(false);
 
     const token = localStorage.getItem('auth_token');
     const { user } = useAuth();
 
     // Form State
-    const [formData, setFormData] = useState({
+    const [formData, setFormData] = useState<VenueSettingsFormData>({
         name: '',
         location: '',
         contact_email: '',
@@ -24,12 +42,13 @@ export default function Settings() {
         is_accepting_orders: true,
         allow_cash_payments: true,
         wifi_ssid: '',
-        wifi_password: ''
+        wifi_password: '',
+        shift_duration_hours: 14
     });
 
     const fetchSettings = useCallback(async () => {
         try {
-            const res = await axios.get('/api/settings/venue', {
+            const res = await axios.get<VenueSettingsFormData>('/api/settings/venue', {
                 headers: { Authorization: `Bearer ${token}` }
             });
             
@@ -39,7 +58,7 @@ export default function Settings() {
                 wifi_ssid: res.data.wifi_ssid || '',
                 wifi_password: res.data.wifi_password || ''
             });
-            setLogoPreview(res.data.logo_url);
+            setLogoPreview(res.data.logo_url || null);
         } catch (error) {
             toast.error("Failed to load venue settings.");
             console.error("Error loading venue settings", error);
@@ -52,7 +71,7 @@ export default function Settings() {
         fetchSettings();
     }, [fetchSettings]);
 
-    const handleChange = (e) => {
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value, type, checked } = e.target;
         setFormData(prev => ({
             ...prev,
@@ -60,7 +79,7 @@ export default function Settings() {
         }));
     };
 
-    const handleSubmit = async (e) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsSaving(true);
         try {
@@ -69,14 +88,15 @@ export default function Settings() {
             });
             toast.success("Settings saved successfully!");
         } catch (error) {
-            toast.error(error.response?.data?.message || "Failed to save settings.");
+            const axiosError = error as AxiosError<{ message: string }>;
+            toast.error(axiosError.response?.data?.message || "Failed to save settings.");
         } finally {
             setIsSaving(false);
         }
     };
 
-    const handleLogoUpload = async (e) => {
-        const file = e.target.files[0];
+    const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
         if (!file) return;
 
         // Show instant local preview
@@ -87,15 +107,15 @@ export default function Settings() {
         uploadData.append('image', file);
 
         try {
-            const res = await axios.post('/api/settings/venue/logo', uploadData, {
-                headers: { 'Content-Type': 'multipart/form-data' }
+            const res = await axios.post<{ logo_url: string }>('/api/settings/venue/logo', uploadData, {
+                headers: { 'Content-Type': 'multipart/form-data', Authorization: `Bearer ${token}` }
             });
             toast.success("Logo uploaded successfully!");
             setFormData(prev => ({ ...prev, logo_url: res.data.logo_url }));
         } catch (error) {
             console.error("Error uploading logo.", error);
             toast.error("Failed to upload logo.");
-            setLogoPreview(formData.logo_url); // Revert on failure
+            setLogoPreview(formData.logo_url || null); // Revert on failure
         } finally {
             setIsUploadingLogo(false);
         }
@@ -159,7 +179,11 @@ export default function Settings() {
                                                     src={logoPreview.startsWith('http') ? logoPreview : `http://localhost:5000${logoPreview}`} 
                                                     alt="Venue Logo"
                                                     className="w-full h-full object-cover"
-                                                    onError={(e) => { e.target.onerror = null; e.target.src = logoPreview; }}
+                                                    onError={(e) => { 
+                                                        const target = e.target as HTMLImageElement;
+                                                        target.onerror = null; 
+                                                        target.src = logoPreview || ''; 
+                                                    }}
                                                 />
                                             ) : (
                                                 <Store size={32} className="text-slate-300" />

@@ -9,33 +9,47 @@ import {
     Settings2, Grid3X3, ChevronDown, ChevronUp, Image as ImageIcon, Store, Wifi, UtensilsCrossed
 } from 'lucide-react';
 
+// 🛡️ Explicit Interfaces for JWT and Venue Settings
+interface JwtPayload {
+    venueId: string;
+    [key: string]: any;
+}
+
+interface VenueSettings {
+    name?: string;
+    logo_url?: string;
+    wifi_ssid?: string;
+    wifi_password?: string;
+}
+
 export default function QRGenerator() {
-    const [venueId, setVenueId] = useState('');
-    const [tables, setTables] = useState([]);
-    const [singleTableInput, setSingleTableInput] = useState('');
+    // 🛡️ Strictly typed state
+    const [venueId, setVenueId] = useState<string>('');
+    const [tables, setTables] = useState<string[]>([]);
+    const [singleTableInput, setSingleTableInput] = useState<string>('');
     
-    const [venueSettings, setVenueSettings] = useState(null);
-    const [orderingMode, setOrderingMode] = useState('TAB'); 
+    const [venueSettings, setVenueSettings] = useState<VenueSettings | null>(null);
+    const [orderingMode, setOrderingMode] = useState<'TAB' | 'KIOSK'>('TAB'); 
 
-    const [bulkStart, setBulkStart] = useState('');
-    const [bulkEnd, setBulkEnd] = useState('');
+    const [bulkStart, setBulkStart] = useState<string>('');
+    const [bulkEnd, setBulkEnd] = useState<string>('');
 
-    const [qrColor, setQrColor] = useState('#0f172a');
-    const [includeLogo, setIncludeLogo] = useState(true);
+    const [qrColor, setQrColor] = useState<string>('#0f172a');
+    const [includeLogo, setIncludeLogo] = useState<boolean>(true);
 
-    const [isControlsOpen, setIsControlsOpen] = useState(false);
+    const [isControlsOpen, setIsControlsOpen] = useState<boolean>(false);
 
     useEffect(() => {
         const token = localStorage.getItem('auth_token');
         if (token) {
             try {
-                const decoded = jwtDecode(token);
+                const decoded = jwtDecode<JwtPayload>(token);
                 setVenueId(decoded.venueId);
                 setTables(['Table 1', 'Table 2', 'Table 3']);
                 
                 const fetchVenueDetails = async () => {
                     try {
-                        const res = await axios.get('/api/settings/venue', {
+                        const res = await axios.get<VenueSettings>('/api/settings/venue', {
                             headers: { Authorization: `Bearer ${token}` }
                         });
                         setVenueSettings(res.data);
@@ -52,7 +66,7 @@ export default function QRGenerator() {
 
     const BASE_QR_URL = window.location.origin + '/q';
 
-    const getFormattedLogoUrl = () => {
+    const getFormattedLogoUrl = (): string | undefined => {
         if (!venueSettings?.logo_url) return undefined;
         const logo = venueSettings.logo_url;
         if (logo.startsWith('http')) return logo;
@@ -60,7 +74,7 @@ export default function QRGenerator() {
         return `${backendUrl}${logo.startsWith('/') ? '' : '/'}${logo}`;
     };
 
-    const getWifiPayload = () => {
+    const getWifiPayload = (): string | null => {
         if (!venueSettings?.wifi_ssid) return null;
         const authType = venueSettings.wifi_password ? 'WPA' : 'nopass';
         return `WIFI:S:${venueSettings.wifi_ssid};T:${authType};P:${venueSettings.wifi_password || ''};;`;
@@ -68,7 +82,7 @@ export default function QRGenerator() {
 
     const hasWifiConfig = !!getWifiPayload();
 
-    const handleAddSingle = (e) => {
+    const handleAddSingle = (e: React.FormEvent) => {
         e.preventDefault();
         if (!singleTableInput.trim()) return;
         if (tables.includes(singleTableInput.trim())) return toast.error("Table already exists.");
@@ -76,14 +90,14 @@ export default function QRGenerator() {
         setSingleTableInput('');
     };
 
-    const handleBulkGenerate = (e) => {
+    const handleBulkGenerate = (e: React.FormEvent) => {
         e.preventDefault();
         const start = parseInt(bulkStart);
         const end = parseInt(bulkEnd);
         if (isNaN(start) || isNaN(end) || start >= end || end - start > 100) {
             return toast.error("Invalid range.");
         }
-        const newTables = [];
+        const newTables: string[] = [];
         for (let i = start; i <= end; i++) {
             const tableName = `Table ${i}`;
             if (!tables.includes(tableName)) newTables.push(tableName);
@@ -94,17 +108,18 @@ export default function QRGenerator() {
         setIsControlsOpen(false); 
     };
 
-    const removeTable = (tableToRemove) => setTables(tables.filter(t => t !== tableToRemove));
+    const removeTable = (tableToRemove: string) => setTables(tables.filter(t => t !== tableToRemove));
 
     const handlePrint = () => window.print();
 
-    const downloadFullCard = async (tableName) => {
-        const cardElement = document.getElementById(`card-${tableName}`);
+    const downloadFullCard = async (tableName: string) => {
+        // 🛡️ Safely cast to HTMLElement for DOM manipulation
+        const cardElement = document.getElementById(`card-${tableName}`) as HTMLElement | null;
         if (!cardElement) return;
 
         // Hide action buttons during snapshot
-        const actionOverlays = cardElement.querySelectorAll('.action-overlay');
-        const originalStyles = [];
+        const actionOverlays = cardElement.querySelectorAll<HTMLElement>('.action-overlay');
+        const originalStyles: string[] = [];
         actionOverlays.forEach(el => {
             originalStyles.push(el.style.display);
             el.style.display = 'none';
@@ -141,9 +156,10 @@ export default function QRGenerator() {
         }
     };
 
-    const downloadSingleQR = (tableName, type) => {
+    const downloadSingleQR = (tableName: string, type: 'WIFI' | 'MENU') => {
         const canvasId = type === 'WIFI' ? `qr-wifi-${tableName}` : `qr-menu-${tableName}`;
-        const canvas = document.getElementById(canvasId);
+        // 🛡️ Safely cast to HTMLCanvasElement
+        const canvas = document.getElementById(canvasId) as HTMLCanvasElement | null;
         if (!canvas) return;
         
         const pngUrl = canvas.toDataURL("image/png").replace("image/png", "image/octet-stream");
@@ -268,13 +284,13 @@ export default function QRGenerator() {
                                                 <div className="p-4 bg-white border-2 border-slate-100 rounded-3xl print:border-none print:p-0">
                                                     <QRCodeCanvas
                                                         id={`qr-wifi-${table}`} 
-                                                        value={getWifiPayload()}
+                                                        value={getWifiPayload() || ''}
                                                         size={140}
                                                         bgColor={"#ffffff"}
                                                         fgColor={qrColor} // ⚡ FIX 1: Applied custom color to WiFi QR!
                                                         level={"M"} 
                                                         imageSettings={includeLogo && venueSettings?.logo_url ? { // ⚡ FIX 2: Applied custom logo to WiFi QR!
-                                                            src: getFormattedLogoUrl(), 
+                                                            src: getFormattedLogoUrl() || '', 
                                                             height: 32,
                                                             width: 32,
                                                             excavate: true,
@@ -303,7 +319,7 @@ export default function QRGenerator() {
                                                     fgColor={qrColor}
                                                     level={"H"}
                                                     imageSettings={includeLogo && venueSettings?.logo_url ? {
-                                                        src: getFormattedLogoUrl(), 
+                                                        src: getFormattedLogoUrl() || '', 
                                                         height: hasWifiConfig ? 48 : 64,
                                                         width: hasWifiConfig ? 48 : 64,
                                                         excavate: true,

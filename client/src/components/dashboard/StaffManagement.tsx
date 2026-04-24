@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { toast } from 'sonner';
 import { 
     Users, Plus, KeyRound, Shield, Clock, RefreshCw, Lock, 
@@ -8,14 +8,40 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
+// 🛡️ Explicit Interfaces for Staff Data and Form States
+export interface StaffMember {
+    user_id: string;
+    username: string;
+    role: string;
+    email?: string;
+    is_active: boolean;
+    last_login?: string;
+}
+
+interface StaffFormData {
+    username: string;
+    role: string;
+    pin: string;
+    email: string;
+    password?: string;
+}
+
+interface ResetPinModalState {
+    isOpen: boolean;
+    staffId: string | null;
+    name: string;
+    pin: string;
+}
+
 export default function StaffManagement() {
-    const [staff, setStaff] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
+    // 🛡️ Strongly typed state
+    const [staff, setStaff] = useState<StaffMember[]>([]);
+    const [isLoading, setIsLoading] = useState<boolean>(true);
     
     // Modals State
-    const [isModalOpen, setIsModalOpen] = useState(false);
-    const [editingStaff, setEditingStaff] = useState(null);
-    const [resetPinModal, setResetPinModal] = useState({ isOpen: false, staffId: null, name: '', pin: '' });
+    const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+    const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
+    const [resetPinModal, setResetPinModal] = useState<ResetPinModalState>({ isOpen: false, staffId: null, name: '', pin: '' });
 
     // Auth Context
     const { user } = useAuth();
@@ -25,23 +51,23 @@ export default function StaffManagement() {
     const currentUserId = user?.id || user?.userId;
 
     // ⚡ FIX: Use a dynamic getter for config to completely prevent stale token/venueId bugs 
-    // and eliminate the useMemo crash.
-    const getConfig = () => ({
+    // and eliminate the useMemo crash. Use `any` to allow the custom venueId property without strict AxiosRequestConfig errors.
+    const getConfig = (): any => ({
         headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` },
         venueId: user?.venueId
     });
 
-    const [activeDropdown, setActiveDropdown] = useState(null);
-    const dropdownRef = useRef(null);
+    const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+    const dropdownRef = useRef<HTMLDivElement>(null);
     
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [formData, setFormData] = useState({ username: '', role: 'WAITER', pin: '', email: '', password: '' });
+    const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+    const [formData, setFormData] = useState<StaffFormData>({ username: '', role: 'WAITER', pin: '', email: '', password: '' });
 
     const fetchStaff = async () => {
         if (!user?.venueId) return; // Prevent fetching before context loads
         setIsLoading(true);
         try {
-            const res = await axios.get('/api/auth/staff', getConfig());
+            const res = await axios.get<StaffMember[]>('/api/auth/staff', getConfig());
             setStaff(res.data);
         } catch (error) {
             console.error('Error loading staff roster', error);
@@ -54,8 +80,11 @@ export default function StaffManagement() {
     useEffect(() => {
         fetchStaff();
         
-        const handleClickOutside = (event) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) setActiveDropdown(null);
+        // 🛡️ Strongly type the DOM mouse event
+        const handleClickOutside = (event: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+                setActiveDropdown(null);
+            }
         };
         document.addEventListener("mousedown", handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -64,7 +93,7 @@ export default function StaffManagement() {
 
     const generateRandomPin = () => Math.floor(1000 + Math.random() * 9000).toString();
 
-    const openModal = (staffMember = null) => {
+    const openModal = (staffMember: StaffMember | null = null) => {
         setActiveDropdown(null);
         if (staffMember) {
             setEditingStaff(staffMember);
@@ -82,7 +111,7 @@ export default function StaffManagement() {
         setIsModalOpen(true);
     };
 
-    const handleSaveStaff = async (e) => {
+    const handleSaveStaff = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsSubmitting(true);
         try {
@@ -96,13 +125,14 @@ export default function StaffManagement() {
             setIsModalOpen(false);
             fetchStaff(); 
         } catch (error) {
-            toast.error(error.response?.data?.message || 'Failed to save staff member.');
+            const axiosError = error as AxiosError<{ message: string }>;
+            toast.error(axiosError.response?.data?.message || 'Failed to save staff member.');
         } finally {
             setIsSubmitting(false);
         }
     };
 
-    const handleResetPinSubmit = async (e) => {
+    const handleResetPinSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsSubmitting(true);
         try {
@@ -110,38 +140,43 @@ export default function StaffManagement() {
             toast.success(`PIN for ${resetPinModal.name} has been reset successfully.`, { duration: 5000 });
             setResetPinModal({ isOpen: false, staffId: null, name: '', pin: '' });
         } catch (error) {
-            toast.error(error.response?.data?.message || 'Failed to reset PIN.');
+            const axiosError = error as AxiosError<{ message: string }>;
+            toast.error(axiosError.response?.data?.message || 'Failed to reset PIN.');
         } finally {
             setIsSubmitting(false);
         }
     };
 
-    const handleDeleteStaff = async (staffId, name) => {
+    const handleDeleteStaff = async (staffId: string, name: string) => {
         setActiveDropdown(null);
         if (!window.confirm(`CRITICAL WARNING: Are you absolutely sure you want to permanently delete ${name}?`)) return;
         try {
             await axios.delete(`/api/auth/staff/${staffId}`, getConfig());
             setStaff(staff.filter(s => s.user_id !== staffId));
             toast.success('Staff member deleted permanently.');
-        } catch (error) { toast.error(error.response?.data?.message || 'Failed to delete staff member.'); }
+        } catch (error) { 
+            const axiosError = error as AxiosError<{ message: string }>;
+            toast.error(axiosError.response?.data?.message || 'Failed to delete staff member.'); 
+        }
     };
 
     // ⚡ SUSPEND ACCESS LOGIC
-    const handleToggleStatus = async (staffId, currentStatus) => {
+    const handleToggleStatus = async (staffId: string, currentStatus: boolean) => {
         try {
             const newStatus = !currentStatus; // Flip the status
-            const res = await axios.patch(`/api/auth/staff/${staffId}/status`, { is_active: newStatus }, getConfig());
+            const res = await axios.patch<{ message: string }>(`/api/auth/staff/${staffId}/status`, { is_active: newStatus }, getConfig());
             
             // Update UI instantly
             setStaff(staff.map(m => m.user_id === staffId ? { ...m, is_active: newStatus } : m));
             toast.success(res.data.message);
             setActiveDropdown(null);
         } catch (error) { 
-            toast.error(error.response?.data?.message || 'Failed to change status.'); 
+            const axiosError = error as AxiosError<{ message: string }>;
+            toast.error(axiosError.response?.data?.message || 'Failed to change status.'); 
         }
     };
 
-    const getRoleBadge = (role) => {
+    const getRoleBadge = (role: string) => {
         switch (role) {
             case 'OWNER': return { icon: <ShieldAlert size={14} />, color: 'text-purple-700 bg-purple-100 border-purple-200' };
             case 'MANAGER': return { icon: <Shield size={14} />, color: 'text-indigo-700 bg-indigo-100 border-indigo-200' };
@@ -157,7 +192,8 @@ export default function StaffManagement() {
     const isDemoting = editingStaff && wasManagerRole && !isManagerRole;
     const showPinAuth = (!editingStaff && !isManagerRole) || isDemoting;
 
-    const renderDropdown = (member, canModify, isDropup) => (
+    // 🛡️ Type the Dropdown Renderer
+    const renderDropdown = (member: StaffMember, canModify: boolean, isDropup: boolean) => (
         <div className={`absolute right-0 md:right-0 w-56 bg-white rounded-2xl shadow-2xl border border-slate-100 z-50 overflow-hidden animate-in fade-in ${
             isDropup ? 'bottom-full mb-2 slide-in-from-bottom-2' : 'top-12 slide-in-from-top-2'
         }`}>
@@ -340,10 +376,14 @@ export default function StaffManagement() {
                                             </div>
                                         </td>
                                         <td className={`p-4 pr-6 text-right relative ${activeDropdown === member.user_id ? 'z-50' : 'z-10'}`}>
-                                            <button onClick={() => setActiveDropdown(activeDropdown === member.user_id ? null : member.user_id)} className="p-2 text-slate-400 hover:text-slate-900 bg-transparent hover:bg-white border border-transparent hover:border-slate-200 rounded-xl transition-all focus:outline-none">
+                                            <button onClick={() => setActiveDropdown(activeDropdown === member.user_id ? null : member.user_id)} className="p-2 text-slate-400 hover:text-slate-900 bg-transparent hover:bg-white border border-transparent hover:border-slate-200 rounded-xl transition-all focus:outline-none" aria-haspopup="true" aria-expanded={activeDropdown === member.user_id}>
                                                 <MoreVertical size={18}/>
                                             </button>
-                                            {activeDropdown === member.user_id && renderDropdown(member, canModify, isDropup)}
+                                            {activeDropdown === member.user_id && (
+                                                <div ref={dropdownRef}>
+                                                    {renderDropdown(member, canModify, isDropup)}
+                                                </div>
+                                            )}
                                         </td>
                                     </tr>
                                 );
@@ -420,7 +460,7 @@ export default function StaffManagement() {
                                                 <input 
                                                     type="password" 
                                                     required={!editingStaff || (editingStaff && !wasManagerRole)} 
-                                                    minLength="6" 
+                                                    minLength={6} 
                                                     value={formData.password} 
                                                     onChange={(e) => setFormData({...formData, password: e.target.value})} 
                                                     placeholder="••••••••" 
@@ -443,7 +483,7 @@ export default function StaffManagement() {
                                                 <input 
                                                     type="text" 
                                                     required={!editingStaff || isDemoting}
-                                                    maxLength="4" pattern="\d{4}" 
+                                                    maxLength={4} pattern="\d{4}" 
                                                     value={formData.pin} 
                                                     onChange={(e) => setFormData({...formData, pin: e.target.value.replace(/\D/g, '')})} 
                                                     placeholder="••••" 
@@ -490,7 +530,7 @@ export default function StaffManagement() {
                                 <div className="relative flex-1">
                                     <KeyRound size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
                                     <input 
-                                        type="text" required maxLength="4" pattern="\d{4}" 
+                                        type="text" required maxLength={4} pattern="\d{4}" 
                                         value={resetPinModal.pin} 
                                         onChange={(e) => setResetPinModal({...resetPinModal, pin: e.target.value.replace(/\D/g, '')})} 
                                         placeholder="••••" 

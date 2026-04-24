@@ -1,25 +1,82 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { 
     LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, 
     Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts';
 import { 
     TrendingUp, TrendingDown, DollarSign, ShoppingBag, 
-    CreditCard, Activity, QrCode, PlusCircle, Clock, Flame,
+    CreditCard, Activity, QrCode, Clock, Flame,
     Calendar, ChevronDown, Download, AlertTriangle, CheckCircle2, AlertCircle
 } from 'lucide-react';
 
+// 🛡️ Interfaces for the highly complex API Dashboard Payload
+interface KPIMetric {
+    value: number;
+    trend: number;
+}
+
+interface LivePulse {
+    activeOrders: number;
+    averageFulfillmentTime: string | number;
+}
+
+interface SalesTrend {
+    timeLabel: string;
+    currentRevenue: number;
+    previousRevenue: number;
+    currentOrders: number;
+    previousOrders: number;
+}
+
+interface PaymentBreakdown {
+    name: string;
+    value: number;
+}
+
+interface CategoryBreakdown {
+    category: string;
+    total_sold: number;
+    revenue: number;
+}
+
+interface TopItem {
+    name: string;
+    total_sold: number;
+    total_revenue: number;
+}
+
+export interface DashboardData {
+    granularity: 'hour' | 'day' | 'month';
+    kpis: {
+        revenue: KPIMetric;
+        orders: KPIMetric;
+        aov: KPIMetric;
+    };
+    livePulse: LivePulse;
+    salesTrends: SalesTrend[];
+    paymentBreakdown: PaymentBreakdown[];
+    categoryBreakdown: CategoryBreakdown[];
+    topItems: TopItem[];
+}
+
+interface DateRangeState {
+    label: string;
+    preset: string;
+    start?: string;
+    end?: string;
+}
+
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
-const formatCurrency = (val) => new Intl.NumberFormat('en-KE', { 
+const formatCurrency = (val?: number) => new Intl.NumberFormat('en-KE', { 
     style: 'currency', 
     currency: 'KES', 
     minimumFractionDigits: 0 
 }).format(val || 0);
 
-const formatTimeLabel = (isoString, granularity) => {
+const formatTimeLabel = (isoString: string, granularity: string) => {
     if (!isoString) return '';
     const safeString = String(isoString).replace(' ', 'T');
     const date = new Date(safeString);
@@ -39,7 +96,7 @@ const formatTimeLabel = (isoString, granularity) => {
     }
 };
 
-const generateCSV = (data, dateRangeLabel) => {
+const generateCSV = (data: DashboardData | null, dateRangeLabel: string) => {
     if (!data) return;
     const { kpis, livePulse, salesTrends, categoryBreakdown, topItems } = data;
 
@@ -86,7 +143,16 @@ const generateCSV = (data, dateRangeLabel) => {
     URL.revokeObjectURL(url);
 };
 
-const StatCard = ({ title, value, trend, icon: Icon, LinkTo }) => {
+// 🛡️ Explicitly typed UI sub-components
+interface StatCardProps {
+    title: string;
+    value: string | number;
+    trend?: number;
+    icon: React.ElementType;
+    LinkTo?: string;
+}
+
+const StatCard: React.FC<StatCardProps> = ({ title, value, trend, icon: Icon, LinkTo }) => {
     const isPositive = Number(trend) >= 0;
     const CardContent = (
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col transition-all hover:shadow-md h-full hover:border-indigo-200 group">
@@ -109,10 +175,10 @@ const StatCard = ({ title, value, trend, icon: Icon, LinkTo }) => {
     return LinkTo ? <Link to={LinkTo} className="block">{CardContent}</Link> : CardContent;
 };
 
-const ComparativeTooltip = ({ active, payload, label, granularity }) => {
+const ComparativeTooltip: React.FC<any> = ({ active, payload, label, granularity }) => {
     if (active && payload && payload.length) {
-        const current = payload.find(p => p.dataKey === 'currentRevenue')?.value || 0;
-        const previous = payload.find(p => p.dataKey === 'previousRevenue')?.value || 0;
+        const current = payload.find((p: any) => p.dataKey === 'currentRevenue')?.value || 0;
+        const previous = payload.find((p: any) => p.dataKey === 'previousRevenue')?.value || 0;
         const diff = current - previous;
         const isPositive = diff >= 0;
 
@@ -195,20 +261,19 @@ const OnboardingChecklist = () => (
 );
 
 export default function DashboardOverview() {
-    // ⚡ FIX: Changed default preset to 'shift'
-    const [dateRange, setDateRange] = useState({ label: 'Current Shift', preset: 'shift', start: '', end: '' });
-    const [customStart, setCustomStart] = useState('');
-    const [customEnd, setCustomEnd] = useState('');
-    const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
-    const datePickerRef = useRef(null);
+    const [dateRange, setDateRange] = useState<DateRangeState>({ label: 'Current Shift', preset: 'shift' });
+    const [customStart, setCustomStart] = useState<string>('');
+    const [customEnd, setCustomEnd] = useState<string>('');
+    const [isDatePickerOpen, setIsDatePickerOpen] = useState<boolean>(false);
+    const datePickerRef = useRef<HTMLDivElement>(null);
 
-    const [data, setData] = useState(null);
-    const [isLoading, setIsLoading] = useState(true);
-    const [errorMsg, setErrorMsg] = useState(null);
+    const [data, setData] = useState<DashboardData | null>(null);
+    const [isLoading, setIsLoading] = useState<boolean>(true);
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
     useEffect(() => {
-        const handleClickOutside = (event) => {
-            if (datePickerRef.current && !datePickerRef.current.contains(event.target)) {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (datePickerRef.current && !datePickerRef.current.contains(event.target as Node)) {
                 setIsDatePickerOpen(false);
             }
         };
@@ -216,15 +281,15 @@ export default function DashboardOverview() {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    const fetchDashboardData = useCallback(async (isSilent = false, signal) => {
+    const fetchDashboardData = useCallback(async (isSilent = false, signal?: AbortSignal) => {
         if (!isSilent) setIsLoading(true);
         setErrorMsg(null);
         
         try {
-            let startDateStr = null; // Let the backend default handles 'shift' logic
-            let endDateStr = null;
+            let startDateStr: string | null = null; 
+            let endDateStr: string | null = null;
 
-            if (dateRange.preset === 'custom') {
+            if (dateRange.preset === 'custom' && dateRange.start && dateRange.end) {
                 const startObj = new Date(dateRange.start);
                 startObj.setHours(0,0,0,0);
                 startDateStr = startObj.toISOString();
@@ -238,7 +303,6 @@ export default function DashboardOverview() {
 
                 switch (dateRange.preset) {
                     case 'shift':
-                        // ⚡ FIX: We pass nothing. The backend will calculate the shift correctly based on Venue settings.
                         break;
                     case 'yesterday':
                         tempStart.setDate(now.getDate() - 1);
@@ -271,14 +335,13 @@ export default function DashboardOverview() {
                 }
             }
             
-            // Only attach query params if they exist
-            const params = {};
+            const params: Record<string, string> = {};
             if (startDateStr && endDateStr) {
                 params.startDate = startDateStr;
                 params.endDate = endDateStr;
             }
             
-            const res = await axios.get(`/api/dashboard/overview`, {
+            const res = await axios.get<DashboardData>(`/api/dashboard/overview`, {
                 params,
                 signal
             });
@@ -292,7 +355,8 @@ export default function DashboardOverview() {
             if (axios.isCancel(error)) {
                 console.log('Request canceled due to race condition prevention.');
             } else {
-                setErrorMsg(error.response?.data?.message || error.message || "Failed to fetch dashboard data.");
+                const axiosError = error as AxiosError<{ message: string }>;
+                setErrorMsg(axiosError.response?.data?.message || axiosError.message || "Failed to fetch dashboard data.");
             }
         } finally {
             if (!isSilent) setIsLoading(false);
@@ -335,9 +399,9 @@ export default function DashboardOverview() {
     }
 
     const { granularity, kpis, livePulse, salesTrends, paymentBreakdown, topItems, categoryBreakdown } = data;
-    const hasOrders = kpis.orders?.value > 0;
+    const hasOrders = (kpis.orders?.value || 0) > 0;
     
-    const isColdStart = !hasOrders && (data.kpis.revenue?.value === 0);
+    const isColdStart = !hasOrders && ((data.kpis.revenue?.value || 0) === 0);
 
     const sanitizedCategoryBreakdown = (categoryBreakdown || []).map(item => ({
         category: item.category || 'Uncategorized',
@@ -372,7 +436,6 @@ export default function DashboardOverview() {
                         {isDatePickerOpen && (
                             <div className="absolute top-full left-0 sm:left-auto right-0 mt-2 w-full sm:w-80 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2">
                                 <div className="p-2 border-b border-slate-100 grid grid-cols-2 gap-1">
-                                    {/* ⚡ FIX: Updated drop-down list to reflect the Shift setting */}
                                     {[
                                         { label: 'Current Shift', preset: 'shift' }, { label: 'Yesterday', preset: 'yesterday' },
                                         { label: 'Last 7 Days', preset: '7days' }, { label: 'This Month', preset: 'thisMonth' },
@@ -429,7 +492,7 @@ export default function DashboardOverview() {
                 </div>
             </div>
 
-            {livePulse?.averageFulfillmentTime > 20 && (
+            {Number(livePulse?.averageFulfillmentTime || 0) > 20 && (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start sm:items-center gap-3 animate-in fade-in slide-in-from-top-2">
                     <div className="text-red-500 shrink-0"><AlertTriangle size={20} /></div>
                     <div>
@@ -527,13 +590,13 @@ export default function DashboardOverview() {
                                     <BarChart data={sanitizedCategoryBreakdown} layout="vertical" margin={{ top: 0, right: 0, left: 10, bottom: 0 }}>
                                         <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                                         <XAxis type="number" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `KSh ${val}`} />
-                                        <YAxis dataKey="category" type="category" stroke="#64748b" fontSize={10} sm:fontSize={12} fontWeight="bold" tickLine={false} axisLine={false} width={80} />
+                                        <YAxis dataKey="category" type="category" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} width={80} />
                                         <RechartsTooltip 
                                             cursor={{fill: '#f8fafc'}}
                                             contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                                            formatter={(value) => [formatCurrency(value), 'Revenue']}
+                                            formatter={(value: number) => [formatCurrency(value), 'Revenue']}
                                         />
-                                        <Bar dataKey="revenue" fill="#10b981" radius={[0, 4, 4, 0]} barSize={20} sm:barSize={24} />
+                                        <Bar dataKey="revenue" fill="#10b981" radius={[0, 4, 4, 0]} />
                                     </BarChart>
                                 </ResponsiveContainer>
                             </div>

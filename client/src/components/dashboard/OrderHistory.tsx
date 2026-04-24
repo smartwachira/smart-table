@@ -1,17 +1,49 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { toast } from 'sonner';
 import { 
     Search, Calendar, ChevronDown, Receipt, 
     CheckCircle2, Ban, Clock, User, Banknote 
 } from 'lucide-react';
 
-const formatCurrency = (val) => new Intl.NumberFormat('en-KE', { 
-    style: 'currency', currency: 'KES', minimumFractionDigits: 0 
-}).format(val || 0);
+// 🛡️ Explicit Interfaces for the API Response
+interface OrderItem {
+    quantity: number;
+    price_at_time: number;
+    name?: string;
+    notes?: string;
+    MenuItem?: {
+        name: string;
+    };
+}
 
-const formatDateTime = (isoString) => {
+interface HistoryOrderData {
+    order_id: string;
+    table_number: string;
+    customer_name?: string;
+    status: 'PENDING' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED';
+    payment_status: 'PENDING' | 'PAID' | 'FAILED';
+    payment_method: 'CASH' | 'M-PESA' | string;
+    total_amount: number | string;
+    createdAt?: string;
+    notes?: string;
+    CashCollector?: { name: string };
+    OrderItems: OrderItem[];
+}
+
+interface DateRangeState {
+    label: string;
+    preset: string;
+    start?: string;
+    end?: string;
+}
+
+const formatCurrency = (val?: number | string) => new Intl.NumberFormat('en-KE', { 
+    style: 'currency', currency: 'KES', minimumFractionDigits: 0 
+}).format(Number(val) || 0);
+
+const formatDateTime = (isoString?: string) => {
     if (!isoString) return '';
     return new Date(isoString).toLocaleString('en-US', { 
         timeZone: 'Africa/Nairobi', 
@@ -24,22 +56,22 @@ export default function OrderHistory() {
     const navigate = useNavigate();
     
     // UI State
-    const [orders, setOrders] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [selectedOrder, setSelectedOrder] = useState(null); // For the Receipt Modal
+    const [orders, setOrders] = useState<HistoryOrderData[]>([]);
+    const [isLoading, setIsLoading] = useState<boolean>(true);
+    const [searchQuery, setSearchQuery] = useState<string>('');
+    const [selectedOrder, setSelectedOrder] = useState<HistoryOrderData | null>(null);
 
     // Temporal Date Picker State
-    const [dateRange, setDateRange] = useState({ label: 'Today', preset: 'today', start: '', end: '' });
-    const [customStart, setCustomStart] = useState('');
-    const [customEnd, setCustomEnd] = useState('');
-    const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
-    const datePickerRef = useRef(null);
+    const [dateRange, setDateRange] = useState<DateRangeState>({ label: 'Today', preset: 'today' });
+    const [customStart, setCustomStart] = useState<string>('');
+    const [customEnd, setCustomEnd] = useState<string>('');
+    const [isDatePickerOpen, setIsDatePickerOpen] = useState<boolean>(false);
+    const datePickerRef = useRef<HTMLDivElement>(null);
 
     // Close date picker when clicking outside
     useEffect(() => {
-        const handleClickOutside = (event) => {
-            if (datePickerRef.current && !datePickerRef.current.contains(event.target)) {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (datePickerRef.current && !datePickerRef.current.contains(event.target as Node)) {
                 setIsDatePickerOpen(false);
             }
         };
@@ -47,7 +79,7 @@ export default function OrderHistory() {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    const fetchHistory = useCallback(async (signal) => {
+    const fetchHistory = useCallback(async (signal?: AbortSignal) => {
         setIsLoading(true);
         try {
             const token = localStorage.getItem('auth_token');
@@ -58,7 +90,7 @@ export default function OrderHistory() {
             let endDateStr = new Date(now);
 
             // Date Math Logic
-            if (dateRange.preset === 'custom') {
+            if (dateRange.preset === 'custom' && dateRange.start && dateRange.end) {
                 const startObj = new Date(dateRange.start); startObj.setHours(0,0,0,0); startDateStr = startObj;
                 const endObj = new Date(dateRange.end); endObj.setHours(23,59,59,999); endDateStr = endObj; 
             } else {
@@ -78,7 +110,7 @@ export default function OrderHistory() {
                 }
             }
 
-            const response = await axios.get('/api/orders/history', {
+            const response = await axios.get<HistoryOrderData[]>('/api/orders/history', {
                 headers: { Authorization: `Bearer ${token}` },
                 params: { startDate: startDateStr.toISOString(), endDate: endDateStr.toISOString() },
                 signal
@@ -121,8 +153,8 @@ export default function OrderHistory() {
         return shortId.includes(query) || customer.includes(query) || table.includes(query);
     });
 
-    const StatusBadge = ({ status }) => {
-        const styles = {
+    const StatusBadge: React.FC<{ status: HistoryOrderData['status'] }> = ({ status }) => {
+        const styles: Record<HistoryOrderData['status'], string> = {
             COMPLETED: 'bg-emerald-100 text-emerald-800 border-emerald-200',
             CANCELLED: 'bg-red-100 text-red-800 border-red-200 line-through',
             PENDING: 'bg-amber-100 text-amber-800 border-amber-200',
@@ -220,9 +252,9 @@ export default function OrderHistory() {
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {isLoading ? (
-                                <tr><td colSpan="7" className="p-8 text-center text-slate-500 font-bold">Loading history...</td></tr>
+                                <tr><td colSpan={7} className="p-8 text-center text-slate-500 font-bold">Loading history...</td></tr>
                             ) : filteredOrders.length === 0 ? (
-                                <tr><td colSpan="7" className="p-12 text-center text-slate-500 font-bold">No orders found for this period.</td></tr>
+                                <tr><td colSpan={7} className="p-12 text-center text-slate-500 font-bold">No orders found for this period.</td></tr>
                             ) : (
                                 filteredOrders.map(order => (
                                     <tr key={order.order_id} className="hover:bg-slate-50 transition-colors">

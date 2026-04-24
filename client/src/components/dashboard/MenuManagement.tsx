@@ -1,49 +1,78 @@
 import React, { useState, useEffect } from 'react';
-import { toast } from 'react-hot-toast';
+import { toast } from 'sonner'; // ⚡ Standardized to Sonner to match global App.tsx Toaster
 import { 
   Search, Plus, Edit2, X, Check, Image as ImageIcon, 
   UtensilsCrossed, AlertCircle, UploadCloud, Trash2
 } from 'lucide-react';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { useAuth } from '../../context/AuthContext';
+
+// 🛡️ Explicit Interfaces for Data Models
+export interface MenuCategory {
+  category_id: string;
+  name: string;
+  venue_id?: string;
+}
+
+export interface MenuItem {
+  item_id: string;
+  name: string;
+  price: number | string;
+  description?: string;
+  image_url?: string;
+  is_available: boolean;
+  category_id: string;
+}
+
+// 🛡️ Interface for the Form Data sent to the backend
+interface ItemFormData {
+  name: string;
+  price: string | number;
+  category_id: string;
+  description: string;
+  is_available: boolean;
+}
 
 export default function MenuManagement() {
   // --- STATE ---
-  const [categories, setCategories] = useState([]);
-  const [items, setItems] = useState([]);
-  const [activeCategory, setActiveCategory] = useState('all');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
+  const [categories, setCategories] = useState<MenuCategory[]>([]);
+  const [items, setItems] = useState<MenuItem[]>([]);
+  const [activeCategory, setActiveCategory] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   
   const token = localStorage.getItem('auth_token');
-  const {user} = useAuth();
-  const config = { headers: {
-      Authorization: `Bearer ${token}`},
-      venueId: user.venueId
-  }
+  const { user } = useAuth();
+  
+  // 🛡️ Type the Axios config object
+  const config = { 
+      headers: { Authorization: `Bearer ${token}` },
+      // Note: Backend extracts venueId from JWT, but keeping this for your specific axios setup
+      venueId: user?.venueId 
+  };
 
   // Drawer & Form State
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [editingItem, setEditingItem] = useState(null);
+  const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
+  const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   
   // New Category State
-  const [isAddingCategory, setIsAddingCategory] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState('');
+  const [isAddingCategory, setIsAddingCategory] = useState<boolean>(false);
+  const [newCategoryName, setNewCategoryName] = useState<string>('');
 
   // --- LIFECYCLE ---
-  const fetchMenuData = async ()=> {
+  const fetchMenuData = async () => {
     setIsLoading(true);
     try {
-      const [categoriesRes,itemsRes] = await Promise.all([
-        axios.get('/api/menu/categories',config),
-        axios.get('/api/menu/items',config)
+      const [categoriesRes, itemsRes] = await Promise.all([
+        axios.get<MenuCategory[]>('/api/menu/categories', config),
+        axios.get<MenuItem[]>('/api/menu/items', config)
       ]);
 
       setCategories(categoriesRes.data);
       setItems(itemsRes.data);
-    } catch (error){
-      console.error("Fetch Menu Data Error:",error);
-      toast.error("Failed to load menu data. Please check your connection.")
+    } catch (error) {
+      console.error("Fetch Menu Data Error:", error);
+      toast.error("Failed to load menu data. Please check your connection.");
     } finally {
       setIsLoading(false);
     }
@@ -54,13 +83,13 @@ export default function MenuManagement() {
   }, []);
 
   // --- HANDLERS ---
-  const handleToggleAvailability = async (itemId, currentStatus) => {
+  const handleToggleAvailability = async (itemId: string, currentStatus: boolean) => {
     setItems(items.map(item => 
       item.item_id === itemId ? { ...item, is_available: !currentStatus } : item
     ));
     
     try {
-      await axios.patch(`/api/menu/items/${itemId}`, { is_available: !currentStatus },config);
+      await axios.patch(`/api/menu/items/${itemId}`, { is_available: !currentStatus }, config);
       toast.success(`Item marked as ${!currentStatus ? 'Available' : 'Unavailable'}`);
     } catch (error) {
       setItems(items.map(item => 
@@ -71,33 +100,34 @@ export default function MenuManagement() {
     }
   };
 
-  const handleSaveItem = async (formData,imageFile) => {
+  const handleSaveItem = async (formData: ItemFormData, imageFile: File | null) => {
     const token = localStorage.getItem('auth_token');
     try {
         const payload = new FormData();
-        payload.append('name',formData.name);
-        payload.append('price', formData.price);
-        payload.append('category_id',formData.category_id);
-        payload.append('description',formData.description);
-        payload.append('is_available',formData.is_available)
+        payload.append('name', formData.name);
+        payload.append('price', String(formData.price));
+        payload.append('category_id', formData.category_id);
+        payload.append('description', formData.description);
+        payload.append('is_available', String(formData.is_available));
 
         if (imageFile) {
             payload.append('image', imageFile);
         }
       
-        const config = { 
+        const uploadConfig = { 
             headers: {
-                'Content-Type':'multipart/form-data',
+                'Content-Type': 'multipart/form-data',
                 Authorization: `Bearer ${token}`
             },
-            venueId: user.venueId
-        }
+            venueId: user?.venueId
+        };
+
       if (editingItem) {
-        const res = await axios.patch(`/api/menu/items/${editingItem.item_id}`, payload, config);
+        const res = await axios.patch<MenuItem>(`/api/menu/items/${editingItem.item_id}`, payload, uploadConfig);
         setItems(items.map(item => item.item_id === editingItem.item_id ? res.data : item));
         toast.success('Menu item updated.');
       } else {
-        const newItem = await axios.post('/api/menu/items', payload, config);
+        const newItem = await axios.post<MenuItem>('/api/menu/items', payload, uploadConfig);
         setItems([newItem.data, ...items]);
         toast.success('New menu item added.');
       }
@@ -108,24 +138,25 @@ export default function MenuManagement() {
     }
   };
 
-  const handleAddCategory = async (e) => {
+  const handleAddCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCategoryName.trim()) return;
     
     try {
-      const newCat = await axios.post('/api/menu/categories', {name: newCategoryName}, config);
+      const newCat = await axios.post<MenuCategory>('/api/menu/categories', { name: newCategoryName }, config);
       setCategories([...categories, newCat.data]);
       setNewCategoryName('');
       setIsAddingCategory(false);
       toast.success('Category created.');
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to create category.');
+      const axiosError = error as AxiosError<{ message: string }>;
+      toast.error(axiosError.response?.data?.message || 'Failed to create category.');
       console.error("Error creating menu category:", error);
     }
   };
 
   // ⚡ NEW: Handle Category Deletion
-  const handleDeleteCategory = async (e, categoryId, categoryName) => {
+  const handleDeleteCategory = async (e: React.MouseEvent, categoryId: string, categoryName: string) => {
     e.stopPropagation(); 
     if (!window.confirm(`Are you sure you want to delete the "${categoryName}" category?`)) return;
 
@@ -135,12 +166,13 @@ export default function MenuManagement() {
       if (activeCategory === categoryId) setActiveCategory('all');
       toast.success('Category deleted.');
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to delete category.');
+      const axiosError = error as AxiosError<{ message: string }>;
+      toast.error(axiosError.response?.data?.message || 'Failed to delete category.');
     }
   };
 
   // ⚡ NEW: Handle Item Deletion
-  const handleDeleteItem = async (e, itemId, itemName) => {
+  const handleDeleteItem = async (e: React.MouseEvent, itemId: string, itemName: string) => {
     e.stopPropagation();
     if (!window.confirm(`Are you sure you want to completely delete "${itemName}"?`)) return;
 
@@ -149,11 +181,12 @@ export default function MenuManagement() {
       setItems(items.filter(i => i.item_id !== itemId));
       toast.success('Item deleted permanently.');
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to delete item.', { duration: 5000 });
+      const axiosError = error as AxiosError<{ message: string }>;
+      toast.error(axiosError.response?.data?.message || 'Failed to delete item.', { duration: 5000 });
     }
   };
 
-  const openDrawer = (item = null) => {
+  const openDrawer = (item: MenuItem | null = null) => {
     setEditingItem(item);
     setIsDrawerOpen(true);
   };
@@ -355,7 +388,7 @@ export default function MenuManagement() {
                         {item.name}
                       </h3>
                       <span className="font-black text-indigo-600 whitespace-nowrap text-sm md:text-base">
-                        {item.price.toLocaleString('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 })}
+                        {Number(item.price).toLocaleString('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 })}
                       </span>
                     </div>
                     <p className="text-slate-500 font-medium text-xs md:text-sm line-clamp-2 mb-3 md:mb-4 flex-1">
@@ -437,9 +470,17 @@ export default function MenuManagement() {
   );
 }
 
+// 🛡️ Interface for the ItemForm Sub-Component Props
+interface ItemFormProps {
+  item: MenuItem | null;
+  categories: MenuCategory[];
+  onSave: (formData: ItemFormData, imageFile: File | null) => void;
+  onCancel: () => void;
+}
+
 // --- SUB-COMPONENT: ITEM FORM ---
-function ItemForm({ item, categories, onSave, onCancel }) {
-  const [formData, setFormData] = useState({
+const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel }) => {
+  const [formData, setFormData] = useState<ItemFormData>({
     name: item?.name || '',
     price: item?.price || '',
     category_id: item?.category_id || categories[0]?.category_id || '',
@@ -447,20 +488,20 @@ function ItemForm({ item, categories, onSave, onCancel }) {
     is_available: item !== null ? item.is_available : true
   });
 
-  const [imageFile, setImageFile] = useState(null);
-  const [previewUrl, setPreviewUrl] = useState(item?.image_url || '');
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string>(item?.image_url || '');
 
-  const handleImageChange = (e) =>{
-    const file = e.target.files[0];
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (file) {
         setImageFile(file);
         setPreviewUrl(URL.createObjectURL(file))
     }
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({ ...formData, price: parseFloat(formData.price) },imageFile);
+    onSave({ ...formData, price: parseFloat(String(formData.price)) }, imageFile);
   };
 
   return (
@@ -557,7 +598,7 @@ function ItemForm({ item, categories, onSave, onCancel }) {
             <span className="text-[10px] md:text-xs text-slate-400 font-medium">Displayed on digital menu</span>
           </label>
           <textarea 
-            rows="3"
+            rows={3}
             value={formData.description}
             onChange={(e) => setFormData({...formData, description: e.target.value})}
             placeholder="Describe the ingredients, preparation, and flavor profile..."
@@ -606,4 +647,4 @@ function ItemForm({ item, categories, onSave, onCancel }) {
       </div>
     </form>
   );
-}
+};

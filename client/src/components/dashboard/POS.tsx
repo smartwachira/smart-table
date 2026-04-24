@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { toast } from 'sonner';
 import { 
     Search, ShoppingCart, Plus, Minus, Trash2, 
@@ -7,32 +7,55 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
+// 🛡️ Explicit Interfaces for POS Data Models
+export interface POSCategory {
+    category_id: string;
+    name: string;
+    is_active?: boolean;
+}
+
+export interface POSItem {
+    item_id: string;
+    name: string;
+    price: number | string;
+    category_id: string;
+    image_url?: string;
+    is_available?: boolean;
+}
+
+export interface CartItem extends POSItem {
+    quantity: number;
+}
+
+export type CartState = Record<string, CartItem>;
+
 export default function POS() {
     const { user } = useAuth();
     const token = localStorage.getItem('auth_token');
 
-    const [categories, setCategories] = useState([]);
-    const [items, setItems] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
+    // 🛡️ Strongly typed state
+    const [categories, setCategories] = useState<POSCategory[]>([]);
+    const [items, setItems] = useState<POSItem[]>([]);
+    const [isLoading, setIsLoading] = useState<boolean>(true);
 
-    const [activeCategory, setActiveCategory] = useState('all');
-    const [searchQuery, setSearchQuery] = useState('');
-    const [isMobileCartOpen, setIsMobileCartOpen] = useState(false); 
+    const [activeCategory, setActiveCategory] = useState<string>('all');
+    const [searchQuery, setSearchQuery] = useState<string>('');
+    const [isMobileCartOpen, setIsMobileCartOpen] = useState<boolean>(false); 
     
-    const [cart, setCart] = useState({});
-    const [tableNumber, setTableNumber] = useState('');
-    const [customerName, setCustomerName] = useState('');
-    const [isProcessing, setIsProcessing] = useState(false);
+    const [cart, setCart] = useState<CartState>({});
+    const [tableNumber, setTableNumber] = useState<string>('');
+    const [customerName, setCustomerName] = useState<string>('');
+    const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
-    const [mpesaModalOpen, setMpesaModalOpen] = useState(false);
-    const [phoneNumber, setPhoneNumber] = useState('');
+    const [mpesaModalOpen, setMpesaModalOpen] = useState<boolean>(false);
+    const [phoneNumber, setPhoneNumber] = useState<string>('');
 
     useEffect(() => {
         const fetchMenu = async () => {
             try {
                 const [itemsRes, categoriesRes] = await Promise.all([
-                    axios.get('/api/menu/items', { headers: { Authorization: `Bearer ${token}` } }),
-                    axios.get('/api/menu/categories', { headers: { Authorization: `Bearer ${token}` } })
+                    axios.get<{ items?: POSItem[] } | POSItem[]>('/api/menu/items', { headers: { Authorization: `Bearer ${token}` } }),
+                    axios.get<{ categories?: POSCategory[] } | POSCategory[]>('/api/menu/categories', { headers: { Authorization: `Bearer ${token}` } })
                 ]);
                 
                 const fetchedItems = Array.isArray(itemsRes.data) ? itemsRes.data : itemsRes.data.items || [];
@@ -53,7 +76,7 @@ export default function POS() {
         fetchMenu();
     }, [token]);
 
-    const addToCart = (item) => {
+    const addToCart = (item: POSItem) => {
         setCart(prev => ({
             ...prev,
             [item.item_id]: {
@@ -63,7 +86,7 @@ export default function POS() {
         }));
     };
 
-    const updateQuantity = (itemId, delta) => {
+    const updateQuantity = (itemId: string, delta: number) => {
         setCart(prev => {
             const newCart = { ...prev };
             if (!newCart[itemId]) return prev;
@@ -98,7 +121,7 @@ export default function POS() {
         });
     }, [items, activeCategory, searchQuery]);
 
-    const handleSubmitOrder = async (paymentMethod) => {
+    const handleSubmitOrder = async (paymentMethod: 'CASH' | 'M-PESA') => {
         if (cartItems.length === 0) return toast.error("Cart is empty");
         if (!tableNumber.trim()) return toast.error("Please enter a Table/Tab identifier");
 
@@ -117,7 +140,7 @@ export default function POS() {
                 items: cartItems.map(i => ({ item_id: i.item_id, quantity: i.quantity }))
             };
 
-            const orderRes = await axios.post('/api/orders', orderPayload, {
+            const orderRes = await axios.post<{ orderId: string }>('/api/orders', orderPayload, {
                 headers: { Authorization: `Bearer ${token}` }
             });
 
@@ -141,7 +164,8 @@ export default function POS() {
             
         } catch (error) {
             console.error(error);
-            toast.error(error.response?.data?.message || "Failed to submit order");
+            const axiosError = error as AxiosError<{ message: string }>;
+            toast.error(axiosError.response?.data?.message || "Failed to submit order");
         } finally {
             setIsProcessing(false);
         }
