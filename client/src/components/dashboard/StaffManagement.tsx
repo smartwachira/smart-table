@@ -48,7 +48,7 @@ export default function StaffManagement() {
     
     // Safely extract role and ID from context
     const currentUserRole = user?.role || 'STAFF';
-    const currentUserId = user?.id || user?.userId;
+    const currentUserId = user?.userId;
 
     // ⚡ FIX: Use a dynamic getter for config to completely prevent stale token/venueId bugs 
     // and eliminate the useMemo crash. Use `any` to allow the custom venueId property without strict AxiosRequestConfig errors.
@@ -187,9 +187,9 @@ export default function StaffManagement() {
 
     // FORM LOGIC
     const isManagerRole = ['MANAGER', 'OWNER'].includes(formData.role);
-    const wasManagerRole = editingStaff && ['MANAGER', 'OWNER'].includes(editingStaff.role);
+    const wasManagerRole = editingStaff ? ['MANAGER', 'OWNER'].includes(editingStaff.role): false;
     const showDashboardAuth = isManagerRole;
-    const isDemoting = editingStaff && wasManagerRole && !isManagerRole;
+    const isDemoting = editingStaff ? (wasManagerRole && !isManagerRole) : false;
     const showPinAuth = (!editingStaff && !isManagerRole) || isDemoting;
 
     // 🛡️ Type the Dropdown Renderer
@@ -459,7 +459,7 @@ export default function StaffManagement() {
                                                 <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
                                                 <input 
                                                     type="password" 
-                                                    required={!editingStaff || (editingStaff && !wasManagerRole)} 
+                                                    required={!editingStaff || wasManagerRole} 
                                                     minLength={6} 
                                                     value={formData.password} 
                                                     onChange={(e) => setFormData({...formData, password: e.target.value})} 

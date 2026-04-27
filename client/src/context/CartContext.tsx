@@ -12,6 +12,10 @@ export interface CartItem {
 
 export interface VenueConfig {
     tax_rate?: string | number;
+    allow_cash_payments?: boolean | string;
+    is_accepting_orders: boolean | string;
+    name?: string;        
+    logo_url?: string;
 }
 
 export interface CartTotals {

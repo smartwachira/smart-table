@@ -1,12 +1,11 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { CartProvider } from './context/CartContext.tsx';
-import App from './App';
+import App from './App'; // Removed CartProvider from here
 import axios, { InternalAxiosRequestConfig } from 'axios';
 
 // 🛡️ Typed Axios Interceptor
 axios.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  const token = localStorage.getItem('auth_token'); // Ensure this matches your AuthContext key
+  const token = localStorage.getItem('auth_token'); 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -20,11 +19,8 @@ if (import.meta.env.VITE_API_URL) {
   axios.defaults.baseURL = import.meta.env.VITE_API_URL;
 }
 
-// 🛡️ The ! tells TypeScript we guarantee this element exists in index.html
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <CartProvider>
-      <App />
-    </CartProvider>
+    <App />
   </StrictMode>,
 );

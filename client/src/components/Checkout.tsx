@@ -1,14 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { jwtDecode } from 'jwt-decode'; // ⚡ NEW: Import jwtDecode
-import axios from 'axios';
+import { jwtDecode } from 'jwt-decode'; 
+import axios, { AxiosError } from 'axios';
 import { toast } from 'sonner';
 import { 
     ArrowLeft, ShieldCheck, Smartphone, 
-    Receipt, Loader2, CheckCircle2, User, Banknote, XCircle,
-    Currency
+    Receipt, Loader2, CheckCircle2, User, Banknote, XCircle
 } from 'lucide-react';
 import { useCart } from '../context/CartContext';
+
+// 🛡️ Explicit Interfaces for Strict Typing
+interface GuestJwtPayload {
+    role: string;
+    venueId: string;
+    tableName: string;
+    orderMode: 'KIOSK' | 'TAB';
+    exp?: number;
+}
+
+type PaymentMethod = 'M-PESA' | 'CASH';
+type PaymentStatus = 'idle' | 'pending' | 'success' | 'failed';
+
+interface OrderStatusResponse {
+    payment_status: string;
+    status: string;
+}
 
 export default function Checkout() {
     const navigate = useNavigate();
@@ -16,26 +32,26 @@ export default function Checkout() {
     const cartItems = Object.values(cart);
 
     // ⚡ 1. State for Token Data
-    const [venueId, setVenueId] = useState(null);
-    const [tableNumber, setTableNumber] = useState('');
-    const [orderMode, setOrderMode] = useState('TAB'); // KIOSK or TAB
+    const [venueId, setVenueId] = useState<string | null>(null);
+    const [tableNumber, setTableNumber] = useState<string>('');
+    const [orderMode, setOrderMode] = useState<'KIOSK' | 'TAB'>('TAB'); 
 
     // Form State
-    const [customerName, setCustomerName] = useState('');
-    const [paymentMethod, setPaymentMethod] = useState('M-PESA'); // 'M-PESA' or 'CASH'
-    const [phone, setPhone] = useState('');
+    const [customerName, setCustomerName] = useState<string>('');
+    const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('M-PESA'); 
+    const [phone, setPhone] = useState<string>('');
     
     // Process State
-    const [isProcessing, setIsProcessing] = useState(false);
-    const [paymentStatus, setPaymentStatus] = useState('idle'); // idle, pending, success, failed
-    const [pollingOrderId, setPollingOrderId] = useState(null);
+    const [isProcessing, setIsProcessing] = useState<boolean>(false);
+    const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('idle'); 
+    const [pollingOrderId, setPollingOrderId] = useState<string | null>(null);
 
     // ⚡ 2. Extract Data from Token on Mount
     useEffect(() => {
         const token = localStorage.getItem('guest_token');
         if (token) {
             try {
-                const decoded = jwtDecode(token);
+                const decoded = jwtDecode<GuestJwtPayload>(token);
                 if (decoded.role === 'GUEST') {
                     setVenueId(decoded.venueId);
                     setTableNumber(decoded.tableName);
@@ -61,14 +77,15 @@ export default function Checkout() {
 
     // --- ⚡ THE SHORT POLLING ENGINE ⚡ ---
     useEffect(() => {
-        let pollInterval;
+        // 🛡️ Strongly type the interval timer
+        let pollInterval: ReturnType<typeof setInterval>;
 
         // Only run the poller if we are waiting for an M-Pesa response
         if (paymentStatus === 'pending' && pollingOrderId){
             pollInterval = setInterval(async () => {
                 try {
                     // Ping the database
-                    const res = await axios.get(`/api/orders/${pollingOrderId}/status`);
+                    const res = await axios.get<OrderStatusResponse>(`/api/orders/${pollingOrderId}/status`);
                     const currentStatus = res.data.payment_status;
 
                     if (currentStatus === "PAID"){
@@ -79,7 +96,7 @@ export default function Checkout() {
 
                         setTimeout(() => {
                             clearCart();
-                            navigate(`/order-status/${pollingOrderId}`); // ⚡ Removed venueId from URL
+                            navigate(`/order-status/${pollingOrderId}`); 
                         }, 2000);
                     } else if (currentStatus === 'FAILED' || res.data.status === 'CANCELLED'){
                         // Failure! Stop polling, reset UI and alert user
@@ -103,11 +120,11 @@ export default function Checkout() {
         };
     }, [paymentStatus, pollingOrderId, navigate, clearCart]);
 
-    const handlePhoneChange = (e) => {
+    const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setPhone(e.target.value.replace(/\D/g, ''));
     };
 
-    const handleCheckoutSubmit = async (e) => {
+    const handleCheckoutSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!customerName.trim()) return toast.error("Please enter your name for the order.");
         
@@ -120,8 +137,6 @@ export default function Checkout() {
         try {
             // STEP 1: CREATE THE ORDER FIRST
             const orderPayload = {
-                // Note: The backend 'protectGuest' middleware will likely extract venue_id 
-                // and table_number directly from the token, but we can pass them here just in case.
                 venue_id: venueId,
                 table_number: tableNumber,
                 customer_name: customerName,
@@ -136,7 +151,7 @@ export default function Checkout() {
                 }))
             };
             
-            const orderRes = await axios.post('/api/orders', orderPayload);
+            const orderRes = await axios.post<{ orderId: string }>('/api/orders', orderPayload);
             const orderId = orderRes.data.orderId;
 
             // STEP 2: HANDLE PAYMENT ROUTING
@@ -147,7 +162,7 @@ export default function Checkout() {
                 
                 setTimeout(() => {
                     clearCart();
-                    navigate(`/order-status/${orderId}`); // ⚡ Removed venueId from URL
+                    navigate(`/order-status/${orderId}`); 
                 }, 2000);
 
             } else {
@@ -161,7 +176,8 @@ export default function Checkout() {
 
         } catch (error) {
             console.error("Checkout Error:", error);
-            toast.error(error.response?.data?.message || "Checkout failed. Please try again.");
+            const axiosError = error as AxiosError<{ message: string }>;
+            toast.error(axiosError.response?.data?.message || "Checkout failed. Please try again.");
             setPaymentStatus('idle');
             setIsProcessing(false);
         }

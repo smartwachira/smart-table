@@ -346,7 +346,7 @@ export default function DashboardOverview() {
                 signal
             });
 
-            if (typeof res.data === 'string' && res.data.includes('<!DOCTYPE html>')) {
+            if (typeof res.data === 'string' && (res.data as string).includes('<!DOCTYPE html>')) {
                 throw new Error("Received HTML instead of JSON. The backend route is not mounted.");
             }
 
@@ -594,7 +594,7 @@ export default function DashboardOverview() {
                                         <RechartsTooltip 
                                             cursor={{fill: '#f8fafc'}}
                                             contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                                            formatter={(value: number) => [formatCurrency(value), 'Revenue']}
+                                            formatter={(value: any) => [formatCurrency(Number(value)), 'Revenue']}
                                         />
                                         <Bar dataKey="revenue" fill="#10b981" radius={[0, 4, 4, 0]} />
                                     </BarChart>
