@@ -63,13 +63,27 @@ export default function Login() {
                 localStorage.setItem('terminal_venue_id', res.data.user.venue_id);
             }
 
+            // ⚡ UNIFIED RBAC ROUTING 
+            // Determine the target route based on the authenticated user's exact role
+            const userRole = res.data.user.role;
+            let targetRoute = '/dashboard/pos'; // Default fallback for floor staff
+            let destinationName = 'Point of Sale';
+
+            if (['OWNER', 'MANAGER'].includes(userRole)) {
+                targetRoute = '/dashboard';
+                destinationName = 'Dashboard';
+            } else if (userRole === 'KITCHEN_STAFF') {
+                targetRoute = '/dashboard/orders';
+                destinationName = 'Kitchen Display';
+            }
+
             toast.success('Authentication Verified', {
-                description: `Routing to ${loginType === 'MANAGER' ? 'Dashboard' : 'Terminal'}...`,
+                description: `Routing to ${destinationName}...`,
                 icon: <KeyRound className="text-amber-500" />
             });
 
             setTimeout(() => {
-                navigate(loginType === 'MANAGER' ? '/dashboard' : '/kitchen');
+                navigate(targetRoute);
             }, 1000);
 
         } catch (err) {

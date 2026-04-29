@@ -61,21 +61,23 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
         // KPI 1: Revenue
         const currentRevenueResult = await Order.sum('total_amount', { where: { ...currentPeriodFilter, ...completedFilter, ...paidFilter } });
         const previousRevenueResult = await Order.sum('total_amount', { where: { ...previousPeriodFilter, ...completedFilter, ...paidFilter } });
-        const totalRevenue = currentRevenueResult || 0;
-        const prevRevenue = previousRevenueResult || 0;
+        
+        // ⚡ GUARANTEE NUMBERS, PREVENT NaN
+        const totalRevenue = Number(currentRevenueResult) || 0;
+        const prevRevenue = Number(previousRevenueResult) || 0;
 
         // KPI 2: Total Orders
-        const totalOrders = await Order.count({ where: { ...currentPeriodFilter, ...completedFilter } });
-        const prevTotalOrders = await Order.count({ where: { ...previousPeriodFilter, ...completedFilter } });
+        const totalOrders = Number(await Order.count({ where: { ...currentPeriodFilter, ...completedFilter } })) || 0;
+        const prevTotalOrders = Number(await Order.count({ where: { ...previousPeriodFilter, ...completedFilter } })) || 0;
 
         // KPI 3: Average Order Value (AOV)
-        const aov = totalOrders > 0 ? (totalRevenue / totalOrders).toFixed(2) : "0.00";
-        const prevAov = prevTotalOrders > 0 ? (prevRevenue / prevTotalOrders).toFixed(2) : "0.00";
+        const aov = totalOrders > 0 ? (totalRevenue / totalOrders) : 0;
+        const prevAov = prevTotalOrders > 0 ? (prevRevenue / prevTotalOrders) : 0;
 
         // KPI 4: Live Kitchen Pulse
-        const liveActiveOrders = await Order.count({
+        const liveActiveOrders = Number(await Order.count({
             where: { venue_id: venueId, status: { [Op.in]: ['PENDING', 'PREPARING', 'READY'] } }
-        });
+        })) || 0;
 
         // Postgres specific time extract mapping
         const fulfillmentData = await Order.findOne({
@@ -83,35 +85,52 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
             attributes: [[literal(`AVG(EXTRACT(EPOCH FROM ("updatedAt" - "createdAt")) / 60)`), 'avg_minutes']],
             raw: true
         }) as any;
+        const avgFulfillment = fulfillmentData?.avg_minutes ? parseFloat(fulfillmentData.avg_minutes).toFixed(1) : '0.0';
 
         // Chart 2: Top Selling Items
         const topItems = await OrderItem.findAll({
-            attributes: ['item_id', [fn('SUM', col('quantity')), 'totalSold'], [fn('SUM', literal('quantity * price_at_time')), 'revenueGenerated']],
+            attributes: [
+                'item_id', 
+                [fn('SUM', col('quantity')), 'total_sold'], 
+                [fn('SUM', literal('quantity * price_at_time')), 'total_revenue'],
+                [col('MenuItem.name'), 'name'], 
+                [col('MenuItem.image_url'), 'image_url']
+            ],
             include: [
                 { model: Order, attributes: [], where: { ...currentPeriodFilter, ...completedFilter } },
-                { model: MenuItem, attributes: ['name', 'image_url'] }
+                { model: MenuItem, attributes: [] }
             ],
             group: ['OrderItem.item_id', 'MenuItem.item_id', 'MenuItem.name', 'MenuItem.image_url'],
-            order: [[literal('totalSold'), 'DESC']],
-            limit: 5
+            order: [[literal('total_sold'), 'DESC']],
+            limit: 5,
+            raw: true // ⚡ CRITICAL FIX: Retain aggregations!
         });
 
         // Chart 3: Category Breakdown
         const categoryBreakdown = await OrderItem.findAll({
-            attributes: [[fn('SUM', col('quantity')), 'totalSold']],
+            attributes: [
+                [col('MenuItem.MenuCategory.name'), 'category'],
+                [fn('SUM', col('quantity')), 'total_sold'],
+                [fn('SUM', literal('quantity * price_at_time')), 'revenue']
+            ],
             include: [
                 { model: Order, attributes: [], where: { ...currentPeriodFilter, ...completedFilter } },
-                { model: MenuItem, attributes: [], include: [{ model: MenuCategory, attributes: ['name'] }] }
+                { model: MenuItem, attributes: [], include: [{ model: MenuCategory, attributes: [] }] }
             ],
             group: ['MenuItem.MenuCategory.category_id', 'MenuItem.MenuCategory.name'],
-            order: [[literal('totalSold'), 'DESC']]
+            order: [[literal('total_sold'), 'DESC']],
+            raw: true // ⚡ CRITICAL FIX: Retain aggregations!
         });
 
         // Chart 4: Payment Methods
         const paymentBreakdown = await Order.findAll({
             where: { ...currentPeriodFilter, ...completedFilter, ...paidFilter },
-            attributes: ['payment_method', [fn('COUNT', col('order_id')), 'count']],
-            group: ['payment_method']
+            attributes: [
+                [col('payment_method'), 'name'], 
+                [fn('COUNT', col('order_id')), 'value']
+            ],
+            group: ['payment_method'],
+            raw: true // ⚡ CRITICAL FIX: Retain aggregations!
         });
 
         // Live Trends Construction
@@ -122,31 +141,33 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
         const currentTrends = await Order.findAll({
             where: { ...currentPeriodFilter, ...completedFilter },
             attributes: [
-                [fn('to_char', col('createdAt'), timeFormatString), 'timeLabel'],
+                [fn('to_char', col('createdAt'), timeFormatString), 'time_label'],
                 [fn('SUM', col('total_amount')), 'revenue'],
                 [fn('COUNT', col('order_id')), 'orders']
             ],
-            group: ['timeLabel'],
-            order: [[literal('timeLabel'), 'ASC']]
+            group: ['time_label'],
+            order: [[literal('time_label'), 'ASC']],
+            raw: true // ⚡ CRITICAL FIX: Retain aggregations!
         });
 
         const previousTrends = await Order.findAll({
             where: { ...previousPeriodFilter, ...completedFilter },
             attributes: [
-                [fn('to_char', col('createdAt'), timeFormatString), 'timeLabel'],
+                [fn('to_char', col('createdAt'), timeFormatString), 'time_label'],
                 [fn('SUM', col('total_amount')), 'revenue'],
                 [fn('COUNT', col('order_id')), 'orders']
             ],
-            group: ['timeLabel'],
-            order: [[literal('timeLabel'), 'ASC']]
+            group: ['time_label'],
+            order: [[literal('time_label'), 'ASC']],
+            raw: true // ⚡ CRITICAL FIX: Retain aggregations!
         });
 
         const unifiedTrendsMap: Record<string, any> = {};
         
-        currentTrends.forEach(t => {
-            const row = t.toJSON() as any;
-            unifiedTrendsMap[row.timeLabel] = {
-                timeLabel: row.timeLabel,
+        // ⚡ Since we used raw: true, `row` is now a plain JS object. No need to .toJSON()
+        currentTrends.forEach((row: any) => {
+            unifiedTrendsMap[row.time_label] = {
+                timeLabel: row.time_label,
                 currentRevenue: parseFloat(row.revenue || 0),
                 currentOrders: parseInt(row.orders || 0, 10),
                 previousRevenue: 0,
@@ -154,11 +175,10 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
             };
         });
 
-        previousTrends.forEach(t => {
-            const row = t.toJSON() as any;
-            let timeKey = row.timeLabel;
+        previousTrends.forEach((row: any) => {
+            let timeKey = row.time_label;
             
-            const prevDateObj = new Date(row.timeLabel);
+            const prevDateObj = new Date(row.time_label);
             const shiftedDateObj = new Date(prevDateObj.getTime() + (startDate.getTime() - previousStartDate.getTime()));
             
             if (granularity === 'day') timeKey = shiftedDateObj.toISOString().split('T')[0];
@@ -185,11 +205,12 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
             kpis: {
                 revenue: { value: totalRevenue, trend: calculateTrend(totalRevenue, prevRevenue) },
                 orders: { value: totalOrders, trend: calculateTrend(totalOrders, prevTotalOrders) },
-                aov: { value: Number(aov), trend: calculateTrend(Number(aov), Number(prevAov)) } 
+                // ⚡ Safely formatted
+                aov: { value: Number(aov.toFixed(2)), trend: calculateTrend(aov, prevAov) } 
             },
             livePulse: {
                 activeOrders: liveActiveOrders,
-                averageFulfillmentTime: fulfillmentData?.avg_minutes ? parseFloat(fulfillmentData.avg_minutes).toFixed(1) : '0.0'
+                averageFulfillmentTime: avgFulfillment
             },
             salesTrends,
             paymentBreakdown,

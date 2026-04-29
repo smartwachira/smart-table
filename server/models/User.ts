@@ -1,7 +1,7 @@
 import { DataTypes, Model, Optional } from "sequelize";
 import sequelize from '../config/db.js';
 
-export type UserRole = 'OWNER' | 'MANAGER' | 'KITCHEN_STAFF' | 'WAITER';
+export type UserRole = 'OWNER' | 'MANAGER' | 'CASHIER' | 'WAITER' | 'KITCHEN_STAFF' | 'GUEST';
 
 export interface UserAttributes {
     user_id: string;
@@ -20,7 +20,7 @@ export interface UserAttributes {
 export interface UserCreationAttributes extends Optional<UserAttributes, 'user_id' | 'role' | 'is_active'> {}
 
 class User extends Model<UserAttributes, UserCreationAttributes> implements UserAttributes {
-    public user_id!: string;
+    public  user_id!: string;
     public username!: string;
     public email!: string | null;
     public password!: string | null;
@@ -58,7 +58,7 @@ User.init({
         allowNull: true,
     },
     role: {
-        type: DataTypes.ENUM("OWNER", "MANAGER", "KITCHEN_STAFF", "WAITER"),
+        type: DataTypes.ENUM('OWNER', 'MANAGER', 'CASHIER', 'WAITER', 'KITCHEN_STAFF', 'GUEST'),
         defaultValue: 'WAITER',
         allowNull: false
     },

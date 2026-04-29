@@ -14,10 +14,12 @@ const seedLiveOrders = async () => {
         await sequelize.authenticate();
         
         // 1. Fetch Venue & Menu
-        const venue = await Venue.findOne();
+        // ⚡ FIX: Added { raw: true } so we get plain JSON objects, bypassing the class property shadowing bug
+        const venue = await Venue.findOne({ raw: true });
         if (!venue) throw new Error('No venues found. Please create a venue first.');
 
-        const menuItems = await MenuItem.findAll({ limit: 10 });
+        // ⚡ FIX: Added { raw: true } here as well
+        const menuItems = await MenuItem.findAll({ limit: 10, raw: true });
         if (menuItems.length === 0) throw new Error('No menu items found.');
 
         console.log(`✅ Found Venue: ${venue.name}`);
@@ -60,6 +62,8 @@ const seedLiveOrders = async () => {
             for (let j = 0; j < numItems; j++) {
                 const item = menuItems[Math.floor(Math.random() * menuItems.length)];
                 const quantity = Math.floor(Math.random() * 2) + 1;
+                
+                // ⚡ With raw: true, item.price now safely holds the numeric value!
                 totalAmount += (Number(item.price) * quantity);
                 
                 orderItemsToInsert.push({

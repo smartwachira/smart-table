@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
-    "target": "ES2022",                                  /* Modern JS features */
+    "target": "ES2022",  
+    "useDefineForClassFields": false,                                /* Modern JS features */
     "module": "NodeNext",                                /* Required for "type": "module" */
     "moduleResolution": "NodeNext",                      /* Resolves imports using Node's ESM rules */
     "outDir": "./dist",                                  /* Where compiled JS will go for production */

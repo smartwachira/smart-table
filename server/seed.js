@@ -36,14 +36,14 @@ const seedDatabase = async () => {
     // 2. Create Venue (Hardcoded ID)
     const TARGET_VENUE_ID = "123e4567-e89b-12d3-a456-426614174000";
     
-    const venue = await Venue.create({
+    await Venue.create({
       venue_id: TARGET_VENUE_ID, // Exact ID requested
       name: 'SmartTable Exclusive Lounge',
       location: "Westlands, Nairobi",
       logo_url: "https://images.unsplash.com/photo-1514933651103-005eec06c04b?auto=format&fit=crop&w=800&q=80",
       contact_email: "owner001@gmail.com"
     });
-    console.log(`✅ Created Venue: ${venue.name} (${venue.venue_id})`);
+    console.log(`✅ Created Venue: SmartTable Exclusive Lounge (${TARGET_VENUE_ID})`);
 
     // 3. Create Categories
     const categoryNames = [
@@ -61,7 +61,8 @@ const seedDatabase = async () => {
 
     const categoryData = categoryNames.map(name => ({
       name,
-      venue_id: venue.venue_id
+      // ⚡ FIX: Use the constant directly instead of accessing the Sequelize object
+      venue_id: TARGET_VENUE_ID 
     }));
 
     const createdCategories = await MenuCategory.bulkCreate(categoryData, { returning: true });
@@ -71,7 +72,7 @@ const seedDatabase = async () => {
     const catMap = {};
     createdCategories.forEach(cat => {
       // Handles both potential primary key naming conventions (id or category_id)
-      catMap[cat.name] = cat.category_id || cat.id; 
+      catMap[cat.getDataValue ? cat.getDataValue('name') : cat.name] = cat.getDataValue ? cat.getDataValue('category_id') : (cat.category_id || cat.id); 
     });
 
     // 4. Create 100 Menu Items (10 per category)
@@ -204,8 +205,8 @@ const seedDatabase = async () => {
     const managerPassword = await bcrypt.hash("password123", 10);
     const WaiterPin = await bcrypt.hash('1234',10)
     await User.bulkCreate([
-      { username: 'JohnOwner',email:'owner001@gmail.com', password: managerPassword, role: 'OWNER', venue_id: venue.venue_id },
-      { username: 'SarahWaiter',email: null,pin: WaiterPin, password: null, role: 'WAITER', venue_id: venue.venue_id }
+      { username: 'JohnOwner',email:'owner001@gmail.com', password: managerPassword, role: 'OWNER', venue_id: TARGET_VENUE_ID },
+      { username: 'SarahWaiter',email: null,pin: WaiterPin, password: null, role: 'WAITER', venue_id: TARGET_VENUE_ID }
     ]);
     console.log("✅ Created Staff: ");
     console.log("   👨‍💼 Owner (Email: owner001@gmail.com | Pass: password123)");

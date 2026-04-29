@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
-import { Toaster } from 'sonner'; // ⚡ Unified UI: Swapped to Sonner for modern, fast notifications
+import { Toaster } from 'sonner';
 import "./index.css";
 
 // --- Context Providers ---
@@ -33,55 +33,76 @@ import Settings from "./components/dashboard/Settings";
 import POS from './components/dashboard/POS';
 import MyOrders from './components/dashboard/MyOrders';
 
-// --- Kitchen KDS ---
-import Kitchen from "./components/Kitchen";
-
 const App: React.FC = () => {
   return (
     <Router>
       <AuthProvider>
         <CartProvider>
-          {/* Global UI layer for notifications */}
-          <Toaster position="top-right" richColors />
+          <Toaster position="top-center" richColors />
           
           <Routes>
             {/* ==========================================
-                GUEST / CUSTOMER FACING ROUTES
+                PUBLIC GUEST ROUTES (Customer Facing)
             ========================================== */}
-            <Route path="/" element={<ScanPage />} />
-            <Route path="/table/:venueId/:tableName" element={<QRGateway />} />
-            <Route path="/menu" element={<Menu />} />
+            <Route path="/" element={<Menu />} />
             <Route path="/checkout" element={<Checkout />} />
-            <Route path="/order/:orderId" element={<OrderStatus />} />
+            <Route path="/status" element={<OrderStatus />} />
+            <Route path="/scan" element={<ScanPage />} />
+            
+            {/* ⚡ Updated to match your QR Generator's output */}
+            <Route path="/q/:venueId/:tableName" element={<QRGateway />} />
 
             {/* ==========================================
-                STAFF / ONBOARDING ROUTES
+                AUTHENTICATION & ONBOARDING
             ========================================== */}
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<VenueRegistration />} />
 
             {/* ==========================================
-                DASHBOARD & MANAGEMENT ROUTES
+                UNIFIED ENTERPRISE DASHBOARD & RBAC
             ========================================== */}
-            <Route element={<PrivateRoute allowedRoles={['MANAGER', 'OWNER', 'WAITER']} />}>
-              <Route path="/dashboard" element={<DashboardLayout />}>
-                <Route index element={<DashboardOverview />} />
-                <Route path="staff" element={<StaffManagement />} />
-                <Route path="orders" element={<LiveOrders />} />
-                <Route path="pos" element={<POS />} />
-                <Route path="my-orders" element={<MyOrders />} />
-                <Route path="history" element={<OrderHistory />} />
-                <Route path="menu" element={<MenuManagement />} />
-                <Route path="qr" element={<QRGenerator />} />
-                <Route path="settings" element={<Settings />} />
-              </Route>
-            </Route>
+            {/* Tier 1: User must be authenticated and have a valid staff role */}
+            <Route path="/dashboard" element={
+              <PrivateRoute allowedRoles={['OWNER', 'MANAGER', 'CASHIER', 'WAITER', 'KITCHEN_STAFF']} />
+            }>
+              
+              {/* Tier 2: The Unified Dashboard Layout */}
+              <Route element={<DashboardLayout />}>
+                
+                {/* 🛡️ Owners & Managers Only */}
+                <Route element={<PrivateRoute allowedRoles={['OWNER', 'MANAGER']} />}>
+                  <Route index element={<DashboardOverview />} />
+                  <Route path="menu" element={<MenuManagement />} />
+                  <Route path="qr" element={<QRGenerator />} />
+                  <Route path="staff" element={<StaffManagement />} />
+                </Route>
 
-            {/* ==========================================
-                OPERATIONAL TERMINALS (KDS / Floor)
-            ========================================== */}
-            <Route element={<PrivateRoute allowedRoles={['KITCHEN_STAFF', 'WAITER', 'OWNER', 'MANAGER']} />}>
-              <Route path="/kitchen" element={<Kitchen />} />
+                {/* 🛡️ Universal Floor/Kitchen Access (The New KDS) */}
+                <Route element={<PrivateRoute allowedRoles={['OWNER', 'MANAGER', 'CASHIER', 'WAITER', 'KITCHEN_STAFF']} />}>
+                  <Route path="orders" element={<LiveOrders />} />
+                </Route>
+
+                {/* 🛡️ Point of Sale (FOH Only, No Kitchen Staff) */}
+                <Route element={<PrivateRoute allowedRoles={['OWNER', 'MANAGER', 'CASHIER', 'WAITER']} />}>
+                  <Route path="pos" element={<POS />} />
+                </Route>
+
+                {/* 🛡️ Exclusive to Waiters */}
+                <Route element={<PrivateRoute allowedRoles={['WAITER']} />}>
+                  <Route path="my-orders" element={<MyOrders />} />
+                </Route>
+
+                {/* 🛡️ Financial / History Review */}
+                <Route element={<PrivateRoute allowedRoles={['OWNER', 'MANAGER', 'CASHIER']} />}>
+                  <Route path="history" element={<OrderHistory />} />
+                </Route>
+
+                {/* 🛡️ Strictly Locked to Venue Principals */}
+                <Route element={<PrivateRoute allowedRoles={['OWNER']} />}>
+                  <Route path="settings" element={<Settings />} />
+                </Route>
+
+              </Route>
             </Route>
 
             {/* ==========================================

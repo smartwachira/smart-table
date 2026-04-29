@@ -1,160 +1,115 @@
 import React, { useState, useEffect } from 'react';
-import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
+import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { 
-    LayoutDashboard, 
-    MenuSquare, 
-    Users, 
-    QrCode, 
-    Settings, 
-    LogOut,
-    History,
-    Store,
-    Smartphone,
-    Menu, 
-    MonitorSmartphone,  
-    ClipboardList,
-    X,
-    ChefHat // ⚡ Imported ChefHat for the Live Orders tab
-} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { dashboardRoutes } from '../config/routeConfig';
+import { LogOut, Menu, X, Store, Smartphone } from 'lucide-react';
 
 // 🛡️ Strict Interface for the Venue Settings payload
-
 interface VenueSettings {
     name: string;
-    logo_url?: string |null
+    logo_url?: string | null;
 }
 
-// 🛡️ Define the exact shape of a Navigation Link
-interface NavItem {
-    path: string;
-    label: string;
-    icon: React.ElementType; 
-    roles: string[]
-}
-
-
-
-const DashboardLayout: React.FC = () => {
-    const location = useLocation();
+export default function DashboardLayout() {
+    const { user, logout } = useAuth();
     const navigate = useNavigate();
-    const { logout, user } = useAuth();
     
     const [venue, setVenue] = useState<VenueSettings | null>(null);
-    const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false); 
+    const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
 
+    // Fetch venue details for the header
     useEffect(() => {
         const fetchVenueForSidebar = async () => {
             try {
-                const res = await axios.get<VenueSettings>('/api/settings/venue');
+                const res = await axios.get('/api/settings/venue');
                 setVenue(res.data);
             } catch (error) {
-                console.error("Failed to fetch venue data for sidebar:", error);
+                console.error("Failed to load venue name for sidebar", error);
             }
         };
         fetchVenueForSidebar();
     }, []);
-
-    useEffect(() => {
-        setIsSidebarOpen(false);
-    }, [location.pathname]);
 
     const handleLogout = () => {
         logout();
         navigate('/login');
     };
 
-    // 🛡️ RBAC (Role-Based Access Control) Navigation Array
-    const navLinks: NavItem[] = [
-        { path: '/dashboard', label: 'Overview', icon: LayoutDashboard, roles: ['OWNER', 'MANAGER'] },
-        { path: '/dashboard/orders', label: 'Live Orders', icon: ChefHat, roles: ['OWNER', 'MANAGER', 'KITCHEN_STAFF', 'WAITER'] },
-        { path: '/dashboard/pos', label: 'POS Terminal', icon: MonitorSmartphone, roles: ['OWNER', 'MANAGER', 'WAITER'] },
-        { path: '/dashboard/my-orders', label: 'My Orders', icon: ClipboardList, roles: ['OWNER', 'MANAGER', 'WAITER'] },
-        { path: '/dashboard/history', label: 'Order History', icon: History, roles: ['OWNER', 'MANAGER'] },
-        { path: '/dashboard/menu', label: 'Menu Management', icon: MenuSquare, roles: ['OWNER', 'MANAGER'] },
-        { path: '/dashboard/staff', label: 'Staff Roster', icon: Users, roles: ['OWNER', 'MANAGER'] },
-        { path: '/dashboard/qr', label: 'QR Codes', icon: QrCode, roles: ['OWNER', 'MANAGER'] },
-        { path: '/dashboard/settings', label: 'Settings', icon: Settings, roles: ['OWNER', 'MANAGER'] },
-    ];
+    // 🛡️ THE MAGIC: Filter routes based on the current user's role
+    // If the route has showInSidebar: true AND the user's role is in allowedRoles, it renders.
+    const authorizedRoutes = dashboardRoutes.filter(route => 
+        route.showInSidebar && user && route.allowedRoles.includes(user.role)
+    );
 
     return (
-        <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
+        <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans overflow-hidden">
             
-            {isSidebarOpen && (
-                <div 
-                    className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-30 lg:hidden"
-                    onClick={() => setIsSidebarOpen(false)}
-                />
-            )}
+            {/* Mobile Header */}
+            <div className="md:hidden bg-slate-900 text-white p-4 flex justify-between items-center sticky top-0 z-50 shadow-md">
+                <div className="flex items-center gap-2 font-black text-xl tracking-tight truncate">
+                    <Store className="text-indigo-400 shrink-0" /> 
+                    <span className="truncate">{venue?.name || 'SmartTable'}</span>
+                </div>
+                <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 bg-slate-800 rounded-lg active:scale-95 transition-transform">
+                    {isSidebarOpen ? <X size={24} /> : <Menu size={24} />}
+                </button>
+            </div>
 
-            <aside className={`fixed inset-y-0 left-0 z-40 w-64 bg-slate-900 text-slate-300 flex flex-col transition-transform duration-300 ease-in-out shadow-xl lg:translate-x-0 lg:static ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-                
-                <div className="p-6 pb-4 border-b border-slate-800 mb-6 bg-slate-950/30 flex justify-between items-start">
-                    <div className="flex items-center gap-3 overflow-hidden">
-                        <div className="w-12 h-12 rounded-xl bg-slate-800 flex items-center justify-center overflow-hidden shrink-0 border border-slate-700 shadow-inner">
-                            {venue?.logo_url ? (
-                                <img 
-                                    src={`http://localhost:5000${venue.logo_url}`} 
-                                    alt="Venue Logo" 
-                                    className="w-full h-full object-cover animate-in fade-in duration-500" 
-                                    onError={(e: any) => { e.target.onerror = null; e.target.src = ''; }}
-                                />
-                            ) : (
-                                <Store size={24} className="text-indigo-400" />
-                            )}
-                        </div>
-                        <div className="overflow-hidden">
-                            <h2 className="font-black text-white leading-tight tracking-tight truncate text-lg">
-                                {venue?.name || 'Your Venue'}
-                            </h2>
-                            <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest block mt-0.5">Admin Panel</span>
-                        </div>
-                    </div>
-
-                    <button 
-                        onClick={() => setIsSidebarOpen(false)} 
-                        className="lg:hidden text-slate-400 hover:text-white p-1 -mr-2 bg-slate-800 rounded-lg transition-colors"
-                    >
-                        <X size={20} />
-                    </button>
+            {/* Sidebar Navigation */}
+            <aside className={`
+                fixed md:static inset-y-0 left-0 z-40 w-64 bg-slate-900 text-slate-300 flex flex-col transition-transform duration-300 ease-in-out
+                ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+            `}>
+                <div className="p-6 hidden md:flex items-center gap-3 font-black text-2xl text-white tracking-tight border-b border-slate-800 truncate">
+                    <Store className="text-indigo-500 shrink-0" size={28} /> 
+                    <span className="truncate">{venue?.name || 'SmartTable'}</span>
                 </div>
 
-                <nav className="flex-1 px-4 space-y-1 overflow-y-auto custom-scrollbar">
-                    {navLinks.map((link) => {
-                        // 🛡️ Filter links based on strictly typed UserRole
-                        if (user?.role && !link.roles.includes(user.role)) return null;
+                <div className="p-6 border-b border-slate-800 flex items-center gap-3 bg-slate-800/30">
+                    <div className="w-10 h-10 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-black border border-indigo-500/30 shrink-0">
+                        {user?.name?.charAt(0).toUpperCase() || 'U'}
+                    </div>
+                    <div className="overflow-hidden">
+                        <p className="font-bold text-white truncate">{user?.name || 'Staff Member'}</p>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-400">{user?.role?.replace('_', ' ')}</p>
+                    </div>
+                </div>
 
-                        const Icon = link.icon;
-                        const isActive = location.pathname === link.path || (location.pathname.startsWith(link.path) && link.path !== '/dashboard');
-                        
+                <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto custom-scrollbar">
+                    {/* ⚡ Loop through ONLY the authorized routes generated from routeConfig.ts */}
+                    {authorizedRoutes.map((route) => {
+                        const Icon = route.icon;
                         return (
-                            <Link 
-                                key={link.path} 
-                                to={link.path}
-                                className={`flex items-center gap-3 px-4 py-3.5 rounded-xl font-bold transition-all duration-200 group ${
-                                    isActive 
-                                    ? 'bg-indigo-500/15 text-indigo-400' 
-                                    : 'hover:bg-slate-800/80 hover:text-white'
-                                }`}
+                            <NavLink
+                                key={route.path}
+                                to={route.path}
+                                onClick={() => setIsSidebarOpen(false)}
+                                end={route.path === '/dashboard'}
+                                className={({ isActive }) => `
+                                    flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all
+                                    ${isActive 
+                                        ? 'bg-indigo-500 text-white shadow-md shadow-indigo-500/20' 
+                                        : 'hover:bg-slate-800 hover:text-white'
+                                    }
+                                `}
                             >
-                                <Icon size={20} className={`${isActive ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-300'} transition-colors`} />
-                                {link.label}
-                            </Link>
+                                <Icon size={20} className="shrink-0" />
+                                <span>{route.label}</span>
+                            </NavLink>
                         );
                     })}
                 </nav>
 
-                <div className="p-4 mt-auto border-t border-slate-800 bg-slate-950/20">
+                <div className="p-4 border-t border-slate-800 bg-slate-900">
                     <button 
-                        onClick={handleLogout}
-                        className="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-slate-400 hover:bg-red-500/10 hover:text-red-400 transition-all duration-200 mb-6"
+                        onClick={handleLogout} 
+                        className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl font-bold transition-colors"
                     >
-                        <LogOut size={20} />
-                        Sign Out
+                        <LogOut size={20} /> Logout
                     </button>
-
-                    <div className="text-center pb-2 opacity-60 hover:opacity-100 transition-opacity cursor-default">
+                    
+                    <div className="mt-4 text-center pb-2 opacity-60 hover:opacity-100 transition-opacity cursor-default">
                         <p className="text-[9px] font-bold text-slate-500 uppercase tracking-[0.2em] mb-1">Software Platform</p>
                         <div className="text-slate-400 font-black tracking-tight flex items-center justify-center gap-1.5">
                             <Smartphone size={14} className="text-indigo-400" /> Smart Table
@@ -163,25 +118,18 @@ const DashboardLayout: React.FC = () => {
                 </div>
             </aside>
 
-            <main className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-50 relative">
-                <header className="lg:hidden bg-white border-b border-slate-200 p-4 flex items-center gap-4 sticky top-0 z-10 shadow-sm">
-                    <button 
-                        onClick={() => setIsSidebarOpen(true)}
-                        className="p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                    >
-                        <Menu size={24} />
-                    </button>
-                    <div className="font-black text-slate-900 tracking-tight text-lg truncate flex-1">
-                        {venue?.name || 'Dashboard'}
-                    </div>
-                </header>
+            {/* Mobile Backdrop */}
+            {isSidebarOpen && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-30 md:hidden" onClick={() => setIsSidebarOpen(false)} />
+            )}
 
+            {/* Main Content Outlet */}
+            <main className="flex-1 flex flex-col h-[calc(100dvh-72px)] md:h-[100dvh] overflow-hidden bg-slate-50 relative">
                 <div className="flex-1 overflow-y-auto custom-scrollbar">
                     <Outlet />
                 </div>
             </main>
+
         </div>
     );
 }
-
-export default DashboardLayout;

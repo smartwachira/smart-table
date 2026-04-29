@@ -16,7 +16,7 @@ const PrivateRoute: React.FC<PrivateRouteProps> = ({ allowedRoles }) =>{
         return (
             <div className="min-h-screen flex flex-col items-center justify-center bg-black selection:bg-amber-500/30">
                 <div className="flex flex-col items-center gap-4 text-amber-500 animate-in fade-in duration-700">
-                    <Loader2 size={32} className="animate-spin"></Loader2>
+                    <Loader2 size={32} className="animate-spin text-indigo-600"></Loader2>
                     <div className="tracking-[0.2em] uppercase font-light text-sm">
                         Verifying Workspace...
                     </div>
@@ -31,11 +31,10 @@ const PrivateRoute: React.FC<PrivateRouteProps> = ({ allowedRoles }) =>{
     }
 
     // 3. Authenticated but Unauthorized Role -> Eject to appropriate domain
-    if(allowedRoles && !allowedRoles.includes(user.role) ){
-        if (['OWNER','MANAGER'].includes(user.role)){
-            return <Navigate to="/dashboard" replace />;
-        }
-        return <Navigate to="/kitchen" replace />;
+    if (allowedRoles && !allowedRoles.includes(user.role) ){
+        console.warn(`Access Denied: User role ${user.role} lacks permission for this route.`);
+        
+        return <Navigate to="/dashboard/orders" replace />;
     }
 
     return <Outlet/>

@@ -11,10 +11,15 @@ import {
     Calendar, ChevronDown, Download, AlertTriangle, CheckCircle2, AlertCircle
 } from 'lucide-react';
 
-// 🛡️ Interfaces for the highly complex API Dashboard Payload
+// 🛡️ Explicit Interfaces for the highly complex API Dashboard Payload
+interface KPITrend {
+    percentage: string | number;
+    isPositive: boolean;
+}
+
 interface KPIMetric {
     value: number;
-    trend: number;
+    trend: KPITrend; // ⚡ FIX 1: Expect an object instead of a raw number
 }
 
 interface LivePulse {
@@ -32,19 +37,19 @@ interface SalesTrend {
 
 interface PaymentBreakdown {
     name: string;
-    value: number;
+    value: number | string;
 }
 
 interface CategoryBreakdown {
     category: string;
-    total_sold: number;
-    revenue: number;
+    total_sold: number | string;
+    revenue: number | string;
 }
 
 interface TopItem {
     name: string;
-    total_sold: number;
-    total_revenue: number;
+    total_sold: number | string;
+    total_revenue: number | string;
 }
 
 export interface DashboardData {
@@ -104,9 +109,9 @@ const generateCSV = (data: DashboardData | null, dateRangeLabel: string) => {
 
     csv += "--- EXECUTIVE SUMMARY ---\n";
     csv += 'Metric,Value,Trend\n';
-    csv += `Gross Revenue,${kpis.revenue?.value || 0},${kpis.revenue?.trend || 0}%\n`;
-    csv += `Total Orders,${kpis.orders?.value || 0},${kpis.orders?.trend || 0}%\n`;
-    csv += `Avg Order Value,${kpis.aov?.value || 0},${kpis.aov?.trend || 0}%\n`;
+    csv += `Gross Revenue,${kpis.revenue?.value || 0},${kpis.revenue?.trend?.percentage || 0}%\n`;
+    csv += `Total Orders,${kpis.orders?.value || 0},${kpis.orders?.trend?.percentage || 0}%\n`;
+    csv += `Avg Order Value,${kpis.aov?.value || 0},${kpis.aov?.trend?.percentage || 0}%\n`;
     csv += `Live Active Orders,${livePulse?.activeOrders || 0},N/A\n`;
     csv += `Avg Kitchen Time (min),${livePulse?.averageFulfillmentTime || 0},N/A\n\n`;
 
@@ -131,7 +136,7 @@ const generateCSV = (data: DashboardData | null, dateRangeLabel: string) => {
         csv += `${safeName},${row.total_sold},${row.total_revenue}\n`;
     });
 
-    const blob = new Blob([csv],{ type: 'text/csv;charset=utf-8;'});
+    const blob = new Blob([csv],{ type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
@@ -147,13 +152,14 @@ const generateCSV = (data: DashboardData | null, dateRangeLabel: string) => {
 interface StatCardProps {
     title: string;
     value: string | number;
-    trend?: number;
+    trend?: KPITrend;
     icon: React.ElementType;
     LinkTo?: string;
 }
 
 const StatCard: React.FC<StatCardProps> = ({ title, value, trend, icon: Icon, LinkTo }) => {
-    const isPositive = Number(trend) >= 0;
+    // ⚡ FIX 2: Correctly pull the positive/negative logic from the trend object
+    const isPositive = trend?.isPositive;
     const CardContent = (
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col transition-all hover:shadow-md h-full hover:border-indigo-200 group">
             <div className="flex justify-between items-start mb-3 sm:mb-4">
@@ -163,7 +169,7 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, trend, icon: Icon, Li
                 {trend !== undefined && (
                     <span className={`flex items-center gap-1 text-xs sm:text-sm font-bold px-2.5 py-1 rounded-full ${isPositive ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
                         {isPositive ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                        {Math.abs(trend || 0)}%
+                        {trend.percentage}%
                     </span>
                 )}
             </div>
@@ -273,7 +279,9 @@ export default function DashboardOverview() {
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
-            if (datePickerRef.current && !datePickerRef.current.contains(event.target as Node)) {
+            const target = event.target as HTMLElement;
+            // ⚡ FIX 3: Ignore clicks on input fields so the native browser date picker doesn't instantly close the dropdown
+            if (datePickerRef.current && !datePickerRef.current.contains(target) && target.tagName !== 'INPUT') {
                 setIsDatePickerOpen(false);
             }
         };
@@ -403,9 +411,15 @@ export default function DashboardOverview() {
     
     const isColdStart = !hasOrders && ((data.kpis.revenue?.value || 0) === 0);
 
+    // ⚡ FIX 4: Sanitize Postgres string sums into raw numbers for Recharts processing
     const sanitizedCategoryBreakdown = (categoryBreakdown || []).map(item => ({
         category: item.category || 'Uncategorized',
         revenue: Number(item.revenue || 0) 
+    }));
+
+    const sanitizedPaymentBreakdown = (paymentBreakdown || []).map(item => ({
+        name: item.name || 'Unknown',
+        value: Number(item.value || 0)
     }));
 
     return (
@@ -554,7 +568,8 @@ export default function DashboardOverview() {
                                     <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `KSh ${val}`} />
                                     <RechartsTooltip content={<ComparativeTooltip granularity={granularity} />} />
                                     <Line type="monotone" dataKey="previousRevenue" stroke="#cbd5e1" strokeWidth={2} strokeDasharray="4 4" dot={false} activeDot={false} />
-                                    <Line type="monotone" dataKey="currentRevenue" stroke="#4f46e5" strokeWidth={3} dot={false} activeDot={{ r: 6, strokeWidth: 0, fill: '#4f46e5' }} />
+                                    {/* ⚡ FIX 5: Ensure single points render on LineChart by enforcing dot true */}
+                                    <Line type="monotone" dataKey="currentRevenue" stroke="#4f46e5" strokeWidth={3} dot={{ r: 3, fill: '#4f46e5', strokeWidth: 0 }} activeDot={{ r: 6, strokeWidth: 0, fill: '#4f46e5' }} />
                                 </LineChart>
                             </ResponsiveContainer>
                         </div>
@@ -566,15 +581,15 @@ export default function DashboardOverview() {
                             <div className="flex-1 w-full relative h-[200px] sm:h-[250px]">
                                 <ResponsiveContainer width="100%" height="100%">
                                     <PieChart>
-                                        <Pie data={paymentBreakdown || []} innerRadius={50} outerRadius={70} paddingAngle={5} dataKey="value">
-                                            {(paymentBreakdown || []).map((entry, index)=> <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]}/>)}
+                                        <Pie data={sanitizedPaymentBreakdown} innerRadius={50} outerRadius={70} paddingAngle={5} dataKey="value">
+                                            {sanitizedPaymentBreakdown.map((entry, index)=> <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]}/>)}
                                         </Pie>
                                         <RechartsTooltip contentStyle={{ borderRadius: '12px', border: 'none',boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}></RechartsTooltip>
                                     </PieChart>
                                 </ResponsiveContainer>
                             </div>
                             <div className="flex flex-wrap justify-center gap-3 sm:gap-4 mt-2 sm:mt-4">
-                                {(paymentBreakdown || []).map((entry, index) => (
+                                {sanitizedPaymentBreakdown.map((entry, index) => (
                                     <div key={entry.name} className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm font-bold text-slate-600">
                                         <div className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }}></div>
                                         {entry.name} <span className="text-slate-400">({entry.value})</span>
@@ -624,7 +639,10 @@ export default function DashboardOverview() {
                                             <td className="p-3 sm:p-4 text-slate-500 font-medium text-center">
                                                 <span className="bg-slate-100 text-slate-600 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md text-xs sm:text-sm">{item.total_sold}</span>
                                             </td>
-                                            <td className="p-3 sm:p-4 text-indigo-600 font-black text-xs sm:text-sm text-right">{formatCurrency(item.total_revenue)}</td>
+                                            <td className="p-3 sm:p-4 text-indigo-600 font-black text-xs sm:text-sm text-right">
+                                                {/* ⚡ FIX 6: Coerce Top Item string revenue back to pure Number */}
+                                                {formatCurrency(Number(item.total_revenue))}
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>

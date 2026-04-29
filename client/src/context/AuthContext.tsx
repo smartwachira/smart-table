@@ -4,7 +4,7 @@ import axios from 'axios';
 import { toast } from 'sonner';
 
 // 🛡️ Strict Types
-export type UserRole = 'OWNER' | 'MANAGER' | 'KITCHEN_STAFF' | 'WAITER' | 'GUEST';
+export type UserRole = 'OWNER' | 'MANAGER' | 'CASHIER' | 'WAITER' | 'KITCHEN_STAFF' | 'GUEST';
 
 export interface User {
     userId: string;
