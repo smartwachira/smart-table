@@ -1,12 +1,14 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useEffect, useCallback, useRef } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios, { AxiosError } from 'axios';
 import { toast } from 'sonner';
 import io, { Socket } from 'socket.io-client';
 import { 
     CheckCircle2, Clock, Flame, ArrowRight, 
-    Banknote, MonitorSmartphone 
+    Banknote, MonitorSmartphone, Loader2
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useMyOrdersStore } from '../../store/useMyOrdersStore'; // ⚡ Global State
 
 const BEEP_URL = 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3';
 
@@ -33,13 +35,18 @@ interface OrderData {
 
 export default function MyOrders() {
     const { user } = useAuth();
-    const [orders, setOrders] = useState<OrderData[]>([]);
-    const [isLoading, setIsLoading] = useState<boolean>(true);
-    const [activeTab, setActiveTab] = useState<string>('READY'); 
+    const queryClient = useQueryClient();
+    const token = localStorage.getItem('auth_token');
+    
+    // ⚡ ZUSTAND: Preserve tab state across unmounts
+    const { activeTab, setActiveTab } = useMyOrdersStore();
 
-    // ⚡ FIX: Use Refs to track state silently without triggering Infinite Loops
-    const previousReadyRef = useRef<string[]>([]);
-    const isFirstLoadRef = useRef<boolean>(true);
+    // ⚡ Refs for Audio Notifications
+    const previousReadyRef = useRef<Set<string>>(new Set());
+
+    const getConfig = () => ({
+        headers: { Authorization: `Bearer ${token}` }
+    });
 
     const playSound = useCallback(() => {
         try {
@@ -50,99 +57,101 @@ export default function MyOrders() {
         }
     }, []);
 
-    const fetchOrders = useCallback(async (signal?: AbortSignal) => {
-        try {
-            const token = localStorage.getItem('auth_token');
+    // ============================================================================
+    // ⚡ TANSTACK QUERY: Server State & Polling Fallback
+    // ============================================================================
+    const { data: orders = [], isLoading } = useQuery({
+        queryKey: ['myOrders', user?.userId],
+        queryFn: async ({ signal }) => {
             const response = await axios.get<OrderData[]>('/api/orders/live', {
-                headers: { Authorization: `Bearer ${token}` },
+                ...getConfig(),
                 signal
             });
+            // Filter instantly to only show orders punched by this specific staff member
+            return (response.data || []).filter(o => String(o.staff_id) === String(user?.userId));
+        },
+        enabled: !!user?.userId && !!token,
+        refetchInterval: 10000 // Fallback polling
+    });
 
-            const myId = user?.userId; 
-            
-            const myOrdersOnly = (response.data || []).filter(o => String(o.staff_id) === String(myId));
-
-            const currentReadyIds = myOrdersOnly.filter(o => o.status === 'READY').map(o => o.order_id);
-            
-            // Only trigger notifications if it is NOT the first time the page is loading
-            if (!isFirstLoadRef.current) {
-                const hasNewReady = currentReadyIds.some(id => !previousReadyRef.current.includes(id));
-                if (hasNewReady) {
-                    playSound();
-                    toast.success('An order is Ready for Pickup!', { icon: '🛎️' });
-                }
-            }
-
-            // Update refs silently
-            previousReadyRef.current = currentReadyIds;
-            isFirstLoadRef.current = false;
-
-            setOrders(myOrdersOnly);
-        } catch (error) {
-            // ⚡ FIX: Silently catch intentional race-condition cancellations
-            if (axios.isCancel(error)) {
-                return; 
-            }
-            toast.error("Could not load your orders");
-            console.error(error);
-        } finally {
-            setIsLoading(false);
-        }
-    }, [user, playSound]); 
-
+    // ============================================================================
+    // ⚡ NOTIFICATION EFFECT: Detect New 'READY' Orders
+    // ============================================================================
     useEffect(() => {
-        const controller = new AbortController();
-        fetchOrders(controller.signal);
+        if (!orders.length) return;
+
+        const currentReadyIds = new Set(orders.filter(o => o.status === 'READY').map(o => String(o.order_id)));
+        let hasNewReady = false;
+
+        if (previousReadyRef.current.size > 0) {
+            currentReadyIds.forEach(id => {
+                if (!previousReadyRef.current.has(id)) hasNewReady = true;
+            });
+        }
+
+        if (hasNewReady) {
+            playSound();
+            toast.success('An order is Ready for Pickup!', { icon: '🛎️' });
+        }
+
+        previousReadyRef.current = currentReadyIds;
+    }, [orders, playSound]);
+
+    // ============================================================================
+    // ⚡ WEBSOCKET INTEGRATION
+    // ============================================================================
+    useEffect(() => {
+        if (!user?.venueId) return;
 
         const socket: Socket = io(import.meta.env.VITE_API_URL || "http://localhost:5000");
-        if (user?.venueId) socket.emit('join_venue', user.venueId);
+        socket.emit('join_venue', user.venueId);
 
-        socket.on('receive_order', () => fetchOrders(controller.signal));
-        socket.on('orderUpdated', () => fetchOrders(controller.signal));
+        // Tell TanStack to instantly refetch when the kitchen updates a ticket
+        socket.on('receive_order', () => queryClient.invalidateQueries({ queryKey: ['myOrders'] }));
+        socket.on('orderUpdated', () => queryClient.invalidateQueries({ queryKey: ['myOrders'] }));
 
         return () => {
-            controller.abort();
             socket.disconnect();
         };
-    }, [fetchOrders, user?.venueId]);
+    }, [user?.venueId, queryClient]);
 
-    const updateStatus = async (orderId: string, newStatus: OrderData['status']) => {
-        try {
-            const token = localStorage.getItem('auth_token');
-            setOrders(prev => prev.map(o => o.order_id === orderId ? { ...o, status: newStatus } : o));
-
-            await axios.patch(`/api/orders/${orderId}/status`, { status: newStatus }, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            toast.success(`Order marked as ${newStatus}`);
-        } catch (error) {
-            const axiosError = error as AxiosError<{ message: string }>;
-            toast.error(axiosError.response?.data?.message || "Failed to update ticket.");
-            fetchOrders(); 
+    // ============================================================================
+    // ⚡ TANSTACK MUTATIONS
+    // ============================================================================
+    const updateStatusMutation = useMutation({
+        mutationFn: async ({ orderId, status }: { orderId: string, status: OrderData['status'] }) => {
+            return axios.patch(`/api/orders/${orderId}/status`, { status }, getConfig());
+        },
+        onSuccess: (_, variables) => {
+            toast.success(`Order marked as ${variables.status}`);
+            queryClient.invalidateQueries({ queryKey: ['myOrders'] });
+        },
+        onError: (error: AxiosError<{ message: string }>) => {
+            toast.error(error.response?.data?.message || "Failed to update ticket.");
         }
-    };
+    });
 
-    const handleCollectCash = async (orderId: string) => {
-        if (!window.confirm("Confirm you have received the cash for this order?")) return;
-        try {
-            const token = localStorage.getItem('auth_token');
-            setOrders(prev => prev.map(o => o.order_id === orderId ? { ...o, payment_status: 'PAID' } : o));
-            
-            await axios.patch(`/api/orders/${orderId}/collect-cash`, {}, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+    const collectCashMutation = useMutation({
+        mutationFn: async (orderId: string) => {
+            return axios.patch(`/api/orders/${orderId}/collect-cash`, {}, getConfig());
+        },
+        onSuccess: () => {
             toast.success("Cash logged securely.");
-        } catch (error) {
+            queryClient.invalidateQueries({ queryKey: ['myOrders'] });
+        },
+        onError: () => {
             toast.error("Failed to log cash.");
-            fetchOrders();
         }
-    };
+    });
 
+    // ============================================================================
+    // DERIVED DATA & RENDERERS
+    // ============================================================================
     const readyOrders = orders.filter(o => o.status === 'READY');
     const cookingOrders = orders.filter(o => ['PENDING', 'PREPARING'].includes(o.status));
     const completedOrders = orders.filter(o => ['COMPLETED', 'CANCELLED'].includes(o.status));
 
-    if (isLoading) {
+    if (isLoading && !orders.length) {
         return (
             <div className="flex h-[calc(100dvh-80px)] items-center justify-center bg-slate-50 text-slate-400">
                 <div className="animate-pulse flex flex-col items-center">
@@ -153,7 +162,6 @@ export default function MyOrders() {
         );
     }
 
-    // 🛡️ Type the internal sub-component
     const OrderCard: React.FC<{ order: OrderData }> = ({ order }) => {
         const isCashPending = order.payment_method === 'CASH' && order.payment_status === 'PENDING';
         
@@ -186,24 +194,31 @@ export default function MyOrders() {
                 <div className="flex flex-col gap-2">
                     {isCashPending && (
                         <button 
-                            onClick={() => handleCollectCash(order.order_id)}
-                            className="w-full py-3 bg-slate-900 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform"
+                            onClick={() => {
+                                if (window.confirm("Confirm you have received the cash for this order?")) {
+                                    collectCashMutation.mutate(order.order_id);
+                                }
+                            }}
+                            disabled={collectCashMutation.isPending}
+                            className="w-full py-3 bg-slate-900 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform disabled:opacity-50"
                         >
-                            <Banknote size={16}/> Collect {Number(order.total_amount).toLocaleString()} KES
+                            {collectCashMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Banknote size={16}/>}
+                            Collect {Number(order.total_amount).toLocaleString()} KES
                         </button>
                     )}
                     
                     {order.status === 'READY' && (
                         <button 
-                            disabled={isCashPending}
-                            onClick={() => updateStatus(order.order_id, 'COMPLETED')}
+                            disabled={isCashPending || updateStatusMutation.isPending}
+                            onClick={() => updateStatusMutation.mutate({ orderId: order.order_id, status: 'COMPLETED' })}
                             className={`w-full py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all ${
                                 isCashPending 
                                 ? 'bg-slate-200 text-slate-400' 
                                 : 'bg-emerald-500 text-white active:scale-95 shadow-md shadow-emerald-200'
                             }`}
                         >
-                            <CheckCircle2 size={16}/> Mark as Delivered
+                            {updateStatusMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16}/>}
+                            Mark as Delivered
                         </button>
                     )}
                 </div>

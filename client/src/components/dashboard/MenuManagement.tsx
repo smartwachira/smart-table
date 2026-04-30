@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { toast } from 'sonner'; // ⚡ Standardized to Sonner to match global App.tsx Toaster
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { 
   Search, Plus, Edit2, X, Check, Image as ImageIcon, 
-  UtensilsCrossed, AlertCircle, UploadCloud, Trash2
+  UtensilsCrossed, AlertCircle, UploadCloud, Trash2, Loader2
 } from 'lucide-react';
 import axios, { AxiosError } from 'axios';
 import { useAuth } from '../../context/AuthContext';
+import { useMenuStore } from '../../store/useMenuStore';
 
-// 🛡️ Explicit Interfaces for Data Models
 export interface MenuCategory {
   category_id: string;
   name: string;
@@ -24,7 +25,6 @@ export interface MenuItem {
   category_id: string;
 }
 
-// 🛡️ Interface for the Form Data sent to the backend
 interface ItemFormData {
   name: string;
   price: string | number;
@@ -33,157 +33,151 @@ interface ItemFormData {
   is_available: boolean;
 }
 
+// ⚡ HELPER: Moved completely outside the component so ItemForm can use it too.
+// Sanitizes Windows backslashes and ensures proper Express routing.
+export const getImageUrl = (path?: string) => {
+    if (!path) return '';
+    if (path.startsWith('http')) return path; 
+    
+    // Convert Windows backslashes to web-safe forward slashes
+    const sanitizedPath = path.replace(/\\/g, '/');
+    const cleanPath = sanitizedPath.startsWith('/') ? sanitizedPath : `/${sanitizedPath}`;
+    
+    return `http://localhost:5000${cleanPath}`;
+};
+
 export default function MenuManagement() {
-  // --- STATE ---
-  const [categories, setCategories] = useState<MenuCategory[]>([]);
-  const [items, setItems] = useState<MenuItem[]>([]);
-  const [activeCategory, setActiveCategory] = useState<string>('all');
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  
-  const token = localStorage.getItem('auth_token');
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const token = localStorage.getItem('auth_token');
   
-  // 🛡️ Type the Axios config object
   const config = { 
       headers: { Authorization: `Bearer ${token}` },
-      // Note: Backend extracts venueId from JWT, but keeping this for your specific axios setup
       venueId: user?.venueId 
   };
 
-  // Drawer & Form State
+  // ⚡ ZUSTAND ONLY: No URL parameters. This lives safely in global memory.
+  const {
+    activeCategoryId,
+    searchQuery,
+    setActiveCategory,
+    setSearchQuery
+  } = useMenuStore();
+
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
-  
-  // New Category State
   const [isAddingCategory, setIsAddingCategory] = useState<boolean>(false);
   const [newCategoryName, setNewCategoryName] = useState<string>('');
 
-  // --- LIFECYCLE ---
-  const fetchMenuData = async () => {
-    setIsLoading(true);
-    try {
-      const [categoriesRes, itemsRes] = await Promise.all([
-        axios.get<MenuCategory[]>('/api/menu/categories', config),
-        axios.get<MenuItem[]>('/api/menu/items', config)
-      ]);
+  // ============================================================================
+  // TANSTACK QUERY: SERVER STATE CACHING
+  // ============================================================================
 
-      setCategories(categoriesRes.data);
-      setItems(itemsRes.data);
-    } catch (error) {
-      console.error("Fetch Menu Data Error:", error);
-      toast.error("Failed to load menu data. Please check your connection.");
-    } finally {
-      setIsLoading(false);
-    }
-  }
+  const { data: categories = [], isLoading: isCategoriesLoading } = useQuery({
+    queryKey: ['categories', user?.venueId],
+    queryFn: async () => {
+      const res = await axios.get<MenuCategory[]>('/api/menu/categories', config);
+      return res.data;
+    },
+    enabled: !!user?.venueId
+  });
 
-  useEffect(() => {
-    fetchMenuData();
-  }, []);
+  const { data: items = [], isLoading: isItemsLoading } = useQuery({
+    queryKey: ['menuItems', user?.venueId],
+    queryFn: async () => {
+      const res = await axios.get<MenuItem[]>('/api/menu/items', config);
+      return res.data;
+    },
+    enabled: !!user?.venueId
+  });
 
-  // --- HANDLERS ---
-  const handleToggleAvailability = async (itemId: string, currentStatus: boolean) => {
-    setItems(items.map(item => 
-      item.item_id === itemId ? { ...item, is_available: !currentStatus } : item
-    ));
-    
-    try {
-      await axios.patch(`/api/menu/items/${itemId}`, { is_available: !currentStatus }, config);
-      toast.success(`Item marked as ${!currentStatus ? 'Available' : 'Unavailable'}`);
-    } catch (error) {
-      setItems(items.map(item => 
-        item.item_id === itemId ? { ...item, is_available: currentStatus } : item
-      ));
-      toast.error('Failed to update availability.');
-      console.error("Error updating availability:", error);
-    }
-  };
+  // ============================================================================
+  // TANSTACK MUTATIONS
+  // ============================================================================
 
-  const handleSaveItem = async (formData: ItemFormData, imageFile: File | null) => {
-    const token = localStorage.getItem('auth_token');
-    try {
-        const payload = new FormData();
-        payload.append('name', formData.name);
-        payload.append('price', String(formData.price));
-        payload.append('category_id', formData.category_id);
-        payload.append('description', formData.description);
-        payload.append('is_available', String(formData.is_available));
+  const toggleAvailabilityMutation = useMutation({
+    mutationFn: async ({ itemId, is_available }: { itemId: string, is_available: boolean }) => {
+      await axios.patch(`/api/menu/items/${itemId}`, { is_available }, config);
+    },
+    onSuccess: (_, variables) => {
+      toast.success(`Item marked as ${variables.is_available ? 'Available' : 'Sold Out'}`);
+      queryClient.invalidateQueries({ queryKey: ['menuItems', user?.venueId] });
+    },
+    onError: () => toast.error('Failed to update availability.')
+  });
 
-        if (imageFile) {
-            payload.append('image', imageFile);
-        }
-      
-        const uploadConfig = { 
-            headers: {
-                'Content-Type': 'multipart/form-data',
-                Authorization: `Bearer ${token}`
-            },
-            venueId: user?.venueId
-        };
+  const saveItemMutation = useMutation({
+    mutationFn: async ({ formData, imageFile }: { formData: ItemFormData, imageFile: File | null }) => {
+      const payload = new FormData();
+      payload.append('name', formData.name);
+      payload.append('price', String(formData.price));
+      payload.append('category_id', formData.category_id);
+      payload.append('description', formData.description);
+      payload.append('is_available', String(formData.is_available));
+      if (imageFile) payload.append('image', imageFile);
+
+      const uploadConfig = { 
+          headers: { 'Content-Type': 'multipart/form-data', Authorization: `Bearer ${token}` },
+          venueId: user?.venueId
+      };
 
       if (editingItem) {
-        const res = await axios.patch<MenuItem>(`/api/menu/items/${editingItem.item_id}`, payload, uploadConfig);
-        setItems(items.map(item => item.item_id === editingItem.item_id ? res.data : item));
-        toast.success('Menu item updated.');
+        return axios.patch<MenuItem>(`/api/menu/items/${editingItem.item_id}`, payload, uploadConfig);
       } else {
-        const newItem = await axios.post<MenuItem>('/api/menu/items', payload, uploadConfig);
-        setItems([newItem.data, ...items]);
-        toast.success('New menu item added.');
+        return axios.post<MenuItem>('/api/menu/items', payload, uploadConfig);
       }
+    },
+    onSuccess: () => {
+      toast.success(editingItem ? 'Menu item updated.' : 'New menu item added.');
       setIsDrawerOpen(false);
-    } catch (error) {
-      toast.error('Failed to save menu item.');
-      console.error("Error saving menu item:", error);
-    }
-  };
+      queryClient.invalidateQueries({ queryKey: ['menuItems', user?.venueId] });
+    },
+    onError: () => toast.error('Failed to save menu item.')
+  });
 
-  const handleAddCategory = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newCategoryName.trim()) return;
-    
-    try {
-      const newCat = await axios.post<MenuCategory>('/api/menu/categories', { name: newCategoryName }, config);
-      setCategories([...categories, newCat.data]);
+  const deleteItemMutation = useMutation({
+    mutationFn: async (itemId: string) => axios.delete(`/api/menu/items/${itemId}`, config),
+    onSuccess: () => {
+      toast.success('Item deleted permanently.');
+      queryClient.invalidateQueries({ queryKey: ['menuItems', user?.venueId] });
+    },
+    onError: (error: AxiosError<{ message: string }>) => {
+      toast.error(error.response?.data?.message || 'Failed to delete item.', { duration: 5000 });
+    }
+  });
+
+  const addCategoryMutation = useMutation({
+    mutationFn: async (name: string) => axios.post<MenuCategory>('/api/menu/categories', { name }, config),
+    onSuccess: () => {
+      toast.success('Category created.');
       setNewCategoryName('');
       setIsAddingCategory(false);
-      toast.success('Category created.');
-    } catch (error) {
-      const axiosError = error as AxiosError<{ message: string }>;
-      toast.error(axiosError.response?.data?.message || 'Failed to create category.');
-      console.error("Error creating menu category:", error);
+      queryClient.invalidateQueries({ queryKey: ['categories', user?.venueId] });
+    },
+    onError: (error: AxiosError<{ message: string }>) => {
+      toast.error(error.response?.data?.message || 'Failed to create category.');
     }
-  };
+  });
 
-  // ⚡ NEW: Handle Category Deletion
-  const handleDeleteCategory = async (e: React.MouseEvent, categoryId: string, categoryName: string) => {
-    e.stopPropagation(); 
-    if (!window.confirm(`Are you sure you want to delete the "${categoryName}" category?`)) return;
-
-    try {
-      await axios.delete(`/api/menu/categories/${categoryId}`, config);
-      setCategories(categories.filter(c => c.category_id !== categoryId));
-      if (activeCategory === categoryId) setActiveCategory('all');
+  const deleteCategoryMutation = useMutation({
+    mutationFn: async (categoryId: string) => axios.delete(`/api/menu/categories/${categoryId}`, config),
+    onSuccess: (_, categoryId) => {
       toast.success('Category deleted.');
-    } catch (error) {
-      const axiosError = error as AxiosError<{ message: string }>;
-      toast.error(axiosError.response?.data?.message || 'Failed to delete category.');
+      if (activeCategoryId === categoryId) setActiveCategory('all');
+      queryClient.invalidateQueries({ queryKey: ['categories', user?.venueId] });
+    },
+    onError: (error: AxiosError<{ message: string }>) => {
+      toast.error(error.response?.data?.message || 'Failed to delete category.');
     }
-  };
+  });
 
-  // ⚡ NEW: Handle Item Deletion
-  const handleDeleteItem = async (e: React.MouseEvent, itemId: string, itemName: string) => {
-    e.stopPropagation();
-    if (!window.confirm(`Are you sure you want to completely delete "${itemName}"?`)) return;
+  // ============================================================================
+  // HANDLERS & DERIVED STATE
+  // ============================================================================
 
-    try {
-      await axios.delete(`/api/menu/items/${itemId}`, config);
-      setItems(items.filter(i => i.item_id !== itemId));
-      toast.success('Item deleted permanently.');
-    } catch (error) {
-      const axiosError = error as AxiosError<{ message: string }>;
-      toast.error(axiosError.response?.data?.message || 'Failed to delete item.', { duration: 5000 });
-    }
+  const handleAddCategory = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newCategoryName.trim()) addCategoryMutation.mutate(newCategoryName);
   };
 
   const openDrawer = (item: MenuItem | null = null) => {
@@ -191,19 +185,18 @@ export default function MenuManagement() {
     setIsDrawerOpen(true);
   };
 
-  // --- DERIVED DATA ---
   const filteredItems = items.filter(item => {
-    const matchesCategory = activeCategory === 'all' || item.category_id === activeCategory;
+    const matchesCategory = activeCategoryId === 'all' || item.category_id === activeCategoryId;
     const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesCategory && matchesSearch;
   });
 
+  const isLoading = isCategoriesLoading || isItemsLoading;
+
   return (
-    // ⚡ MOBILE FIX: Changed min-h to h-[100dvh] md:h-full to prevent mobile scroll jumping
     <div className="flex flex-col md:flex-row h-[100dvh] md:h-full md:min-h-[85vh] bg-slate-50 relative overflow-hidden">
       
       {/* --- LEFT COLUMN: CATEGORIES SIDEBAR --- */}
-      {/* ⚡ MOBILE FIX: Made this sticky at the top with a horizontal scrolling tab UI */}
       <aside className="w-full md:w-64 lg:w-72 bg-white border-b md:border-b-0 md:border-r border-slate-200 flex-shrink-0 flex flex-col z-20 sticky top-0 md:static shadow-sm md:shadow-none">
         <div className="p-4 md:p-5 border-b border-slate-100 hidden md:block">
           <h2 className="text-xl font-black text-slate-900 flex items-center gap-2 tracking-tight">
@@ -213,19 +206,20 @@ export default function MenuManagement() {
           <p className="text-sm font-medium text-slate-500 mt-1">Organize your offerings.</p>
         </div>
 
-        {/* Categories List (Horizontal on mobile, vertical on desktop) */}
+        {/* Categories List */}
         <div className="flex-1 overflow-x-auto md:overflow-y-auto p-3 md:p-4 custom-scrollbar flex md:flex-col gap-2 items-center md:items-stretch snap-x snap-mandatory">
           
+          {/* ⚡ ZUSTAND IN ACTION: Binding onClick to setActiveCategory */}
           <button
             onClick={() => setActiveCategory('all')}
             className={`shrink-0 snap-center whitespace-nowrap md:whitespace-normal text-left px-4 py-2 md:py-3 rounded-full md:rounded-xl font-bold text-sm md:text-base transition-all flex items-center justify-between gap-2 group ${
-              activeCategory === 'all' 
+              activeCategoryId === 'all' 
                 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' 
                 : 'bg-slate-100 md:bg-transparent text-slate-600 hover:bg-slate-200 md:hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
             <span>All Items</span>
-            <span className={`text-[10px] md:text-xs px-2 py-0.5 rounded-full ${activeCategory === 'all' ? 'bg-indigo-500 text-white' : 'bg-slate-200 md:bg-slate-200 text-slate-600 group-hover:bg-slate-300'}`}>
+            <span className={`text-[10px] md:text-xs px-2 py-0.5 rounded-full ${activeCategoryId === 'all' ? 'bg-indigo-500 text-white' : 'bg-slate-200 md:bg-slate-200 text-slate-600 group-hover:bg-slate-300'}`}>
               {items.length}
             </span>
           </button>
@@ -237,20 +231,22 @@ export default function MenuManagement() {
                 key={cat.category_id}
                 onClick={() => setActiveCategory(cat.category_id)}
                 className={`shrink-0 snap-center whitespace-nowrap md:whitespace-normal text-left px-4 py-2 md:py-3 rounded-full md:rounded-xl font-bold text-sm md:text-base transition-all flex items-center justify-between gap-2 group ${
-                  activeCategory === cat.category_id 
+                  activeCategoryId === cat.category_id 
                     ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' 
                     : 'bg-slate-100 md:bg-transparent text-slate-600 hover:bg-slate-200 md:hover:bg-slate-100 hover:text-slate-900'
                 }`}
               >
                 <span className="truncate max-w-[120px] md:max-w-none">{cat.name}</span>
                 <div className="flex items-center gap-1.5 md:gap-2">
-                  <span className={`text-[10px] md:text-xs px-2 py-0.5 rounded-full ${activeCategory === cat.category_id ? 'bg-indigo-500 text-white' : 'bg-slate-200 md:bg-slate-200 text-slate-600 group-hover:bg-slate-300'}`}>
+                  <span className={`text-[10px] md:text-xs px-2 py-0.5 rounded-full ${activeCategoryId === cat.category_id ? 'bg-indigo-500 text-white' : 'bg-slate-200 md:bg-slate-200 text-slate-600 group-hover:bg-slate-300'}`}>
                     {itemCount}
                   </span>
-                  {/* ⚡ NEW: Delete Category Button */}
                   <div 
-                    onClick={(e) => handleDeleteCategory(e, cat.category_id, cat.name)}
-                    className={`p-1.5 md:p-2 rounded-lg transition-colors ${activeCategory === cat.category_id ? 'hover:bg-indigo-500 text-white' : 'hover:bg-red-100 text-slate-400 hover:text-red-600'} hidden group-hover:flex items-center justify-center`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm(`Delete the "${cat.name}" category?`)) deleteCategoryMutation.mutate(cat.category_id);
+                    }}
+                    className={`p-1.5 md:p-2 rounded-lg transition-colors ${activeCategoryId === cat.category_id ? 'hover:bg-indigo-500 text-white' : 'hover:bg-red-100 text-slate-400 hover:text-red-600'} hidden group-hover:flex items-center justify-center`}
                     title="Delete Category"
                   >
                     <Trash2 size={14} />
@@ -260,7 +256,6 @@ export default function MenuManagement() {
             )
           })}
 
-          {/* ⚡ MOBILE FIX: Compact inline Add Category form for horizontal scrolling */}
           <div className="shrink-0 snap-center md:mt-2 md:border-t md:border-slate-100 md:pt-3 flex items-center">
             {!isAddingCategory ? (
               <button 
@@ -272,15 +267,12 @@ export default function MenuManagement() {
             ) : (
               <form onSubmit={handleAddCategory} className="flex items-center gap-1 md:gap-2 animate-in fade-in slide-in-from-right-2 md:flex-col md:items-stretch">
                 <input 
-                  autoFocus
-                  type="text" 
-                  placeholder="Category Name" 
-                  value={newCategoryName}
-                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  autoFocus type="text" placeholder="Category Name" 
+                  value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)}
                   className="w-32 md:w-full bg-white md:bg-slate-50 border border-slate-200 rounded-full md:rounded-lg px-3 py-1.5 md:py-2 text-sm font-medium text-slate-900 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                 />
                 <div className="flex gap-1 md:gap-2">
-                  <button type="submit" disabled={!newCategoryName.trim()} className="p-1.5 md:flex-1 md:py-2 text-white bg-indigo-600 hover:bg-indigo-700 rounded-full md:rounded-lg disabled:opacity-50 shrink-0"><Check size={16} className="md:mx-auto"/></button>
+                  <button type="submit" disabled={!newCategoryName.trim() || addCategoryMutation.isPending} className="p-1.5 md:flex-1 md:py-2 text-white bg-indigo-600 hover:bg-indigo-700 rounded-full md:rounded-lg disabled:opacity-50 shrink-0"><Check size={16} className="md:mx-auto"/></button>
                   <button type="button" onClick={() => setIsAddingCategory(false)} className="p-1.5 md:flex-1 md:py-2 text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-full md:rounded-lg shrink-0"><X size={16} className="md:mx-auto"/></button>
                 </div>
               </form>
@@ -296,6 +288,7 @@ export default function MenuManagement() {
         <header className="bg-white p-3 md:p-6 border-b border-slate-200 flex items-center gap-4 z-10 shrink-0">
           <div className="relative w-full md:max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            {/* ⚡ ZUSTAND IN ACTION: Binding onChange to setSearchQuery */}
             <input 
               type="text" 
               placeholder="Search items..." 
@@ -305,7 +298,6 @@ export default function MenuManagement() {
             />
           </div>
           
-          {/* Desktop Button - Hidden on mobile */}
           <button 
             onClick={() => openDrawer()}
             className="hidden md:flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-6 py-2.5 rounded-xl font-bold transition-all shadow-sm active:scale-95 shrink-0"
@@ -343,25 +335,25 @@ export default function MenuManagement() {
                 <div key={item.item_id} className="bg-white rounded-[1.5rem] border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow group flex flex-col">
                   
                   {/* Card Image */}
-                  <div className="relative h-40 md:h-48 bg-slate-100 overflow-hidden shrink-0">
+                  <div className="relative h-40 md:h-48 bg-slate-100 overflow-hidden shrink-0 flex items-center justify-center">
                     {item.image_url ? (
-                      <img src={item.image_url} alt={item.name} className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${!item.is_available && 'grayscale opacity-70'}`} />
+                      <img 
+                        src={getImageUrl(item.image_url)} 
+                        alt={item.name} 
+                        className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${!item.is_available && 'grayscale opacity-70'}`} 
+                        onError={(e: any) => { e.target.onerror = null; e.target.style.display = 'none'; }}
+                      />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-slate-300">
-                        <ImageIcon size={40} />
-                      </div>
+                      <ImageIcon size={40} className="text-slate-300" />
                     )}
                     
-                    {/* Status Badge */}
                     {!item.is_available && (
                       <div className="absolute top-3 left-3 bg-red-600/90 backdrop-blur-sm text-white text-[10px] md:text-xs font-black uppercase tracking-wider px-2.5 py-1 md:py-1.5 rounded-lg shadow-sm">
                         86'd (Sold Out)
                       </div>
                     )}
 
-                    {/* ⚡ NEW: Action Buttons Container */}
                     <div className="absolute top-3 right-3 flex flex-col gap-2 md:opacity-0 group-hover:opacity-100 transition-opacity focus-within:opacity-100">
-                      {/* Quick Edit Button */}
                       <button 
                         onClick={() => openDrawer(item)}
                         className="p-2 md:p-2.5 bg-white/90 backdrop-blur-sm text-slate-700 hover:text-indigo-600 rounded-xl shadow-sm active:scale-95"
@@ -369,10 +361,11 @@ export default function MenuManagement() {
                       >
                         <Edit2 size={16} />
                       </button>
-                      
-                      {/* Quick Delete Button */}
                       <button 
-                        onClick={(e) => handleDeleteItem(e, item.item_id, item.name)}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            if (window.confirm(`Delete "${item.name}"?`)) deleteItemMutation.mutate(item.item_id);
+                        }}
                         className="p-2 md:p-2.5 bg-white/90 backdrop-blur-sm text-slate-700 hover:text-red-600 rounded-xl shadow-sm active:scale-95"
                         aria-label="Delete Item"
                       >
@@ -395,13 +388,11 @@ export default function MenuManagement() {
                       {item.description || <span className="italic opacity-50">No description provided.</span>}
                     </p>
                     
-                    {/* Interactive Footer (Availability Toggle) */}
                     <div className="pt-3 md:pt-4 border-t border-slate-100 flex items-center justify-between mt-auto">
                       <span className="text-xs md:text-sm font-bold text-slate-600">Active on POS</span>
-                      
-                      {/* Custom Toggle Switch */}
                       <button 
-                        onClick={() => handleToggleAvailability(item.item_id, item.is_available)}
+                        onClick={() => toggleAvailabilityMutation.mutate({ itemId: item.item_id, is_available: !item.is_available })}
+                        disabled={toggleAvailabilityMutation.isPending}
                         className={`relative inline-flex h-5 w-9 md:h-6 md:w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
                           item.is_available ? 'bg-indigo-600' : 'bg-slate-300'
                         }`}
@@ -422,7 +413,6 @@ export default function MenuManagement() {
         </div>
       </main>
 
-      {/* ⚡ MOBILE FIX: Floating Action Button (FAB) strictly for mobile */}
       <button 
         onClick={() => openDrawer()}
         className="md:hidden fixed bottom-6 right-6 w-14 h-14 bg-slate-900 text-white rounded-full flex items-center justify-center shadow-xl shadow-slate-900/30 z-30 active:scale-95 transition-transform"
@@ -430,8 +420,7 @@ export default function MenuManagement() {
         <Plus size={24} />
       </button>
 
-      {/* --- SLIDE-OUT DRAWER (Add/Edit Item) --- */}
-      {/* Backdrop */}
+      {/* --- SLIDE-OUT DRAWER --- */}
       {isDrawerOpen && (
         <div 
           className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 transition-opacity"
@@ -439,7 +428,6 @@ export default function MenuManagement() {
         />
       )}
       
-      {/* Drawer Panel */}
       <div className={`fixed top-0 right-0 h-[100dvh] w-full sm:w-[480px] bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-out flex flex-col ${
         isDrawerOpen ? 'translate-x-0' : 'translate-x-full'
       }`}>
@@ -455,31 +443,30 @@ export default function MenuManagement() {
           </button>
         </div>
 
-        {/* Drawer Form Content */}
         {isDrawerOpen && (
           <ItemForm 
             item={editingItem} 
             categories={categories} 
-            onSave={handleSaveItem} 
+            onSave={(data, img) => saveItemMutation.mutate({ formData: data, imageFile: img })} 
             onCancel={() => setIsDrawerOpen(false)} 
+            isSubmitting={saveItemMutation.isPending}
           />
         )}
       </div>
-
     </div>
   );
 }
 
-// 🛡️ Interface for the ItemForm Sub-Component Props
+// 🛡️ Interface for the ItemForm
 interface ItemFormProps {
   item: MenuItem | null;
   categories: MenuCategory[];
   onSave: (formData: ItemFormData, imageFile: File | null) => void;
   onCancel: () => void;
+  isSubmitting: boolean;
 }
 
-// --- SUB-COMPONENT: ITEM FORM ---
-const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel }) => {
+const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel, isSubmitting }) => {
   const [formData, setFormData] = useState<ItemFormData>({
     name: item?.name || '',
     price: item?.price || '',
@@ -489,7 +476,9 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
   });
 
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string>(item?.image_url || '');
+  
+  // ⚡ Use our global helper to safely parse the preview URL
+  const [previewUrl, setPreviewUrl] = useState<string>(getImageUrl(item?.image_url));
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -508,7 +497,6 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
     <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5 md:space-y-6 custom-scrollbar pb-10">
         
-        {/* ---  Image Upload Zone --- */}
         <div className="space-y-2">
           <label className="text-sm font-bold text-slate-700">Item Image</label>
           <div className="relative group rounded-3xl border-2 border-dashed border-slate-300 hover:border-indigo-500 bg-slate-50 transition-colors overflow-hidden flex items-center justify-center h-40 md:h-48 cursor-pointer">
@@ -542,10 +530,8 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
           </div>
         </div>
 
-        {/* Name Input */}
         <div className="space-y-2">
           <label className="text-sm font-bold text-slate-700">Item Name</label>
-          {/* ⚡ MOBILE FIX: text-base prevents iOS auto-zoom on focus */}
           <input 
             required
             type="text" 
@@ -556,7 +542,6 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
           />
         </div>
 
-        {/* Price & Category Row */}
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="space-y-2 flex-1">
             <label className="text-sm font-bold text-slate-700">Price (KSh)</label>
@@ -591,7 +576,6 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
           </div>
         </div>
 
-        {/* Description */}
         <div className="space-y-2">
           <label className="text-sm font-bold text-slate-700 flex justify-between items-center">
             Description
@@ -606,7 +590,6 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
           />
         </div>
 
-        {/* Initial Availability */}
         {!item && (
           <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 flex items-center justify-between">
             <div>
@@ -628,7 +611,6 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
         )}
       </div>
 
-      {/* Drawer Footer Actions */}
       <div className="p-4 md:p-6 border-t border-slate-100 bg-white flex gap-3 shrink-0 pb-safe">
         <button 
           type="button"
@@ -639,9 +621,10 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
         </button>
         <button 
           type="submit"
-          className="flex-1 px-4 py-3.5 text-sm md:text-base text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2"
+          disabled={isSubmitting}
+          className="flex-1 px-4 py-3.5 text-sm md:text-base text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
         >
-          <Check size={18} />
+          {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />}
           {item ? 'Save Changes' : 'Publish Item'}
         </button>
       </div>

@@ -1,18 +1,20 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios, { AxiosError } from 'axios';
 import { toast } from 'sonner';
 import io, { Socket } from 'socket.io-client';
 import { 
     ChefHat, CheckCircle2, Ban, AlertTriangle, Clock, 
     User, BellRing, Flame, ArrowRight, UtensilsCrossed, 
-    Banknote, History, RotateCcw, Lock, Search, AlertOctagon
+    Banknote, History, RotateCcw, Lock, Search, AlertOctagon,Loader2
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useKdsStore } from '../../store/useKdsStore'; // ⚡ Global UI State
 
 const BEEP_URL = 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3';
 
-// 🛡️ Strict typing for deeply nested orders
+// 🛡️ Strict typing
 interface OrderItem {
     name?: string;
     quantity: number;
@@ -46,165 +48,148 @@ interface CancelModalState {
 export default function LiveOrders() {
     const { user } = useAuth();
     const navigate = useNavigate();
+    const queryClient = useQueryClient();
     
-    // 🛡️ Strongly typed state
-    const [orders, setOrders] = useState<OrderData[]>([]);
-    const [loading, setIsLoading] = useState<boolean>(true);
+    // ⚡ ZUSTAND: Preserve tabs and search across unmounts
+    const { activeTab, searchQuery, setActiveTab, setSearchQuery } = useKdsStore();
+
+    // Local transient state
     const [cancelModal, setCancelModal] = useState<CancelModalState>({ isOpen: false, orderId: null });
     const [cancelReason, setCancelReason] = useState<string>('');
     
-    const [activeTab, setActiveTab] = useState<string>('PENDING');
-    const [searchQuery, setSearchQuery] = useState<string>('');
-
-    // 🛡️ Type the refs
     const previousOrderIdsRef = useRef<Set<string>>(new Set());
     const newOrderScrollRef = useRef<HTMLDivElement>(null);
 
     const userRole = user?.role || 'STAFF';
+    const token = localStorage.getItem('auth_token');
+
+    const getConfig = () => ({
+        headers: { Authorization: `Bearer ${token}` }
+    });
 
     const playSound = useCallback(() => {
         try {
             const audio = new Audio(BEEP_URL);
-            audio.play().catch(e => console.log("Audio play blocked:", e));
+            audio.play().catch(e => console.log("Audio play blocked by browser policy:", e));
         } catch (err) {
             console.error("Audio play failed", err);
         }
     }, []);
 
-    const fetchOrders = useCallback(async (signal?: AbortSignal) => {
-        try {
-            const token = localStorage.getItem('auth_token');
-            if (!token) {
-                navigate('/login');
-                return;
-            }
+    // ============================================================================
+    // ⚡ TANSTACK QUERY: Server State & Polling Fallback
+    // ============================================================================
+    const { data: orders = [], isLoading } = useQuery({
+        queryKey: ['liveOrders', user?.venueId],
+        queryFn: async () => {
+            if (!token) { navigate('/login'); throw new Error("No token"); }
+            const response = await axios.get<OrderData[]>('/api/orders/live', getConfig());
+            return response.data || [];
+        },
+        enabled: !!user?.venueId && !!token,
+        refetchInterval: 10000 // Fallback polling in case WebSockets drop
+    });
 
-            const response = await axios.get<OrderData[]>('/api/orders/live', {
-                headers: { Authorization: `Bearer ${token}` },
-                signal
-            });
-
-            const fetchedOrders = response.data || [];
-            
-            const currentIds = new Set(fetchedOrders.map(o => String(o.order_id)));
-            let hasNewOrder = false;
-
-            if (previousOrderIdsRef.current.size > 0) {
-                currentIds.forEach(id => {
-                    if (!previousOrderIdsRef.current.has(id)) hasNewOrder = true;
-                });
-            }
-
-            if (hasNewOrder) {
-                playSound();
-                toast.success('New Order Arrived!', { icon: '🛎️' });
-                setActiveTab('PENDING'); 
-                if (newOrderScrollRef.current) {
-                    newOrderScrollRef.current.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'start' });
-                }
-            }
-
-            previousOrderIdsRef.current = currentIds;
-            setOrders(fetchedOrders);
-
-        } catch (error) {
-            if (!axios.isCancel(error)) {
-                toast.error("Could not load kitchen orders");
-            }
-        } finally {
-            setIsLoading(false);
-        }
-    }, [navigate, playSound]);
-
+    // ============================================================================
+    // ⚡ NEW ORDER DETECTION (Audio Beep & Scroll)
+    // ============================================================================
     useEffect(() => {
-        const controller = new AbortController();
-        fetchOrders(controller.signal);
+        if (!orders.length) return;
+        
+        const currentIds = new Set(orders.map(o => String(o.order_id)));
+        let hasNewOrder = false;
 
-        const interval = setInterval(() => fetchOrders(controller.signal), 10000);
+        if (previousOrderIdsRef.current.size > 0) {
+            currentIds.forEach(id => {
+                if (!previousOrderIdsRef.current.has(id)) hasNewOrder = true;
+            });
+        }
 
+        if (hasNewOrder) {
+            playSound();
+            toast.success('New Order Arrived!', { icon: '🛎️' });
+            setActiveTab('PENDING'); 
+            if (newOrderScrollRef.current) {
+                newOrderScrollRef.current.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'start' });
+            }
+        }
+
+        previousOrderIdsRef.current = currentIds;
+    }, [orders, playSound, setActiveTab]);
+
+    // ============================================================================
+    // ⚡ WEBSOCKET INTEGRATION: Smart Cache Invalidation
+    // ============================================================================
+    useEffect(() => {
+        if (!user?.venueId) return;
+        
         const socket: Socket = io(import.meta.env.VITE_API_URL || "http://localhost:5000");
-        if (user?.venueId) socket.emit('join_venue', user.venueId);
+        socket.emit('join_venue', user.venueId);
 
-        socket.on('receive_order', () => fetchOrders(controller.signal));
-        socket.on('orderUpdated', () => fetchOrders(controller.signal));
+        // When a socket event fires, tell TanStack to fetch fresh data instantly
+        socket.on('receive_order', () => queryClient.invalidateQueries({ queryKey: ['liveOrders'] }));
+        socket.on('orderUpdated', () => queryClient.invalidateQueries({ queryKey: ['liveOrders'] }));
 
         return () => {
-            clearInterval(interval);
-            controller.abort();
             socket.disconnect();
         };
-    }, [fetchOrders, user?.venueId]);
+    }, [user?.venueId, queryClient]);
 
-    const updateStatus = async (orderId: string, newStatus: OrderData['status']) => {
-        try {
-            const token = localStorage.getItem('auth_token');
-            if (!token) return;
-
-            setOrders(prev => prev.map(o => o.order_id === orderId ? { ...o, status: newStatus } : o));
-
-            await axios.patch(`/api/orders/${orderId}/status`, { status: newStatus }, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-
-            toast.success(`Ticket advanced to ${newStatus}`);
-        } catch (error) {
-            const axiosError = error as AxiosError<{ message: string }>;
-            toast.error(axiosError.response?.data?.message || "Failed to advance ticket.");
-            fetchOrders(); 
+    // ============================================================================
+    // ⚡ TANSTACK MUTATIONS
+    // ============================================================================
+    const updateStatusMutation = useMutation({
+        mutationFn: async ({ orderId, status }: { orderId: string, status: OrderData['status'] }) => {
+            return axios.patch(`/api/orders/${orderId}/status`, { status }, getConfig());
+        },
+        onSuccess: (_, variables) => {
+            toast.success(`Ticket advanced to ${variables.status}`);
+            queryClient.invalidateQueries({ queryKey: ['liveOrders'] });
+        },
+        onError: (error: AxiosError<{ message: string }>) => {
+            toast.error(error.response?.data?.message || "Failed to advance ticket.");
         }
-    };
+    });
 
-    const handleCancel = async () => {
-        if (!cancelModal.orderId) return;
-
-        try {
-            const token = localStorage.getItem('auth_token');
-            await axios.patch(`/api/orders/${cancelModal.orderId}/status`, 
-                { status: 'CANCELLED', cancelReason: cancelReason }, 
-                { headers: { Authorization: `Bearer ${token}` } }
+    const cancelOrderMutation = useMutation({
+        mutationFn: async () => {
+            if (!cancelModal.orderId) throw new Error("No order selected");
+            return axios.patch(`/api/orders/${cancelModal.orderId}/status`, 
+                { status: 'CANCELLED', cancelReason }, 
+                getConfig()
             );
-            
+        },
+        onSuccess: () => {
             toast.success("Order Cancelled");
             setCancelModal({ isOpen: false, orderId: null });
             setCancelReason('');
-            fetchOrders();
-        } catch (error) {
-            toast.error("Failed to cancel order.");
-        }
-    };
+            queryClient.invalidateQueries({ queryKey: ['liveOrders'] });
+        },
+        onError: () => toast.error("Failed to cancel order.")
+    });
 
-    const handleCollectCash = async (orderId: string) => {
-        if (!window.confirm("Confirm you have received the cash for this order?")) return;
-        
-        try {
-            const token = localStorage.getItem('auth_token');
-            
-            setOrders(prev => prev.map(o => o.order_id === orderId ? { 
-                ...o, 
-                payment_status: 'PAID',
-                CashCollector: { name: user?.name || 'Staff' } 
-            } : o));
-            
-            await axios.patch(`/api/orders/${orderId}/collect-cash`, {}, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+    const collectCashMutation = useMutation({
+        mutationFn: async (orderId: string) => {
+            return axios.patch(`/api/orders/${orderId}/collect-cash`, {}, getConfig());
+        },
+        onSuccess: () => {
             toast.success("Cash collection logged successfully.");
-        } catch (error) {
-            toast.error("Failed to log cash collection.");
-            fetchOrders();
-        }
-    };
+            queryClient.invalidateQueries({ queryKey: ['liveOrders'] });
+        },
+        onError: () => toast.error("Failed to log cash collection.")
+    });
 
+    // ============================================================================
+    // DERIVED DATA & RENDERERS
+    // ============================================================================
     const getElapsedMinutes = (timestamp?: string) => {
         if (!timestamp) return 0;
         const created = new Date(timestamp);
-        const now = new Date();
-        return Math.floor((now.getTime() - created.getTime()) / 60000);
+        return Math.floor((new Date().getTime() - created.getTime()) / 60000);
     };
 
     const filteredOrders = orders.filter(order => {
         if (!searchQuery.trim()) return true;
-        
         const query = searchQuery.toLowerCase().trim();
         const shortId = order.order_id ? String(order.order_id).slice(0, 4).toLowerCase() : '';
         const fullId = order.order_id ? String(order.order_id).toLowerCase() : '';
@@ -212,11 +197,7 @@ export default function LiveOrders() {
         const table = order.table_number ? String(order.table_number).toLowerCase() : '';
         const itemNames = order.OrderItems ? order.OrderItems.map(i => (i.MenuItem?.name || i.name || '').toLowerCase()).join(' ') : '';
 
-        return shortId.includes(query) || 
-               fullId.includes(query) || 
-               customer.includes(query) || 
-               table.includes(query) || 
-               itemNames.includes(query);
+        return shortId.includes(query) || fullId.includes(query) || customer.includes(query) || table.includes(query) || itemNames.includes(query);
     });
 
     const pendingOrders = filteredOrders.filter(o => o.status === 'PENDING');
@@ -224,7 +205,7 @@ export default function LiveOrders() {
     const readyOrders = filteredOrders.filter(o => o.status === 'READY');
     const recallOrders = filteredOrders.filter(o => ['COMPLETED', 'CANCELLED'].includes(o.status));
 
-    if (loading) {
+    if (isLoading && !orders.length) {
         return (
             <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50">
                 <ChefHat className="animate-bounce text-indigo-600 w-12 h-12 md:w-16 md:h-16 mb-4" />
@@ -233,7 +214,6 @@ export default function LiveOrders() {
         );
     }
 
-    // 🛡️ Type the internal sub-component
     const OrderTicket: React.FC<{ order: OrderData, isFirst?: boolean, isRecall?: boolean }> = ({ order, isFirst, isRecall = false }) => {
         const elapsedMins = getElapsedMinutes(order.createdAt || order.created_at);
         const isCashPending = order.payment_method === 'CASH' && order.payment_status === 'PENDING';
@@ -342,8 +322,13 @@ export default function LiveOrders() {
                     <div className="p-2 md:p-3 bg-white/60 border-t border-slate-100 flex flex-col gap-2">
                         {isCashPending && ['MANAGER', 'OWNER', 'STAFF'].includes(userRole) && (
                             <button 
-                                onClick={() => handleCollectCash(order.order_id)}
-                                className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-black text-white py-2 md:py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all active:scale-95 shadow-sm"
+                                onClick={() => {
+                                    if(window.confirm("Confirm you have received the cash for this order?")) {
+                                        collectCashMutation.mutate(order.order_id);
+                                    }
+                                }}
+                                disabled={collectCashMutation.isPending}
+                                className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-black text-white py-2 md:py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all active:scale-95 shadow-sm disabled:opacity-50"
                             >
                                 <Banknote size={16} /> Log Cash Collection
                             </button>
@@ -352,41 +337,40 @@ export default function LiveOrders() {
                         <div className="flex gap-2">
                             {order.status === "PENDING" && (
                                 <button 
-                                    className="flex-1 flex items-center justify-center gap-1.5 md:gap-2 bg-amber-500 hover:bg-amber-600 text-white py-2.5 md:py-3 px-2 rounded-xl text-xs md:text-sm font-bold transition-all active:scale-95 shadow-sm"
-                                    onClick={() => updateStatus(order.order_id, 'PREPARING')}
+                                    className="flex-1 flex items-center justify-center gap-1.5 md:gap-2 bg-amber-500 hover:bg-amber-600 text-white py-2.5 md:py-3 px-2 rounded-xl text-xs md:text-sm font-bold transition-all active:scale-95 shadow-sm disabled:opacity-50"
+                                    onClick={() => updateStatusMutation.mutate({ orderId: order.order_id, status: 'PREPARING' })}
+                                    disabled={updateStatusMutation.isPending}
                                 >
                                     <Flame size={16} /> Start Cooking
                                 </button>
                             )}
                             {order.status === "PREPARING" && (
                                 <button 
-                                    className="flex-1 flex items-center justify-center gap-1.5 md:gap-2 bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 md:py-3 px-2 rounded-xl text-xs md:text-sm font-bold transition-all active:scale-95 shadow-sm"
-                                    onClick={() => updateStatus(order.order_id, 'READY')}
+                                    className="flex-1 flex items-center justify-center gap-1.5 md:gap-2 bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 md:py-3 px-2 rounded-xl text-xs md:text-sm font-bold transition-all active:scale-95 shadow-sm disabled:opacity-50"
+                                    onClick={() => updateStatusMutation.mutate({ orderId: order.order_id, status: 'READY' })}
+                                    disabled={updateStatusMutation.isPending}
                                 >
                                     <CheckCircle2 size={16}/> Mark Ready
                                 </button>
                             )}
                             {order.status === "READY" && (
                                 <button 
-                                    disabled={isPaymentPending}
+                                    disabled={isPaymentPending || updateStatusMutation.isPending}
                                     className={`flex-1 flex items-center justify-center gap-1.5 md:gap-2 py-2.5 md:py-3 px-2 rounded-xl text-xs md:text-sm font-bold transition-all shadow-sm ${
                                         isPaymentPending 
                                             ? 'bg-slate-200 text-slate-400 cursor-not-allowed' 
                                             : 'bg-emerald-500 hover:bg-emerald-600 text-white active:scale-95'
                                     }`}
-                                    onClick={() => updateStatus(order.order_id, 'COMPLETED')}
+                                    onClick={() => updateStatusMutation.mutate({ orderId: order.order_id, status: 'COMPLETED' })}
                                 >
-                                    {isPaymentPending ? (
-                                        <><Lock size={16}/> Pending Payment</>
-                                    ) : (
-                                        <><UtensilsCrossed size={16}/> Complete</>
-                                    )}
+                                    {isPaymentPending ? <><Lock size={16}/> Pending Payment</> : <><UtensilsCrossed size={16}/> Complete</>}
                                 </button>
                             )}
                             {isRecall && (
                                 <button 
-                                    className="flex-1 flex items-center justify-center gap-1.5 md:gap-2 bg-slate-200 hover:bg-slate-300 text-slate-700 py-2.5 md:py-3 px-2 rounded-xl text-xs md:text-sm font-bold transition-all active:scale-95 shadow-sm"
-                                    onClick={() => updateStatus(order.order_id, 'READY')}
+                                    className="flex-1 flex items-center justify-center gap-1.5 md:gap-2 bg-slate-200 hover:bg-slate-300 text-slate-700 py-2.5 md:py-3 px-2 rounded-xl text-xs md:text-sm font-bold transition-all active:scale-95 shadow-sm disabled:opacity-50"
+                                    onClick={() => updateStatusMutation.mutate({ orderId: order.order_id, status: 'READY' })}
+                                    disabled={updateStatusMutation.isPending}
                                 >
                                     <RotateCcw size={16}/> Undo
                                 </button>
@@ -473,10 +457,7 @@ export default function LiveOrders() {
                         {searchQuery ? `No orders match "${searchQuery}"` : "Waiting for new orders to arrive..."}
                     </p>
                     {searchQuery && (
-                        <button 
-                            onClick={() => setSearchQuery('')}
-                            className="mt-4 bg-indigo-50 text-indigo-600 font-bold px-4 py-2 rounded-lg hover:bg-indigo-100"
-                        >
+                        <button onClick={() => setSearchQuery('')} className="mt-4 bg-indigo-50 text-indigo-600 font-bold px-4 py-2 rounded-lg hover:bg-indigo-100">
                             Clear Search
                         </button>
                     )}
@@ -568,7 +549,9 @@ export default function LiveOrders() {
 
                         <div className="flex gap-2 md:gap-3">
                             <button onClick={() => setCancelModal({ isOpen: false, orderId: null })} className="flex-1 py-2.5 md:py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm md:text-base font-bold rounded-xl transition-colors">Keep Order</button>
-                            <button onClick={handleCancel} disabled={!cancelReason} className="flex-1 py-2.5 md:py-3 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm md:text-base font-bold rounded-xl transition-colors shadow-lg shadow-red-200">Confirm Cancel</button>
+                            <button onClick={() => cancelOrderMutation.mutate()} disabled={!cancelReason || cancelOrderMutation.isPending} className="flex-1 py-2.5 md:py-3 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm md:text-base font-bold rounded-xl transition-colors shadow-lg shadow-red-200">
+                                {cancelOrderMutation.isPending ? <Loader2 size={16} className="animate-spin mx-auto"/> : 'Confirm Cancel'}
+                            </button>
                         </div>
                     </div>
                 </div>

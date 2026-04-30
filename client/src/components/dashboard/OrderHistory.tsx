@@ -1,21 +1,22 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios, { AxiosError } from 'axios';
+// ⚡ IMPORT TanStack Query and keepPreviousData
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
+import axios from 'axios';
 import { toast } from 'sonner';
 import { 
     Search, Calendar, ChevronDown, Receipt, 
     CheckCircle2, Ban, Clock, User, Banknote 
 } from 'lucide-react';
+import { useOrderHistoryStore } from '../../store/useOrderHistoryStore'; // ⚡ Global State
 
-// 🛡️ Explicit Interfaces for the API Response
+// 🛡️ Explicit Interfaces
 interface OrderItem {
     quantity: number;
     price_at_time: number;
     name?: string;
     notes?: string;
-    MenuItem?: {
-        name: string;
-    };
+    MenuItem?: { name: string; };
 }
 
 interface HistoryOrderData {
@@ -30,13 +31,6 @@ interface HistoryOrderData {
     notes?: string;
     CashCollector?: { name: string };
     OrderItems: OrderItem[];
-}
-
-interface DateRangeState {
-    label: string;
-    preset: string;
-    start?: string;
-    end?: string;
 }
 
 const formatCurrency = (val?: number | string) => new Intl.NumberFormat('en-KE', { 
@@ -54,24 +48,72 @@ const formatDateTime = (isoString?: string) => {
 
 export default function OrderHistory() {
     const navigate = useNavigate();
+    const token = localStorage.getItem('auth_token');
     
-    // UI State
-    const [orders, setOrders] = useState<HistoryOrderData[]>([]);
-    const [isLoading, setIsLoading] = useState<boolean>(true);
-    const [searchQuery, setSearchQuery] = useState<string>('');
-    const [selectedOrder, setSelectedOrder] = useState<HistoryOrderData | null>(null);
+    // ⚡ ZUSTAND: Immune to Sidebar unmounting
+    const { 
+        preset, label, customStart, customEnd, searchQuery, 
+        setDateFilter, setSearchQuery 
+    } = useOrderHistoryStore();
 
-    // Temporal Date Picker State
-    const [dateRange, setDateRange] = useState<DateRangeState>({ label: 'Today', preset: 'today' });
-    const [customStart, setCustomStart] = useState<string>('');
-    const [customEnd, setCustomEnd] = useState<string>('');
+    // Local UI State
+    const [selectedOrder, setSelectedOrder] = useState<HistoryOrderData | null>(null);
     const [isDatePickerOpen, setIsDatePickerOpen] = useState<boolean>(false);
+    const [localCustomStart, setLocalCustomStart] = useState<string>(customStart);
+    const [localCustomEnd, setLocalCustomEnd] = useState<string>(customEnd);
     const datePickerRef = useRef<HTMLDivElement>(null);
 
-    // Close date picker when clicking outside
+    // Date Calculation Helper
+    const getDateParams = () => {
+        const now = new Date();
+        let startDateObj = new Date();
+        let endDateObj = new Date(now);
+
+        if (preset === 'custom' && customStart && customEnd) {
+            startDateObj = new Date(customStart); startDateObj.setHours(0,0,0,0);
+            endDateObj = new Date(customEnd); endDateObj.setHours(23,59,59,999);
+        } else {
+            switch (preset) {
+                case 'yesterday':
+                    startDateObj.setDate(now.getDate() - 1); startDateObj.setHours(0,0,0,0);
+                    endDateObj = new Date(startDateObj); endDateObj.setHours(23,59,59,999);
+                    break;
+                case '7days': startDateObj.setDate(now.getDate() - 7); break;
+                case 'thisMonth': startDateObj = new Date(now.getFullYear(), now.getMonth(), 1); break;
+                case 'lastMonth':
+                    startDateObj = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                    endDateObj = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+                    break;
+                case 'ytd': startDateObj = new Date(now.getFullYear(), 0, 1); break;
+                default: startDateObj.setHours(0,0,0,0); // Today
+            }
+        }
+        return { startDateStr: startDateObj.toISOString(), endDateStr: endDateObj.toISOString() };
+    };
+
+    // ============================================================================
+    // ⚡ TANSTACK QUERY: Server State Caching
+    // ============================================================================
+    const { data: orders = [], isLoading } = useQuery({
+        queryKey: ['orderHistory', preset, customStart, customEnd],
+        queryFn: async () => {
+            if (!token) { navigate('/login'); throw new Error("No token"); }
+            
+            const { startDateStr, endDateStr } = getDateParams();
+            const response = await axios.get<HistoryOrderData[]>('/api/orders/history', {
+                headers: { Authorization: `Bearer ${token}` },
+                params: { startDate: startDateStr, endDate: endDateStr }
+            });
+            return response.data || [];
+        },
+        enabled: !!token,
+        placeholderData: keepPreviousData // ⚡ Smooth UX: Doesn't flash loading spinner when changing dates
+    });
+
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
-            if (datePickerRef.current && !datePickerRef.current.contains(event.target as Node)) {
+            const target = event.target as HTMLElement;
+            if (datePickerRef.current && !datePickerRef.current.contains(target) && target.tagName !== 'INPUT') {
                 setIsDatePickerOpen(false);
             }
         };
@@ -79,65 +121,12 @@ export default function OrderHistory() {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    const fetchHistory = useCallback(async (signal?: AbortSignal) => {
-        setIsLoading(true);
-        try {
-            const token = localStorage.getItem('auth_token');
-            if (!token) return navigate('/login');
-
-            const now = new Date();
-            let startDateStr = new Date();
-            let endDateStr = new Date(now);
-
-            // Date Math Logic
-            if (dateRange.preset === 'custom' && dateRange.start && dateRange.end) {
-                const startObj = new Date(dateRange.start); startObj.setHours(0,0,0,0); startDateStr = startObj;
-                const endObj = new Date(dateRange.end); endObj.setHours(23,59,59,999); endDateStr = endObj; 
-            } else {
-                switch (dateRange.preset) {
-                    case 'yesterday':
-                        startDateStr.setDate(now.getDate() - 1); startDateStr.setHours(0,0,0,0);
-                        endDateStr = new Date(startDateStr); endDateStr.setHours(23,59,59,999);
-                        break;
-                    case '7days': startDateStr.setDate(now.getDate() - 7); break;
-                    case 'thisMonth': startDateStr = new Date(now.getFullYear(), now.getMonth(), 1); break;
-                    case 'lastMonth':
-                        startDateStr = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                        endDateStr = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-                        break;
-                    case 'ytd': startDateStr = new Date(now.getFullYear(), 0, 1); break;
-                    default: startDateStr.setHours(0,0,0,0); // Today
-                }
-            }
-
-            const response = await axios.get<HistoryOrderData[]>('/api/orders/history', {
-                headers: { Authorization: `Bearer ${token}` },
-                params: { startDate: startDateStr.toISOString(), endDate: endDateStr.toISOString() },
-                signal
-            });
-
-            setOrders(response.data || []);
-        } catch (error) {
-            if (!axios.isCancel(error)) {
-                toast.error("Failed to load order history");
-            }
-        } finally {
-            setIsLoading(false);
-        }
-    }, [dateRange, navigate]);
-
-    useEffect(() => {
-        const controller = new AbortController();
-        fetchHistory(controller.signal);
-        return () => controller.abort();
-    }, [fetchHistory]);
-
     const applyCustomDate = () => {
-        if (!customStart || !customEnd) return;
-        if (new Date(customStart) > new Date(customEnd)) {
+        if (!localCustomStart || !localCustomEnd) return;
+        if (new Date(localCustomStart) > new Date(localCustomEnd)) {
             toast.error("Start date cannot be after end date."); return;
         }
-        setDateRange({ label: `${customStart} to ${customEnd}`, preset: 'custom', start: customStart, end: customEnd });
+        setDateFilter('custom', `${localCustomStart} to ${localCustomEnd}`, localCustomStart, localCustomEnd);
         setIsDatePickerOpen(false);
     };
 
@@ -169,7 +158,7 @@ export default function OrderHistory() {
     };
 
     return (
-        <div className="max-w-7xl mx-auto p-4 md:p-6 lg:p-8 bg-slate-50 min-h-screen">
+        <div className="max-w-7xl mx-auto p-4 md:p-6 lg:p-8 bg-slate-50 min-h-screen animate-in fade-in duration-500">
             
             {/* Header & Controls */}
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
@@ -199,13 +188,13 @@ export default function OrderHistory() {
                         >
                             <span className="flex items-center gap-2 truncate">
                                 <Calendar size={18} className="text-indigo-500 shrink-0" /> 
-                                <span className="truncate">{dateRange.label}</span>
+                                <span className="truncate">{label}</span>
                             </span>
                             <ChevronDown size={18} className={`text-slate-400 shrink-0 ${isDatePickerOpen ? 'rotate-180' : ''}`} />
                         </button>
 
                         {isDatePickerOpen && (
-                            <div className="absolute top-full right-0 mt-2 w-full sm:w-80 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50">
+                            <div className="absolute top-full right-0 mt-2 w-full sm:w-80 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2">
                                 <div className="p-2 border-b border-slate-100 grid grid-cols-2 gap-1">
                                     {[
                                         { label: 'Today', preset: 'today' }, { label: 'Yesterday', preset: 'yesterday' },
@@ -214,8 +203,8 @@ export default function OrderHistory() {
                                     ].map(item => (
                                         <button 
                                             key={item.preset}
-                                            onClick={() => { setDateRange({ label: item.label, preset: item.preset }); setIsDatePickerOpen(false); }}
-                                            className={`text-left px-3 py-2 rounded-xl text-sm font-bold transition-colors ${dateRange.preset === item.preset ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
+                                            onClick={() => { setDateFilter(item.preset, item.label); setIsDatePickerOpen(false); }}
+                                            className={`text-left px-3 py-2 rounded-xl text-sm font-bold transition-colors ${preset === item.preset ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
                                         >
                                             {item.label}
                                         </button>
@@ -224,10 +213,10 @@ export default function OrderHistory() {
                                 <div className="p-4 space-y-3 bg-slate-50">
                                     <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Custom Range</p>
                                     <div className="flex gap-2">
-                                        <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="w-full border rounded-lg p-2 text-sm outline-none" />
-                                        <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="w-full border rounded-lg p-2 text-sm outline-none" />
+                                        <input type="date" value={localCustomStart} onChange={(e) => setLocalCustomStart(e.target.value)} className="w-full border rounded-lg p-2 text-sm outline-none" />
+                                        <input type="date" value={localCustomEnd} onChange={(e) => setLocalCustomEnd(e.target.value)} className="w-full border rounded-lg p-2 text-sm outline-none" />
                                     </div>
-                                    <button onClick={applyCustomDate} className="w-full bg-indigo-600 text-white font-bold py-2 rounded-lg text-sm">Apply Custom Dates</button>
+                                    <button onClick={applyCustomDate} disabled={!localCustomStart || !localCustomEnd} className="w-full bg-indigo-600 text-white font-bold py-2 rounded-lg text-sm disabled:opacity-50">Apply Custom Dates</button>
                                 </div>
                             </div>
                         )}
@@ -251,7 +240,7 @@ export default function OrderHistory() {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {isLoading ? (
+                            {isLoading && orders.length === 0 ? (
                                 <tr><td colSpan={7} className="p-8 text-center text-slate-500 font-bold">Loading history...</td></tr>
                             ) : filteredOrders.length === 0 ? (
                                 <tr><td colSpan={7} className="p-12 text-center text-slate-500 font-bold">No orders found for this period.</td></tr>
@@ -305,7 +294,7 @@ export default function OrderHistory() {
                             <div className="flex justify-between items-start border-b border-dashed border-slate-300 pb-4">
                                 <div>
                                     <p className="text-xs font-black text-slate-400 uppercase tracking-wider mb-1">Customer</p>
-                                    <p className="font-bold text-slate-900 flex items-center gap-1.5"><User size={14}/> {selectedOrder.customer_name}</p>
+                                    <p className="font-bold text-slate-900 flex items-center gap-1.5"><User size={14}/> {selectedOrder.customer_name || 'Guest'}</p>
                                 </div>
                                 <div className="text-right">
                                     <p className="text-xs font-black text-slate-400 uppercase tracking-wider mb-1">Location</p>

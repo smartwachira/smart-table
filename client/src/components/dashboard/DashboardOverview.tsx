@@ -1,5 +1,7 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
+// ⚡ IMPORT keepPreviousData for buttery smooth transitions
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import axios, { AxiosError } from 'axios';
 import { 
     LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, 
@@ -10,55 +12,21 @@ import {
     CreditCard, Activity, QrCode, Clock, Flame,
     Calendar, ChevronDown, Download, AlertTriangle, CheckCircle2, AlertCircle
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { useDashboardStore } from '../../store/useDashboardStore'; // ⚡ Global State
 
-// 🛡️ Explicit Interfaces for the highly complex API Dashboard Payload
-interface KPITrend {
-    percentage: string | number;
-    isPositive: boolean;
-}
-
-interface KPIMetric {
-    value: number;
-    trend: KPITrend; // ⚡ FIX 1: Expect an object instead of a raw number
-}
-
-interface LivePulse {
-    activeOrders: number;
-    averageFulfillmentTime: string | number;
-}
-
-interface SalesTrend {
-    timeLabel: string;
-    currentRevenue: number;
-    previousRevenue: number;
-    currentOrders: number;
-    previousOrders: number;
-}
-
-interface PaymentBreakdown {
-    name: string;
-    value: number | string;
-}
-
-interface CategoryBreakdown {
-    category: string;
-    total_sold: number | string;
-    revenue: number | string;
-}
-
-interface TopItem {
-    name: string;
-    total_sold: number | string;
-    total_revenue: number | string;
-}
+// 🛡️ Explicit Interfaces
+interface KPITrend { percentage: string | number; isPositive: boolean; }
+interface KPIMetric { value: number; trend: KPITrend; }
+interface LivePulse { activeOrders: number; averageFulfillmentTime: string | number; }
+interface SalesTrend { timeLabel: string; currentRevenue: number; previousRevenue: number; currentOrders: number; previousOrders: number; }
+interface PaymentBreakdown { name: string; value: number | string; }
+interface CategoryBreakdown { category: string; total_sold: number | string; revenue: number | string; }
+interface TopItem { name: string; total_sold: number | string; total_revenue: number | string; }
 
 export interface DashboardData {
     granularity: 'hour' | 'day' | 'month';
-    kpis: {
-        revenue: KPIMetric;
-        orders: KPIMetric;
-        aov: KPIMetric;
-    };
+    kpis: { revenue: KPIMetric; orders: KPIMetric; aov: KPIMetric; };
     livePulse: LivePulse;
     salesTrends: SalesTrend[];
     paymentBreakdown: PaymentBreakdown[];
@@ -66,71 +34,41 @@ export interface DashboardData {
     topItems: TopItem[];
 }
 
-interface DateRangeState {
-    label: string;
-    preset: string;
-    start?: string;
-    end?: string;
-}
-
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
-const formatCurrency = (val?: number) => new Intl.NumberFormat('en-KE', { 
-    style: 'currency', 
-    currency: 'KES', 
-    minimumFractionDigits: 0 
-}).format(val || 0);
+const formatCurrency = (val?: number) => new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 }).format(val || 0);
 
 const formatTimeLabel = (isoString: string, granularity: string) => {
     if (!isoString) return '';
     const safeString = String(isoString).replace(' ', 'T');
     const date = new Date(safeString);
-    
     if (isNaN(date.getTime())) return String(isoString).split('T')[0];
 
     const timeZone = 'Africa/Nairobi';
-
-    if (granularity === 'hour'){
-        return `${date.toLocaleTimeString('en-US', { timeZone, hour: '2-digit', minute: '2-digit', hour12: false })}, ${date.toLocaleDateString('en-US',{ timeZone, weekday: 'short' })}`;
-    } else if (granularity === 'day'){
-        return `${date.toLocaleDateString('en-US', { timeZone, month: 'short', day: 'numeric' })}, ${date.toLocaleDateString('en-US', { timeZone, weekday: 'short' })}`;
-    } else if (granularity === 'month'){
-        return date.toLocaleDateString('en-US', { timeZone, month: 'short', year: 'numeric' });
-    } else {
-        return `${date.toLocaleDateString('en-US', { timeZone, month: 'short', year: 'numeric' })} ${date.toLocaleTimeString('en-US', { timeZone, hour: 'numeric', minute: '2-digit' })}`;
-    }
+    if (granularity === 'hour') return `${date.toLocaleTimeString('en-US', { timeZone, hour: '2-digit', minute: '2-digit', hour12: false })}, ${date.toLocaleDateString('en-US',{ timeZone, weekday: 'short' })}`;
+    if (granularity === 'day') return `${date.toLocaleDateString('en-US', { timeZone, month: 'short', day: 'numeric' })}, ${date.toLocaleDateString('en-US', { timeZone, weekday: 'short' })}`;
+    if (granularity === 'month') return date.toLocaleDateString('en-US', { timeZone, month: 'short', year: 'numeric' });
+    return `${date.toLocaleDateString('en-US', { timeZone, month: 'short', year: 'numeric' })} ${date.toLocaleTimeString('en-US', { timeZone, hour: 'numeric', minute: '2-digit' })}`;
 };
 
 const generateCSV = (data: DashboardData | null, dateRangeLabel: string) => {
     if (!data) return;
     const { kpis, livePulse, salesTrends, categoryBreakdown, topItems } = data;
-
     let csv = `Smart Table Analytical Report - ${dateRangeLabel}\n\n`;
-
-    csv += "--- EXECUTIVE SUMMARY ---\n";
-    csv += 'Metric,Value,Trend\n';
+    csv += "--- EXECUTIVE SUMMARY ---\nMetric,Value,Trend\n";
     csv += `Gross Revenue,${kpis.revenue?.value || 0},${kpis.revenue?.trend?.percentage || 0}%\n`;
     csv += `Total Orders,${kpis.orders?.value || 0},${kpis.orders?.trend?.percentage || 0}%\n`;
     csv += `Avg Order Value,${kpis.aov?.value || 0},${kpis.aov?.trend?.percentage || 0}%\n`;
     csv += `Live Active Orders,${livePulse?.activeOrders || 0},N/A\n`;
     csv += `Avg Kitchen Time (min),${livePulse?.averageFulfillmentTime || 0},N/A\n\n`;
-
-    csv += "--- SALES TRENDS ---\n";
-    csv += "Timestamp,Current Revenue,Previous Revenue,Current Orders,Previous Orders\n";
-    (salesTrends || []).forEach(row => {
-        csv += `${row.timeLabel},${row.currentRevenue},${row.previousRevenue},${row.currentOrders},${row.previousOrders}\n`;
-    });
-    csv += "\n";
-
-    csv += "--- CATEGORY PERFORMANCE ---\n";
-    csv += "Category,Units Sold,Revenue\n";
-    (categoryBreakdown || []).forEach(row => {
-        csv += `${row.category},${row.total_sold},${row.revenue}\n`;
-    });
-    csv += "\n";
-
-    csv += "--- TOP PERFORMING ITEMS ---\n";
-    csv += "Item Name,Units Sold,Revenue\n";
+    
+    csv += "--- SALES TRENDS ---\nTimestamp,Current Revenue,Previous Revenue,Current Orders,Previous Orders\n";
+    (salesTrends || []).forEach(row => csv += `${row.timeLabel},${row.currentRevenue},${row.previousRevenue},${row.currentOrders},${row.previousOrders}\n`);
+    
+    csv += "\n--- CATEGORY PERFORMANCE ---\nCategory,Units Sold,Revenue\n";
+    (categoryBreakdown || []).forEach(row => csv += `${row.category},${row.total_sold},${row.revenue}\n`);
+    
+    csv += "\n--- TOP PERFORMING ITEMS ---\nItem Name,Units Sold,Revenue\n";
     (topItems || []).forEach(row =>{
         const safeName = row.name ? `"${row.name.replace(/"/g, '""')}"` : '"Unknown"';
         csv += `${safeName},${row.total_sold},${row.total_revenue}\n`;
@@ -148,28 +86,16 @@ const generateCSV = (data: DashboardData | null, dateRangeLabel: string) => {
     URL.revokeObjectURL(url);
 };
 
-// 🛡️ Explicitly typed UI sub-components
-interface StatCardProps {
-    title: string;
-    value: string | number;
-    trend?: KPITrend;
-    icon: React.ElementType;
-    LinkTo?: string;
-}
-
-const StatCard: React.FC<StatCardProps> = ({ title, value, trend, icon: Icon, LinkTo }) => {
-    // ⚡ FIX 2: Correctly pull the positive/negative logic from the trend object
+// UI Sub-components
+const StatCard: React.FC<{ title: string; value: string | number; trend?: KPITrend; icon: React.ElementType; LinkTo?: string; }> = ({ title, value, trend, icon: Icon, LinkTo }) => {
     const isPositive = trend?.isPositive;
     const CardContent = (
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col transition-all hover:shadow-md h-full hover:border-indigo-200 group">
             <div className="flex justify-between items-start mb-3 sm:mb-4">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-                    <Icon size={20} className="sm:w-6 sm:h-6" />
-                </div>
+                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center group-hover:scale-110 transition-transform"><Icon size={20} className="sm:w-6 sm:h-6" /></div>
                 {trend !== undefined && (
                     <span className={`flex items-center gap-1 text-xs sm:text-sm font-bold px-2.5 py-1 rounded-full ${isPositive ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
-                        {isPositive ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                        {trend.percentage}%
+                        {isPositive ? <TrendingUp size={12} /> : <TrendingDown size={12} />}{trend.percentage}%
                     </span>
                 )}
             </div>
@@ -177,7 +103,6 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, trend, icon: Icon, Li
             <p className="text-2xl sm:text-3xl font-black text-slate-900 mt-1 truncate">{value}</p>
         </div>
     );
-
     return LinkTo ? <Link to={LinkTo} className="block">{CardContent}</Link> : CardContent;
 };
 
@@ -187,31 +112,13 @@ const ComparativeTooltip: React.FC<any> = ({ active, payload, label, granularity
         const previous = payload.find((p: any) => p.dataKey === 'previousRevenue')?.value || 0;
         const diff = current - previous;
         const isPositive = diff >= 0;
-
         return (
             <div className="bg-white p-3 sm:p-4 rounded-xl shadow-xl border border-slate-100 min-w-[160px] sm:min-w-[200px] text-xs sm:text-sm">
-                <p className="font-bold text-slate-500 mb-2 pb-2 border-b border-slate-100">
-                    {formatTimeLabel(label, granularity)}
-                </p>
+                <p className="font-bold text-slate-500 mb-2 pb-2 border-b border-slate-100">{formatTimeLabel(label, granularity)}</p>
                 <div className="space-y-1.5 sm:space-y-2">
-                    <div className="flex justify-between items-center">
-                        <span className="flex items-center gap-1.5 font-bold text-indigo-600">
-                            <div className="w-2 h-2 rounded-full bg-indigo-600"></div> Current
-                        </span>
-                        <span className="font-black text-slate-900">{formatCurrency(current)}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                        <span className="flex items-center gap-1.5 font-bold text-slate-400">
-                            <div className="w-2 h-2 rounded-full bg-slate-300"></div> Previous
-                        </span>
-                        <span className="font-bold text-slate-500">{formatCurrency(previous)}</span>
-                    </div>
-                    <div className="pt-2 mt-2 border-t border-slate-50 flex justify-between items-center font-bold">
-                        <span className="text-slate-400">Difference</span>
-                        <span className={isPositive ? 'text-emerald-500': 'text-red-500'}>
-                            {isPositive ? '+' : ''}{formatCurrency(diff)}
-                        </span>
-                    </div>
+                    <div className="flex justify-between items-center"><span className="flex items-center gap-1.5 font-bold text-indigo-600"><div className="w-2 h-2 rounded-full bg-indigo-600"></div> Current</span><span className="font-black text-slate-900">{formatCurrency(current)}</span></div>
+                    <div className="flex justify-between items-center"><span className="flex items-center gap-1.5 font-bold text-slate-400"><div className="w-2 h-2 rounded-full bg-slate-300"></div> Previous</span><span className="font-bold text-slate-500">{formatCurrency(previous)}</span></div>
+                    <div className="pt-2 mt-2 border-t border-slate-50 flex justify-between items-center font-bold"><span className="text-slate-400">Difference</span><span className={isPositive ? 'text-emerald-500': 'text-red-500'}>{isPositive ? '+' : ''}{formatCurrency(diff)}</span></div>
                 </div>
             </div>
         );
@@ -223,9 +130,7 @@ const SkeletonLoader = () => (
     <div className="space-y-4 sm:space-y-6 animate-pulse p-3 sm:p-6 lg:p-8 max-w-7xl mx-auto">
         <div className="flex justify-between h-8 sm:h-10 bg-slate-200 rounded-xl w-1/2 md:w-1/4"></div>
         <div className="h-24 sm:h-28 bg-slate-800 rounded-2xl sm:rounded-3xl w-full"></div> 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {[1, 2, 3, 4].map(i => <div key={i} className="h-32 sm:h-40 bg-slate-200 rounded-2xl"></div>)}
-        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">{[1, 2, 3, 4].map(i => <div key={i} className="h-32 sm:h-40 bg-slate-200 rounded-2xl"></div>)}</div>
         <div className="h-64 sm:h-96 bg-slate-200 rounded-2xl sm:rounded-3xl w-full"></div>
     </div>
 );
@@ -233,32 +138,22 @@ const SkeletonLoader = () => (
 const OnboardingChecklist = () => (
     <div className="bg-white border border-indigo-100 rounded-[1.5rem] sm:rounded-3xl p-6 sm:p-10 shadow-lg shadow-indigo-50/50 max-w-4xl mx-auto mt-4 sm:mt-8 animate-in fade-in slide-in-from-bottom-4">
         <div className="text-center mb-8">
-            <div className="w-16 h-16 sm:w-20 sm:h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Activity size={32} className="sm:w-10 sm:h-10" />
-            </div>
+            <div className="w-16 h-16 sm:w-20 sm:h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4"><Activity size={32} className="sm:w-10 sm:h-10" /></div>
             <h2 className="text-2xl sm:text-3xl font-black text-slate-900 mb-2">Welcome to Smart Table!</h2>
             <p className="text-slate-500 text-sm sm:text-base max-w-lg mx-auto">Your dashboard is empty because you haven't received any orders yet. Let's get your venue set up and ready for customers.</p>
         </div>
-
         <div className="space-y-4">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 sm:p-6 bg-slate-50 rounded-2xl border border-slate-100 gap-4">
                 <div className="flex items-start gap-4">
                     <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0"><CheckCircle2 size={20} /></div>
-                    <div>
-                        <h4 className="font-bold text-slate-900">1. Create your Menu</h4>
-                        <p className="text-sm text-slate-500 mt-1">Add categories (Drinks, Mains) and items so customers can order.</p>
-                    </div>
+                    <div><h4 className="font-bold text-slate-900">1. Create your Menu</h4><p className="text-sm text-slate-500 mt-1">Add categories (Drinks, Mains) and items so customers can order.</p></div>
                 </div>
                 <Link to="/dashboard/menu" className="w-full sm:w-auto bg-white border border-slate-200 text-indigo-600 font-bold px-5 py-2.5 rounded-xl hover:bg-indigo-50 hover:border-indigo-200 transition-colors text-center text-sm">Go to Menu</Link>
             </div>
-
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 sm:p-6 bg-slate-50 rounded-2xl border border-slate-100 gap-4">
                 <div className="flex items-start gap-4">
                     <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center shrink-0"><AlertCircle size={20} /></div>
-                    <div>
-                        <h4 className="font-bold text-slate-900">2. Generate QR Codes</h4>
-                        <p className="text-sm text-slate-500 mt-1">Create and print QR codes for your tables to enable Smart Ordering.</p>
-                    </div>
+                    <div><h4 className="font-bold text-slate-900">2. Generate QR Codes</h4><p className="text-sm text-slate-500 mt-1">Create and print QR codes for your tables to enable Smart Ordering.</p></div>
                 </div>
                 <Link to="/dashboard/qr" className="w-full sm:w-auto bg-indigo-600 text-white font-bold px-5 py-2.5 rounded-xl hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-600/20 text-center text-sm">Setup QR Codes</Link>
             </div>
@@ -267,20 +162,89 @@ const OnboardingChecklist = () => (
 );
 
 export default function DashboardOverview() {
-    const [dateRange, setDateRange] = useState<DateRangeState>({ label: 'Current Shift', preset: 'shift' });
-    const [customStart, setCustomStart] = useState<string>('');
-    const [customEnd, setCustomEnd] = useState<string>('');
+    const { user } = useAuth();
+    
+    // ⚡ ZUSTAND STATE: Completely immune to Router links & unmounting
+    const { preset, label, customStart, customEnd, setDateFilter } = useDashboardStore();
+
+    // Local UI State
     const [isDatePickerOpen, setIsDatePickerOpen] = useState<boolean>(false);
+    const [localCustomStart, setLocalCustomStart] = useState<string>(customStart);
+    const [localCustomEnd, setLocalCustomEnd] = useState<string>(customEnd);
     const datePickerRef = useRef<HTMLDivElement>(null);
 
-    const [data, setData] = useState<DashboardData | null>(null);
-    const [isLoading, setIsLoading] = useState<boolean>(true);
-    const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    // Date Calculation Helper
+    const getDateParams = () => {
+        let startDateStr: string | null = null; 
+        let endDateStr: string | null = null;
+        const now = new Date();
+        let tempStart = new Date();
+
+        if (preset === 'custom' && customStart && customEnd) {
+            const startObj = new Date(customStart); startObj.setHours(0,0,0,0);
+            const endObj = new Date(customEnd); endObj.setHours(23,59,59,999);
+            return { startDate: startObj.toISOString(), endDate: endObj.toISOString() };
+        }
+
+        switch (preset) {
+            case 'yesterday':
+                tempStart.setDate(now.getDate() - 1); tempStart.setHours(0,0,0,0);
+                startDateStr = tempStart.toISOString();
+                let tempEnd = new Date(tempStart); tempEnd.setHours(23,59,59,999);
+                endDateStr = tempEnd.toISOString();
+                break;
+            case '7days':
+                tempStart.setDate(now.getDate() - 7);
+                startDateStr = tempStart.toISOString(); endDateStr = now.toISOString();
+                break;
+            case 'thisMonth':
+                startDateStr = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+                endDateStr = now.toISOString();
+                break;
+            case 'lastMonth':
+                startDateStr = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+                endDateStr = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59).toISOString();
+                break;
+            case 'ytd':
+                startDateStr = new Date(now.getFullYear(), 0, 1).toISOString();
+                endDateStr = now.toISOString();
+                break;
+            default: break; // 'shift' leaves params empty for backend default
+        }
+        return { startDate: startDateStr, endDate: endDateStr };
+    };
+
+    // ============================================================================
+    // ⚡ TANSTACK QUERY: With `keepPreviousData` to prevent Skeleton flashes
+    // ============================================================================
+    const { data, isLoading, error } = useQuery({
+        queryKey: ['dashboardOverview', user?.venueId, preset, customStart, customEnd],
+        queryFn: async () => {
+            const { startDate, endDate } = getDateParams();
+            const params: Record<string, string> = {};
+            if (startDate && endDate) {
+                params.startDate = startDate;
+                params.endDate = endDate;
+            }
+            const res = await axios.get<DashboardData>(`/api/dashboard/overview`, {
+                params,
+                headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` },
+                venueId: user?.venueId 
+            } as any);
+
+            if (typeof res.data === 'string' && (res.data as string).includes('<!DOCTYPE html>')) {
+                throw new Error("Received HTML instead of JSON. The backend route is not mounted.");
+            }
+            return res.data;
+        },
+        enabled: !!user?.venueId,
+        refetchInterval: 60000, 
+        placeholderData: keepPreviousData, // ⚡ Holds old chart data on screen while fetching new dates!
+    });
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
             const target = event.target as HTMLElement;
-            // ⚡ FIX 3: Ignore clicks on input fields so the native browser date picker doesn't instantly close the dropdown
             if (datePickerRef.current && !datePickerRef.current.contains(target) && target.tagName !== 'INPUT') {
                 setIsDatePickerOpen(false);
             }
@@ -289,137 +253,40 @@ export default function DashboardOverview() {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    const fetchDashboardData = useCallback(async (isSilent = false, signal?: AbortSignal) => {
-        if (!isSilent) setIsLoading(true);
-        setErrorMsg(null);
-        
-        try {
-            let startDateStr: string | null = null; 
-            let endDateStr: string | null = null;
-
-            if (dateRange.preset === 'custom' && dateRange.start && dateRange.end) {
-                const startObj = new Date(dateRange.start);
-                startObj.setHours(0,0,0,0);
-                startDateStr = startObj.toISOString();
-
-                const endObj = new Date(dateRange.end);
-                endObj.setHours(23,59,59,999);
-                endDateStr = endObj.toISOString(); 
-            } else {
-                const now = new Date();
-                let tempStart = new Date();
-
-                switch (dateRange.preset) {
-                    case 'shift':
-                        break;
-                    case 'yesterday':
-                        tempStart.setDate(now.getDate() - 1);
-                        tempStart.setHours(0,0,0,0);
-                        startDateStr = tempStart.toISOString();
-                        
-                        let tempEnd = new Date(tempStart);
-                        tempEnd.setHours(23,59,59,999);
-                        endDateStr = tempEnd.toISOString();
-                        break;
-                    case '7days':
-                        tempStart.setDate(now.getDate() - 7);
-                        startDateStr = tempStart.toISOString();
-                        endDateStr = now.toISOString();
-                        break;
-                    case 'thisMonth':
-                        startDateStr = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-                        endDateStr = now.toISOString();
-                        break;
-                    case 'lastMonth':
-                        startDateStr = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
-                        endDateStr = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59).toISOString();
-                        break;
-                    case 'ytd':
-                        startDateStr = new Date(now.getFullYear(), 0, 1).toISOString();
-                        endDateStr = now.toISOString();
-                        break;
-                    default:
-                        break;
-                }
-            }
-            
-            const params: Record<string, string> = {};
-            if (startDateStr && endDateStr) {
-                params.startDate = startDateStr;
-                params.endDate = endDateStr;
-            }
-            
-            const res = await axios.get<DashboardData>(`/api/dashboard/overview`, {
-                params,
-                signal
-            });
-
-            if (typeof res.data === 'string' && (res.data as string).includes('<!DOCTYPE html>')) {
-                throw new Error("Received HTML instead of JSON. The backend route is not mounted.");
-            }
-
-            setData(res.data);
-        } catch (error) {
-            if (axios.isCancel(error)) {
-                console.log('Request canceled due to race condition prevention.');
-            } else {
-                const axiosError = error as AxiosError<{ message: string }>;
-                setErrorMsg(axiosError.response?.data?.message || axiosError.message || "Failed to fetch dashboard data.");
-            }
-        } finally {
-            if (!isSilent) setIsLoading(false);
-        }
-    }, [dateRange]);
-
-    useEffect(() => {
-        const controller = new AbortController();
-        
-        fetchDashboardData(false, controller.signal);
-        
-        const interval = setInterval(() => fetchDashboardData(true, controller.signal), 60000);
-        
-        return () => {
-            clearInterval(interval);
-            controller.abort();
-        };
-    }, [fetchDashboardData]);
-
     const applyCustomDate = () => {
-        if (!customStart || !customEnd) return;
-        if (new Date(customStart) > new Date(customEnd)) {
+        if (!localCustomStart || !localCustomEnd) return;
+        if (new Date(localCustomStart) > new Date(localCustomEnd)) {
             alert("Start date cannot be after end date.");
             return;
         }
-        setDateRange({ label: `${customStart} to ${customEnd}`, preset: 'custom', start: customStart, end: customEnd });
+        setDateFilter('custom', `${localCustomStart} to ${localCustomEnd}`, localCustomStart, localCustomEnd);
         setIsDatePickerOpen(false);
     };
 
+    // Only show the skeleton if we are loading AND have zero cached data to show
     if (isLoading && !data) return <SkeletonLoader />;
 
-    if (errorMsg || !data || !data.kpis) {
+    if (error || !data || !data.kpis) {
+        const axiosError = error as AxiosError<{ message: string }>;
+        const errorMsg = axiosError?.response?.data?.message || error?.message || "Failed to fetch dashboard data.";
         return (
             <div className="p-4 sm:p-8 flex flex-col items-center justify-center text-center mt-12 animate-in fade-in">
                 <Activity size={40} className="text-red-400 mb-4 sm:w-12 sm:h-12" />
                 <h2 className="text-lg sm:text-xl font-bold text-slate-900 mb-2">Connection Error</h2>
-                <p className="text-sm sm:text-base text-slate-500 max-w-md">{errorMsg || "Failed to load dashboard structure."}</p>
+                <p className="text-sm sm:text-base text-slate-500 max-w-md">{errorMsg}</p>
             </div>
         );
     }
 
     const { granularity, kpis, livePulse, salesTrends, paymentBreakdown, topItems, categoryBreakdown } = data;
     const hasOrders = (kpis.orders?.value || 0) > 0;
-    
-    const isColdStart = !hasOrders && ((data.kpis.revenue?.value || 0) === 0);
+    const isColdStart = !hasOrders && ((kpis.revenue?.value || 0) === 0);
 
-    // ⚡ FIX 4: Sanitize Postgres string sums into raw numbers for Recharts processing
     const sanitizedCategoryBreakdown = (categoryBreakdown || []).map(item => ({
-        category: item.category || 'Uncategorized',
-        revenue: Number(item.revenue || 0) 
+        category: item.category || 'Uncategorized', revenue: Number(item.revenue || 0) 
     }));
-
     const sanitizedPaymentBreakdown = (paymentBreakdown || []).map(item => ({
-        name: item.name || 'Unknown',
-        value: Number(item.value || 0)
+        name: item.name || 'Unknown', value: Number(item.value || 0)
     }));
 
     return (
@@ -433,7 +300,7 @@ export default function DashboardOverview() {
 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full lg:w-auto">
                     {hasOrders && (
-                        <button onClick={() => generateCSV(data, dateRange.label)} className="flex justify-center items-center gap-2 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl px-4 py-3 sm:py-2.5 hover:bg-slate-50 hover:text-indigo-600 transition-colors shadow-sm w-full sm:w-auto text-sm sm:text-base">
+                        <button onClick={() => generateCSV(data, label)} className="flex justify-center items-center gap-2 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl px-4 py-3 sm:py-2.5 hover:bg-slate-50 hover:text-indigo-600 transition-colors shadow-sm w-full sm:w-auto text-sm sm:text-base">
                             <Download size={18} /> Export
                         </button>
                     )}
@@ -443,7 +310,7 @@ export default function DashboardOverview() {
                             onClick={() => setIsDatePickerOpen(!isDatePickerOpen)}
                             className="w-full flex items-center justify-between bg-white border border-slate-200 text-slate-700 font-bold rounded-xl px-4 py-3 sm:py-2.5 shadow-sm hover:border-indigo-300 transition-colors text-sm sm:text-base"
                         >
-                            <span className="flex items-center gap-2 truncate"><Calendar size={18} className="text-indigo-500 shrink-0" /> <span className="truncate">{dateRange.label}</span></span>
+                            <span className="flex items-center gap-2 truncate"><Calendar size={18} className="text-indigo-500 shrink-0" /> <span className="truncate">{label}</span></span>
                             <ChevronDown size={18} className={`text-slate-400 transition-transform shrink-0 ${isDatePickerOpen ? 'rotate-180' : ''}`} />
                         </button>
 
@@ -457,8 +324,11 @@ export default function DashboardOverview() {
                                     ].map(item => (
                                         <button 
                                             key={item.preset}
-                                            onClick={() => { setDateRange({ label: item.label, preset: item.preset }); setIsDatePickerOpen(false); }}
-                                            className={`text-left px-3 py-2.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-colors ${dateRange.preset === item.preset ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
+                                            onClick={() => {
+                                                setDateFilter(item.preset, item.label);
+                                                setIsDatePickerOpen(false);
+                                            }}
+                                            className={`text-left px-3 py-2.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-colors ${preset === item.preset ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
                                         >
                                             {item.label}
                                         </button>
@@ -467,13 +337,13 @@ export default function DashboardOverview() {
                                 <div className="p-4 space-y-3 bg-slate-50/50">
                                     <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Custom Range</p>
                                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                                        <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="w-full text-sm border border-slate-200 rounded-lg p-2.5 sm:p-2 outline-none focus:border-indigo-500 bg-white" />
+                                        <input type="date" value={localCustomStart} onChange={(e) => setLocalCustomStart(e.target.value)} className="w-full text-sm border border-slate-200 rounded-lg p-2.5 sm:p-2 outline-none focus:border-indigo-500 bg-white" />
                                         <span className="text-slate-400 font-bold text-xs text-center hidden sm:block">TO</span>
-                                        <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="w-full text-sm border border-slate-200 rounded-lg p-2.5 sm:p-2 outline-none focus:border-indigo-500 bg-white" />
+                                        <input type="date" value={localCustomEnd} onChange={(e) => setLocalCustomEnd(e.target.value)} className="w-full text-sm border border-slate-200 rounded-lg p-2.5 sm:p-2 outline-none focus:border-indigo-500 bg-white" />
                                     </div>
                                     <button 
                                         onClick={applyCustomDate}
-                                        disabled={!customStart || !customEnd}
+                                        disabled={!localCustomStart || !localCustomEnd}
                                         className="w-full bg-indigo-600 text-white font-bold py-3 sm:py-2 rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50 transition-colors"
                                     >
                                         Apply Custom Dates
@@ -554,21 +424,10 @@ export default function DashboardOverview() {
                             <ResponsiveContainer width="100%" height="100%">
                                 <LineChart data={salesTrends || []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                    <XAxis 
-                                        dataKey="timeLabel" 
-                                        stroke="#94a3b8" 
-                                        fontSize={10} 
-                                        tickLine={false} 
-                                        axisLine={false} 
-                                        dy={10} 
-                                        tickFormatter={(val) => formatTimeLabel(val, granularity)}
-                                        minTickGap={30}
-                                        interval="preserveStartEnd" 
-                                    />
+                                    <XAxis dataKey="timeLabel" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} dy={10} tickFormatter={(val) => formatTimeLabel(val, granularity)} minTickGap={30} interval="preserveStartEnd" />
                                     <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `KSh ${val}`} />
                                     <RechartsTooltip content={<ComparativeTooltip granularity={granularity} />} />
                                     <Line type="monotone" dataKey="previousRevenue" stroke="#cbd5e1" strokeWidth={2} strokeDasharray="4 4" dot={false} activeDot={false} />
-                                    {/* ⚡ FIX 5: Ensure single points render on LineChart by enforcing dot true */}
                                     <Line type="monotone" dataKey="currentRevenue" stroke="#4f46e5" strokeWidth={3} dot={{ r: 3, fill: '#4f46e5', strokeWidth: 0 }} activeDot={{ r: 6, strokeWidth: 0, fill: '#4f46e5' }} />
                                 </LineChart>
                             </ResponsiveContainer>
@@ -606,11 +465,7 @@ export default function DashboardOverview() {
                                         <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                                         <XAxis type="number" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `KSh ${val}`} />
                                         <YAxis dataKey="category" type="category" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} width={80} />
-                                        <RechartsTooltip 
-                                            cursor={{fill: '#f8fafc'}}
-                                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                                            formatter={(value: any) => [formatCurrency(Number(value)), 'Revenue']}
-                                        />
+                                        <RechartsTooltip cursor={{fill: '#f8fafc'}} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} formatter={(value: any) => [formatCurrency(Number(value)), 'Revenue']} />
                                         <Bar dataKey="revenue" fill="#10b981" radius={[0, 4, 4, 0]} />
                                     </BarChart>
                                 </ResponsiveContainer>
@@ -636,13 +491,8 @@ export default function DashboardOverview() {
                                     {(topItems || []).map((item, idx) => (
                                         <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
                                             <td className="p-3 sm:p-4 font-bold text-xs sm:text-sm text-slate-900 truncate max-w-[150px] sm:max-w-[200px]">{item.name}</td>
-                                            <td className="p-3 sm:p-4 text-slate-500 font-medium text-center">
-                                                <span className="bg-slate-100 text-slate-600 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md text-xs sm:text-sm">{item.total_sold}</span>
-                                            </td>
-                                            <td className="p-3 sm:p-4 text-indigo-600 font-black text-xs sm:text-sm text-right">
-                                                {/* ⚡ FIX 6: Coerce Top Item string revenue back to pure Number */}
-                                                {formatCurrency(Number(item.total_revenue))}
-                                            </td>
+                                            <td className="p-3 sm:p-4 text-slate-500 font-medium text-center"><span className="bg-slate-100 text-slate-600 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md text-xs sm:text-sm">{item.total_sold}</span></td>
+                                            <td className="p-3 sm:p-4 text-indigo-600 font-black text-xs sm:text-sm text-right">{formatCurrency(Number(item.total_revenue))}</td>
                                         </tr>
                                     ))}
                                 </tbody>

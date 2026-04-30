@@ -47,7 +47,7 @@ export const dashboardRoutes: RouteConfig[] = [
         label: 'My Orders (Tips)',
         path: '/dashboard/my-orders',
         icon: Receipt,
-        allowedRoles: ['WAITER'], // Exclusive to FOH staff tracking their own metrics
+        allowedRoles: ['OWNER', 'MANAGER', 'CASHIER', 'WAITER'],
         showInSidebar: true,
     },
     {
