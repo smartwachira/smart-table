@@ -19,6 +19,7 @@ export interface OrderAttributes {
     notes?: string | null;
     cash_collected_by?: string | null;
     staff_id?: string | null;
+    guest_session_id?: string | null; // ⚡ ADDED: The Anonymous Session Tracker
 }
 
 export interface OrderCreationAttributes extends Optional<OrderAttributes, 'order_id' | 'status' | 'payment_status'> {}
@@ -38,6 +39,7 @@ class Order extends Model<OrderAttributes, OrderCreationAttributes> implements O
     public notes!: string | null;
     public cash_collected_by!: string | null;
     public staff_id!: string | null;
+    public guest_session_id!: string | null; // ⚡ ADDED
 
     public readonly createdAt!: Date;
     public readonly updatedAt!: Date;
@@ -101,11 +103,16 @@ Order.init({
     staff_id: {
         type: DataTypes.UUID,
         allowNull: true,
+    },
+    // ⚡ ADDED: Let Express and PostgreSQL know this exists
+    guest_session_id: {
+        type: DataTypes.STRING,
+        allowNull: true
     }
 }, {
     sequelize,
     timestamps: true,
-    tableName: 'Orders' // Note: Ensure casing matches your DB structure
+    tableName: 'Orders' 
 });
 
 export default Order;

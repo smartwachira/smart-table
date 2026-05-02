@@ -14,7 +14,7 @@
   },
   "include": [
     "**/*.ts"
-  ],
+, "migrations/20260501172247-add-guest-session-id-to-orders.cjs"  ],
   "exclude": [
     "node_modules",
     "dist"

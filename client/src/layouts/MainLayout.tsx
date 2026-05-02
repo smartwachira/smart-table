@@ -1,7 +1,7 @@
 import React from 'react';
 import { Outlet } from 'react-router-dom';
 import Navbar from '../components/Navbar';
-import FloatingCart from '../components/FloatingCart';
+import FloatingCart from '../components/guest/FloatingCart';
 
 const MainLayout: React.FC = () => {
     return (

@@ -45,8 +45,21 @@ const io = new Server(server, {
   }
 });
 
+// ============================================================================
+// ⚡ CORS SECURITY CONFIGURATION
+// ============================================================================
+const corsOptions = {
+    // In production, swap this for your actual Vercel/Netlify frontend URL
+    origin: ['http://localhost:5173', 'http://127.0.0.1:5173'], 
+    credentials: true,
+    // ⚡ THE FIX: Explicitly allow our custom session header to pass the preflight check
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-guest-id'], 
+    // Expose it just in case the frontend ever needs to read it from a response
+    exposedHeaders: ['x-guest-id'] 
+};
+
 //Middleware
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json()); //Crucial for parsing JSON bodies
 
 //Serve static files from  the uploads directory

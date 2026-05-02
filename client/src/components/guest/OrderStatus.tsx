@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import { io, Socket } from 'socket.io-client';
 import { jwtDecode } from 'jwt-decode'; 
@@ -8,10 +9,7 @@ import {
     BellRing, CheckCircle2, Receipt
 } from 'lucide-react';
 
-// 🛡️ Connect to your backend socket server with an explicit type
-const socket: Socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000');
-
-// 🛡️ Interfaces for strict typing
+// 🛡️ Interfaces
 interface GuestJwtPayload {
     role: string;
     venueId: string;
@@ -25,7 +23,7 @@ export type OrderStatusType = 'PENDING' | 'PREPARING' | 'READY' | 'COMPLETED' | 
 interface OrderData {
     order_id: string;
     status: OrderStatusType;
-    [key: string]: any; // Allow other fields from DB without throwing errors
+    [key: string]: any; 
 }
 
 interface SocketUpdatePayload {
@@ -34,15 +32,11 @@ interface SocketUpdatePayload {
 }
 
 export default function OrderStatus() {
-    // 🛡️ Type the URL param
     const { orderId } = useParams<{ orderId: string }>(); 
     const navigate = useNavigate();
+    const queryClient = useQueryClient();
 
-    // 🛡️ State Typing
     const [venueId, setVenueId] = useState<string | null>(null);
-    const [order, setOrder] = useState<OrderData | null>(null);
-    const [isLoading, setIsLoading] = useState<boolean>(true);
-    const [error, setError] = useState<string | null>(null);
 
     // ⚡ Extract Data from Token on Mount
     useEffect(() => {
@@ -64,35 +58,40 @@ export default function OrderStatus() {
         }
     }, [navigate]);
 
-    // Fetch Initial Order Data
-    useEffect(() => {
-        const fetchOrder = async () => {
-            if (!venueId || !orderId) return; 
+    // ============================================================================
+    // ⚡ TANSTACK QUERY: Instant Load & Background Refresh
+    // ============================================================================
+    const { data: order, isLoading, error } = useQuery({
+        queryKey: ['orderStatus', orderId],
+        queryFn: async () => {
+            if (!orderId) throw new Error("No Order ID");
 
-            try {
-                const res = await axios.get<OrderData>(`/api/orders/${orderId}/status`);
-                setOrder(res.data);
-            } catch (err) {
-                console.error("Failed to fetch order:", err);
-                setError("We couldn't find this order. It may have been completed or cancelled.");
-            } finally {
-                setIsLoading(false);
-            }
-        };
+            // ⚡ FIX 1: Extract the guest token
+            const token = localStorage.getItem('guest_token');
+            if (!token) throw new Error("Unauthorized: No guest session found.");
 
-        fetchOrder();
-    }, [orderId, venueId]);
-
-    // Set up Real-Time Socket Listeners
+            // ⚡ FIX 2: Explicitly pass the Authorization header
+            const res = await axios.get<OrderData>(`/api/orders/${orderId}/status`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            return res.data;
+        },
+        enabled: !!orderId && !!venueId,
+        refetchInterval: 15000 // Fallback poll every 15s in case sockets disconnect on mobile
+    });
+    // ============================================================================
+    // ⚡ WEBSOCKET INTEGRATION
+    // ============================================================================
     useEffect(() => {
         if (!venueId || !orderId) return;
 
+        const socket: Socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000');
         socket.emit('join_venue', venueId);
 
-        // 🛡️ Strongly type the incoming socket data
         const handleOrderUpdate = (data: SocketUpdatePayload) => {
             if (data.orderId === orderId && data.status) {
-                setOrder(prev => prev ? { ...prev, status: data.status } : null);
+                // Instantly tell TanStack Query to refetch this specific order
+                queryClient.invalidateQueries({ queryKey: ['orderStatus', orderId] });
             }
         };
 
@@ -100,11 +99,12 @@ export default function OrderStatus() {
 
         return () => {
             socket.off('orderUpdated', handleOrderUpdate);
+            socket.disconnect();
         };
-    }, [venueId, orderId]);
+    }, [venueId, orderId, queryClient]);
 
-
-    if (isLoading || !venueId) {
+    // UI Render Logic
+    if (isLoading && !order) {
         return (
             <div className="min-h-screen bg-slate-50 flex items-center justify-center">
                 <div className="animate-spin text-indigo-600"><Clock size={32} /></div>
@@ -114,10 +114,10 @@ export default function OrderStatus() {
 
     if (error || !order) {
         return (
-            <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+            <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center animate-in fade-in">
                 <CheckCircle2 size={48} className="text-slate-300 mb-4" />
-                <h2 className="text-xl font-bold text-slate-900 mb-2">Order Not Found</h2>
-                <p className="text-slate-500 mb-6">{error}</p>
+                <h2 className="text-xl font-bold text-slate-900 mb-2">Order Complete</h2>
+                <p className="text-slate-500 mb-6">We couldn't find this order. It may have been completed or cancelled.</p>
                 <button onClick={() => navigate('/menu')} className="px-6 py-3 bg-slate-900 text-white rounded-full font-bold transition-transform active:scale-95">
                     Return to Menu
                 </button>
@@ -138,10 +138,10 @@ export default function OrderStatus() {
     const activeIndex = currentStepIndex >= 0 ? currentStepIndex : 0; 
 
     return (
-        <div className="min-h-screen bg-slate-50 font-sans pb-12">
+        <div className="min-h-screen bg-slate-50 font-sans pb-12 animate-in fade-in duration-300">
             
             {/* Header */}
-            <header className="bg-white px-4 pt-6 pb-4 border-b border-slate-200 flex items-center justify-between sticky top-0 z-10">
+            <header className="bg-white px-4 pt-6 pb-4 border-b border-slate-200 flex items-center justify-between sticky top-0 z-10 shadow-sm">
                 <button 
                     onClick={() => navigate(`/menu`)}
                     className="w-10 h-10 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center text-slate-600 transition-colors active:scale-95"
@@ -158,22 +158,28 @@ export default function OrderStatus() {
             <main className="px-4 py-8 max-w-lg mx-auto space-y-6">
                 
                 {/* Hero Status Display */}
-                <div className="bg-white rounded-[2rem] p-8 text-center shadow-sm border border-slate-100">
-                    <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <div className="bg-white rounded-[2rem] p-8 text-center shadow-sm border border-slate-100 relative overflow-hidden">
+                    
+                    {/* Background Pulse Effect for Active State */}
+                    {activeIndex < 3 && (
+                        <div className="absolute -top-10 -right-10 w-40 h-40 bg-indigo-500 rounded-full mix-blend-multiply filter blur-3xl opacity-10 animate-pulse"></div>
+                    )}
+
+                    <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4 relative z-10">
                         {activeIndex === 0 && <Receipt size={36} />}
                         {activeIndex === 1 && <ChefHat size={36} className="animate-bounce" />}
                         {activeIndex === 2 && <BellRing size={36} className="animate-pulse text-amber-500" />}
                         {activeIndex === 3 && <CheckCircle2 size={36} className="text-emerald-500" />}
                     </div>
                     
-                    <h2 className="text-2xl font-black text-slate-900 mb-2">
+                    <h2 className="text-2xl font-black text-slate-900 mb-2 relative z-10">
                         {activeIndex === 0 && "We got your order!"}
                         {activeIndex === 1 && "Chef is cooking..."}
                         {activeIndex === 2 && "Order is ready!"}
                         {activeIndex === 3 && "Enjoy your meal!"}
                     </h2>
                     
-                    <p className="text-slate-500 font-medium text-sm px-4">
+                    <p className="text-slate-500 font-medium text-sm px-4 relative z-10">
                         {activeIndex === 0 && "Your order has been sent to the kitchen."}
                         {activeIndex === 1 && "Your food is being prepared fresh."}
                         {activeIndex === 2 && "A waiter is bringing it to your table now."}
@@ -196,17 +202,17 @@ export default function OrderStatus() {
                             return (
                                 <div key={step.id} className="relative flex items-center gap-6 z-10">
                                     {/* Status Bubble */}
-                                    <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 transition-colors duration-500 ${
+                                    <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 transition-all duration-500 ${
                                         isCompleted ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' :
-                                        isActive ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-300 ring-4 ring-indigo-50' :
-                                        'bg-slate-100 text-slate-400 border-2 border-slate-200 border-dashed'
+                                        isActive ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-300 ring-4 ring-indigo-50 scale-110' :
+                                        'bg-slate-50 text-slate-400 border border-slate-200'
                                     }`}>
                                         <Icon size={20} />
                                     </div>
                                     
                                     {/* Text Label */}
                                     <div>
-                                        <h4 className={`font-bold text-lg ${isActive ? 'text-indigo-600' : isCompleted ? 'text-slate-900' : 'text-slate-400'}`}>
+                                        <h4 className={`font-bold text-lg transition-colors duration-300 ${isActive ? 'text-indigo-600' : isCompleted ? 'text-slate-900' : 'text-slate-400'}`}>
                                             {step.label}
                                         </h4>
                                         {isActive && (

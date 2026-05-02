@@ -7,7 +7,7 @@ import {
     ArrowLeft, ShieldCheck, Smartphone, 
     Receipt, Loader2, CheckCircle2, User, Banknote, XCircle
 } from 'lucide-react';
-import { useCart } from '../context/CartContext';
+import { useCustomerCartStore } from '../../store/useCustomerCartStore'; // ⚡ Global Persistent State
 
 // 🛡️ Explicit Interfaces for Strict Typing
 interface GuestJwtPayload {
@@ -28,8 +28,16 @@ interface OrderStatusResponse {
 
 export default function Checkout() {
     const navigate = useNavigate();
-    const { cart, cartTotals, clearCart, venueConfig } = useCart();
+    
+    // ⚡ ZUSTAND: Persistent Cart State
+    const { cart, clearCart, venueConfig } = useCustomerCartStore();
     const cartItems = Object.values(cart);
+
+    // ⚡ Dynamic Cart Math (Calculates Subtotal & Tax on the fly)
+    const subtotal = cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const taxRate = venueConfig?.tax_rate ? Number(venueConfig.tax_rate) / 100 : 0;
+    const taxAmount = subtotal * taxRate;
+    const total = subtotal + taxAmount;
 
     // ⚡ 1. State for Token Data
     const [venueId, setVenueId] = useState<string | null>(null);
@@ -77,14 +85,12 @@ export default function Checkout() {
 
     // --- ⚡ THE SHORT POLLING ENGINE ⚡ ---
     useEffect(() => {
-        // 🛡️ Strongly type the interval timer
         let pollInterval: ReturnType<typeof setInterval>;
 
         // Only run the poller if we are waiting for an M-Pesa response
         if (paymentStatus === 'pending' && pollingOrderId){
             pollInterval = setInterval(async () => {
                 try {
-                    // Ping the database
                     const res = await axios.get<OrderStatusResponse>(`/api/orders/${pollingOrderId}/status`);
                     const currentStatus = res.data.payment_status;
 
@@ -95,7 +101,7 @@ export default function Checkout() {
                         toast.success("Payment confirmed!");
 
                         setTimeout(() => {
-                            clearCart();
+                            clearCart(); // Safely wipes local storage
                             navigate(`/order-status/${pollingOrderId}`); 
                         }, 2000);
                     } else if (currentStatus === 'FAILED' || res.data.status === 'CANCELLED'){
@@ -134,6 +140,18 @@ export default function Checkout() {
 
         setIsProcessing(true);
 
+        // ⚡ NEW: Grab the token and create the Axios config header
+        const token = localStorage.getItem('guest_token');
+        if (!token) {
+            toast.error("Session expired. Please scan the QR code again.");
+            navigate('/scan');
+            return;
+        }
+        
+        const config = {
+            headers: { Authorization: `Bearer ${token}` }
+        };
+
         try {
             // STEP 1: CREATE THE ORDER FIRST
             const orderPayload = {
@@ -142,7 +160,7 @@ export default function Checkout() {
                 customer_name: customerName,
                 payment_method: paymentMethod,
                 phone_number: paymentMethod === 'M-PESA' ? phone : null,
-                amount: cartTotals.total,
+                amount: total, 
                 items: cartItems.map(item => ({ 
                     item_id: item.item_id, 
                     quantity: item.quantity, 
@@ -151,12 +169,12 @@ export default function Checkout() {
                 }))
             };
             
-            const orderRes = await axios.post<{ orderId: string }>('/api/orders', orderPayload);
+            // ⚡ FIX: Pass the config to the Order creation endpoint
+            const orderRes = await axios.post<{ orderId: string }>('/api/orders', orderPayload, config);
             const orderId = orderRes.data.orderId;
 
             // STEP 2: HANDLE PAYMENT ROUTING
             if (paymentMethod === 'CASH') {
-                // Cash Flow: Done immediately
                 setPaymentStatus('success');
                 toast.success("Order sent to kitchen! Please pay your waiter.");
                 
@@ -166,11 +184,10 @@ export default function Checkout() {
                 }, 2000);
 
             } else {
-                // M-Pesa Flow: Trigger STK Push
                 setPaymentStatus('pending');
-                await axios.post('/api/mpesa/stkpush', { orderId, phone });
+                // ⚡ FIX: Pass the config to the STK Push endpoint
+                await axios.post('/api/mpesa/stkpush', { orderId, phone }, config);
                 
-                //⚡ Start the Polling Engine!
                 setPollingOrderId(orderId);
             }
 
@@ -198,7 +215,7 @@ export default function Checkout() {
         <div className="min-h-screen bg-slate-50 font-sans pb-12 relative overflow-hidden">
             
             {/* Header */}
-            <header className="bg-white px-4 pt-6 pb-4 border-b border-slate-200 sticky top-0 z-10 flex items-center justify-between">
+            <header className="bg-white px-4 pt-6 pb-4 border-b border-slate-200 sticky top-0 z-10 flex items-center justify-between shadow-sm">
                 <button onClick={() => navigate(-1)} disabled={isProcessing} className="w-10 h-10 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center text-slate-600 transition-colors disabled:opacity-50">
                     <ArrowLeft size={20} />
                 </button>
@@ -232,18 +249,18 @@ export default function Checkout() {
                     <div className="pt-4 border-t border-slate-100 space-y-2">
                        <div className="flex justify-between text-slate-500 font-medium text-sm">
                             <span>Subtotal</span>
-                            <span>{cartTotals.subtotal.toLocaleString('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 })}</span>
+                            <span>{subtotal.toLocaleString('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 })}</span>
                         </div>
-                        {cartTotals.taxAmount > 0 && (
+                        {taxAmount > 0 && (
                             <div className="flex justify-between text-slate-500 font-medium text-sm">
-                                <span>Taxes & Fees</span>
-                                <span>{cartTotals.taxAmount.toLocaleString('en-KE',{ style: 'currency', currency: 'KES', minimumFractionDigits: 0 })}</span>
+                                <span>Taxes & Fees ({(taxRate * 100).toFixed(0)}%)</span>
+                                <span>{taxAmount.toLocaleString('en-KE',{ style: 'currency', currency: 'KES', minimumFractionDigits: 0 })}</span>
                             </div>
                         )}
                         <div className="flex justify-between items-center text-slate-900 pt-2 border-t border-slate-100 mt-2">
                             <span className="text-lg font-black">Total</span>
                             <span className="text-2xl font-black text-indigo-600">
-                                {cartTotals.total.toLocaleString('en-KE',{ style: 'currency', currency: 'KES', minimumFractionDigits: 0 })}
+                                {total.toLocaleString('en-KE',{ style: 'currency', currency: 'KES', minimumFractionDigits: 0 })}
                             </span>
                         </div>
                     </div>
@@ -294,7 +311,7 @@ export default function Checkout() {
                                     value={customerName}
                                     onChange={(e) => setCustomerName(e.target.value)}
                                     disabled={isProcessing}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-11 pr-4 py-4 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:bg-white transition-all disabled:opacity-50"
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-11 pr-4 py-4 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:bg-white transition-all disabled:opacity-50 shadow-inner"
                                 />
                             </div>
                         </div>
@@ -306,22 +323,23 @@ export default function Checkout() {
                                 <button 
                                     type="button"
                                     onClick={() => setPaymentMethod('M-PESA')}
-                                    className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 transition-all ${paymentMethod === 'M-PESA' ? 'border-[#52B44B] bg-[#52B44B]/5 text-[#52B44B]' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
+                                    className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 transition-all ${paymentMethod === 'M-PESA' ? 'border-[#52B44B] bg-[#52B44B]/5 text-[#52B44B] shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
                                 >
                                     <Smartphone size={24}/>
                                     <span className="font-bold text-sm">M-Pesa</span>
                                 </button>
 
                                 {/* Only render this button if the venue allows it */}
-
-                                {venueConfig?.allow_cash_payments && (<button 
-                                    type="button"
-                                    onClick={() => setPaymentMethod('CASH')}
-                                    className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 transition-all ${paymentMethod === 'CASH' ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
-                                >
-                                    <Banknote size={24} />
-                                    <span className="font-bold text-sm">Pay Waiter</span>
-                                </button>)}
+                                {venueConfig?.allow_cash_payments && (
+                                    <button 
+                                        type="button"
+                                        onClick={() => setPaymentMethod('CASH')}
+                                        className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 transition-all ${paymentMethod === 'CASH' ? 'border-indigo-600 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
+                                    >
+                                        <Banknote size={24} />
+                                        <span className="font-bold text-sm">Pay Waiter</span>
+                                    </button>
+                                )}
                             </div>
                         </div>
 
@@ -336,7 +354,7 @@ export default function Checkout() {
                                     value={phone}
                                     onChange={handlePhoneChange}
                                     disabled={isProcessing}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4 text-slate-900 font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-[#52B44B]/50 focus:bg-white transition-all disabled:opacity-50"
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4 text-slate-900 font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-[#52B44B]/50 focus:bg-white transition-all disabled:opacity-50 shadow-inner text-center text-lg"
                                 />
                             </div>
                         )}
@@ -351,7 +369,7 @@ export default function Checkout() {
                                 : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/30'
                             }`}
                         >
-                            {paymentMethod === 'M-PESA' ? `Pay ${cartTotals.total.toLocaleString('en-KE')}` : 'Send Order to Kitchen'}
+                            {paymentMethod === 'M-PESA' ? `Pay ${total.toLocaleString('en-KE')}` : 'Send Order to Kitchen'}
                         </button>
                     </form>
                 </div>

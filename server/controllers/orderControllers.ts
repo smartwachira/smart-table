@@ -356,3 +356,31 @@ export const getHistoricalOrders = async (req: Request<{}, {}, {}, HistoricalOrd
         res.status(500).json({ message: 'Failed to fetch order history' });
     }
 };
+
+// ⚡ NEW: Fetch all orders for a specific device's session
+export const getGuestOrders = async (req, res) => {
+    try {
+        const guestSessionId = req.headers['x-guest-id'];
+
+        if (!guestSessionId) {
+            return res.status(400).json({ message: "Missing x-guest-id header" });
+        }
+
+        const orders = await Order.findAll({
+            where: { guest_session_id: guestSessionId },
+            include: [
+                {
+                    model: OrderItem,
+                    include: [{ model: MenuItem, attributes: ['name', 'image_url'] }]
+                }
+            ],
+            order: [['createdAt', 'DESC']] // Most recent orders at the top
+        });
+
+        return res.status(200).json(orders);
+
+    } catch (error) {
+        console.error("Error fetching guest orders:", error);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+};

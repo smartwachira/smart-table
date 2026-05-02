@@ -8,11 +8,11 @@ import "./index.css";
 import { AuthProvider } from './context/AuthContext';
 
 // --- Public Customer Components ---
-import Menu from './components/Menu';
-import Checkout from "./components/Checkout";
-import OrderStatus from "./components/OrderStatus";
-import ScanPage from "./components/ScanPage";
-import QRGateway from "./components/QRGateway";
+import Menu from './components/guest/Menu';
+import Checkout from "./components/guest/Checkout";
+import OrderStatus from "./components/guest/OrderStatus";
+import ScanPage from "./components/guest/ScanPage";
+import QRGateway from "./components/guest/QRGateway";
 
 // --- Auth & Onboarding Components ---
 import Login from "./components/Login";
@@ -67,7 +67,7 @@ const App: React.FC = () => {
               <Route path="/" element={<ScanPage />} />
               <Route path="/menu" element={<Menu />} />
               <Route path="/checkout" element={<Checkout />} />
-              <Route path="/status" element={<OrderStatus />} />
+              <Route path="/order-status/:orderId" element={<OrderStatus />} />
               
               {/* ⚡ Updated to match your QR Generator's output */}
               <Route path="/q/:venueId/:tableName" element={<QRGateway />} />

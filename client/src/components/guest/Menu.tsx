@@ -1,13 +1,17 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom'; 
-import axios from 'axios';
+import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Search, ShoppingBag, Plus, Minus, Info, UtensilsCrossed, AlertCircle, Moon, Smartphone } from 'lucide-react';
-import { useCart } from '../context/CartContext';
-import FloatingCart from './FloatingCart'; 
+import { Search, ShoppingBag, Plus, Minus, Info, UtensilsCrossed, AlertCircle, Moon, Smartphone, Receipt } from 'lucide-react';
 import { jwtDecode } from 'jwt-decode';
 
-// 🛡️ 1. Strict TypeScript Interfaces for the Menu Data
+import api from '../../utils/axiosConfig'; // ⚡ Global Interceptor
+import { useCustomerCartStore } from '../../store/useCustomerCartStore';
+import { useCustomerStore } from '../../store/useCustomerStore'; 
+import FloatingCart from './FloatingCart'; 
+import MyOrdersDrawer from './MyOrdersDrawer';
+
+// 🛡️ Strict TypeScript Interfaces
 interface GuestJwtPayload {
     role: string;
     venueId: string;
@@ -36,103 +40,96 @@ export interface MenuItemType {
 interface MenuResponse {
     categories: MenuCategoryType[];
     items: MenuItemType[];
-    venue: any; // Maps to the VenueConfig in CartContext
+    venue: any; 
 }
 
 export default function Menu() {
   const navigate = useNavigate();
-  const { cart, updateQuantity, cartTotals, setIsCartOpen, venueConfig, setVenueConfig } = useCart();
+  const { cart, updateQuantity, setIsCartOpen, venueConfig, setVenueConfig, getCartTotals } = useCustomerCartStore();
+  const cartTotals = getCartTotals();
+  
+  const { activeCategory, searchQuery, setActiveCategory, setSearchQuery } = useCustomerStore();
 
-  // 🛡️ 2. Strictly Typed Local State
   const [venueId, setVenueId] = useState<string | null>(null);
   const [tableNumber, setTableNumber] = useState<string>('');
-  const [orderMode, setOrderMode] = useState<'KIOSK' | 'TAB'>('TAB');
+  const [isOrdersDrawerOpen, setIsOrdersDrawerOpen] = useState(false);
 
-  const [categories, setCategories] = useState<MenuCategoryType[]>([]);
-  const [items, setItems] = useState<MenuItemType[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const [activeCategory, setActiveCategory] = useState<string>('all');
-  const [searchQuery, setSearchQuery] = useState<string>('');
-
-  // ⚡ Extract secure session data from the JWT Token immediately on mount
+  // Secure Session validation
   useEffect(() => {
     const token = localStorage.getItem('guest_token');
-    
     if (!token) {
         navigate('/scan', { replace: true });
         return;
     }
-
     try {
         const decoded = jwtDecode<GuestJwtPayload>(token);
         if (decoded.role === 'GUEST') {
             setVenueId(decoded.venueId);
             setTableNumber(decoded.tableName);
-            setOrderMode(decoded.orderMode || 'TAB');
         } else {
             navigate('/scan', { replace: true });
         }
     } catch (e) {
-        console.error("Session decode failed", e);
         navigate('/scan', { replace: true });
     }
   }, [navigate]);
 
-  const fetchMenu = useCallback(async () => {
-    if (!venueId) return; 
-    
-    setIsLoading(true);
-    setError(null);
-    try {
-      // ⚡ ZERO-TRUST: Backend extracts venueId from the token
-      const res = await axios.get<MenuResponse>(`/api/menu/public`); 
-      setCategories(res.data.categories);
-      setItems(res.data.items);
-      setVenueConfig(res.data.venue);
-    } catch (err) {
-      setError("Failed to load the menu. Your session may have expired.");
-      console.log("Error loading the menu", err);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [venueId, setVenueConfig]);
+  // ============================================================================
+  // ⚡ TANSTACK QUERY: Server State Caching (Cleaned up via Interceptor)
+  // ============================================================================
+  const { data: menuData, isLoading, error } = useQuery({
+      queryKey: ['publicMenu', venueId],
+      queryFn: async () => {
+          if (!venueId) throw new Error("No venue ID");
+          // ⚡ The api interceptor automatically injects Bearer + x-guest-id
+          const res = await api.get<MenuResponse>(`/api/menu/public`); 
+          return res.data;
+      },
+      enabled: !!venueId,
+      staleTime: 1000 * 60 * 5, 
+      retry: 1
+  });
 
   useEffect(() => {
-    if (venueId) {
-        fetchMenu();
-    }
-  }, [fetchMenu, venueId]);
+      if (menuData?.venue && !venueConfig) {
+          setVenueConfig(menuData.venue);
+      }
+  }, [menuData, venueConfig, setVenueConfig]);
+
+  const categories = menuData?.categories || [];
+  const items = menuData?.items || [];
 
   const filteredItems = items.filter(item => {
     const matchesCat = activeCategory === 'all' || item.category_id === activeCategory;
     const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesCat && matchesSearch;
+    return matchesCat && matchesSearch && item.is_available;
   });
 
+  // Error Handling UI
   if (error) {
     return (
       <div className="min-h-[100dvh] bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
         <AlertCircle className="text-red-500 mb-4 w-12 h-12" />
-        <h2 className="text-xl font-black text-slate-900 mb-2">Oops!</h2>
-        <p className="text-slate-600 font-medium max-w-sm">{error}</p>
-        <button onClick={() => navigate('/scan')} className="mt-6 px-6 py-2 bg-slate-900 text-white rounded-full font-bold">
+        <h2 className="text-xl font-black text-slate-900 mb-2">Connection Lost</h2>
+        <p className="text-slate-600 font-medium max-w-sm">Failed to load the menu. Your session may have expired.</p>
+        <button onClick={() => navigate('/scan')} className="mt-6 px-6 py-2 bg-slate-900 text-white rounded-full font-bold shadow-md active:scale-95 transition-transform">
             Scan New QR Code
         </button>
       </div>
     );
   }
 
+  // Loading UI
   if (isLoading || !venueId) return <MenuSkeleton />;
 
-  if (venueConfig && !venueConfig.is_accepting_orders) {
+  // Venue Closed UI
+  if (menuData?.venue && !menuData.venue.is_accepting_orders) {
       return (
           <div className="min-h-[100dvh] bg-slate-900 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-500">
               <div className="w-24 h-24 bg-slate-800 rounded-[2rem] flex items-center justify-center mb-6 shadow-2xl border-4 border-slate-800/50">
                   <Moon size={40} className="text-indigo-400" />
               </div>
-              <h2 className="text-2xl font-black text-white mb-2">{venueConfig.name} is Closed</h2>
+              <h2 className="text-2xl font-black text-white mb-2">{menuData.venue.name} is Closed</h2>
               <p className="text-slate-400 max-w-xs font-medium">We are not accepting digital orders right now. Please check back later or speak to a waiter.</p>
           </div>
       );
@@ -142,18 +139,23 @@ export default function Menu() {
     <div className="min-h-screen bg-slate-50 font-sans pb-32">
 
       <FloatingCart tableNumber={tableNumber} />
+      <MyOrdersDrawer 
+    isOpen={isOrdersDrawerOpen} 
+    onClose={() => setIsOrdersDrawerOpen(false)} 
+    venueId={venueId} 
+/>
 
       <header className="bg-white px-4 md:px-8 pt-8 pb-6 md:pb-8 rounded-b-[2.5rem] shadow-sm relative z-10">
           <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-end justify-between gap-6 md:gap-12">
               
               <div className="flex flex-col items-center md:items-start text-center md:text-left gap-4 md:flex-row md:gap-6">
-                  
                   <div className="shrink-0">
-                      {venueConfig?.logo_url ? (
+                      {menuData?.venue?.logo_url ? (
                           <img 
-                              src={`http://localhost:5000${venueConfig.logo_url}`} 
-                              alt={venueConfig.name} 
+                              src={menuData.venue.logo_url.startsWith('http') ? menuData.venue.logo_url : `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}${menuData.venue.logo_url}`} 
+                              alt={menuData.venue.name} 
                               className="w-24 h-24 md:w-28 md:h-28 rounded-3xl shadow-lg object-cover border-4 border-slate-50 animate-in zoom-in duration-500"
+                              onError={(e:any)=>{e.target.style.display='none'}}
                           />
                       ) : (
                           <div className="w-24 h-24 md:w-28 md:h-28 bg-indigo-600 rounded-3xl flex items-center justify-center text-white shadow-lg border-4 border-slate-50">
@@ -164,7 +166,7 @@ export default function Menu() {
 
                   <div className="flex flex-col justify-center space-y-1">
                       <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight leading-none">
-                          {venueConfig?.name}
+                          {menuData?.venue?.name}
                       </h1>
                       
                       <div className="flex items-center justify-center md:justify-start gap-3 mt-2">
@@ -180,15 +182,24 @@ export default function Menu() {
                   </div>
               </div>
 
-              <div className="w-full md:max-w-md md:shrink-0 relative">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-                  <input 
-                      type="text"
-                      placeholder="Search for dishes, drinks..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)} 
-                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-12 pr-4 py-4 md:py-3 text-base md:text-sm font-medium text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all shadow-inner"
-                  />
+              <div className="flex flex-col gap-3 w-full md:w-auto md:min-w-[350px]">
+                  <div className="relative">
+                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                      <input 
+                          type="text"
+                          placeholder="Search for dishes, drinks..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)} 
+                          className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-12 pr-4 py-4 md:py-3 text-base md:text-sm font-medium text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all shadow-inner"
+                      />
+                  </div>
+                  {/* ⚡ UPDATED: Route to the consolidated tracking view */}
+                  <button 
+                      onClick={() => setIsOrdersDrawerOpen(true)} // ⚡ Open the drawer!
+                      className="w-full bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-2xl py-3 md:py-2.5 text-sm font-bold flex justify-center items-center gap-2 shadow-sm transition-colors active:scale-95"
+                  >
+                      <Receipt size={16} className="text-indigo-500" /> Track My Orders
+                  </button>
               </div>
           </div>
       </header>
@@ -234,7 +245,7 @@ export default function Menu() {
                   <div key={item.item_id} className="bg-white rounded-[1.5rem] p-3 flex gap-4 shadow-sm border border-slate-100 items-stretch hover:shadow-md transition-shadow">
                     <div className="w-28 h-28 shrink-0 rounded-2xl bg-slate-100 overflow-hidden relative border border-slate-200/50">
                         {item.image_url ? (
-                          <img src={item.image_url} alt={item.name} className='w-full h-full object-cover transition-transform hover:scale-105' loading='lazy'/>                  
+                          <img src={item.image_url.startsWith('http') ? item.image_url : `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}${item.image_url}`} alt={item.name} className='w-full h-full object-cover transition-transform hover:scale-105' loading='lazy' onError={(e:any)=>{e.target.style.display='none'}}/>                  
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-slate-300">
                             <UtensilsCrossed size={32}/>
@@ -320,7 +331,6 @@ export default function Menu() {
   )
 };
 
-// ⚡ STRICT TYPING: Convert to React.FC
 const MenuSkeleton: React.FC = () => {
     return (
         <div className="min-h-screen bg-slate-50 px-4 pt-8 pb-6 space-y-6 animate-pulse max-w-6xl mx-auto">

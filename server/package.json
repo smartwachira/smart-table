@@ -20,6 +20,7 @@
     "@types/multer": "^2.1.0",
     "@types/node": "^20.0.0",
     "@types/sequelize": "^4.28.20",
+    "ts-node": "^10.9.2",
     "tsx": "^4.7.1",
     "typescript": "^5.4.2"
   },
