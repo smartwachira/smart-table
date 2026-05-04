@@ -18,6 +18,7 @@ api.interceptors.request.use(
         }
 
         const guestSessionId = useGuestSessionStore.getState().guestSessionId;
+        console.log("Interceptor firing! Current Guest ID:", guestSessionId);
         if (guestSessionId) {
             config.headers['x-guest-id'] = guestSessionId;
         }

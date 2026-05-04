@@ -34,11 +34,16 @@ interface HistoricalOrdersQuery {
 }
 
 export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Response): Promise<Response | void> => {
+
+    console.log("🕵️ EXTRACTED GUEST ID:", req.headers['x-guest-id']);
     const t = await sequelize.transaction(); // Start a "Safety Net"
 
     try {
         const { items, payment_method, customer_name, phone_number } = req.body;
-
+        
+        // ⚡ ADDED: Extract the session UUID injected by the React Axios Interceptor
+        const guestSessionId = req.headers['x-guest-id'] as string | undefined;
+        
         let venue_id: string;
         let table_number: string;
         let staffId: string | null = null;
@@ -50,7 +55,7 @@ export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Re
         } else if (req.user && ['WAITER', 'MANAGER', 'OWNER', 'KITCHEN_STAFF'].includes(req.user.role)) {
             venue_id = req.user.venueId; 
             table_number = req.body.table_number as string; 
-            staffId = req.user.userId ; 
+            staffId = req.user.userId; 
         } else {
             return res.status(403).json({ message: "Unauthorized order request." });
         }
@@ -101,7 +106,9 @@ export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Re
             total_amount: trueTotalAmount,
             payment_method,
             status: 'PENDING',
-            payment_status: 'PENDING'
+            payment_status: 'PENDING',
+            // ⚡ ADDED: Explicitly map the UUID into the PostgreSQL row
+            guest_session_id: guestSessionId || null 
         }, { transaction: t });
 
 
@@ -357,10 +364,11 @@ export const getHistoricalOrders = async (req: Request<{}, {}, {}, HistoricalOrd
     }
 };
 
-// ⚡ NEW: Fetch all orders for a specific device's session
-export const getGuestOrders = async (req, res) => {
+// ⚡ NEW: Fetch all orders for a specific device's session (Strict TypeScript)
+export const getGuestOrders = async (req: Request, res: Response): Promise<Response | void> => {
     try {
-        const guestSessionId = req.headers['x-guest-id'];
+        // Explicitly cast the header to a string to satisfy TypeScript
+        const guestSessionId = req.headers['x-guest-id'] as string | undefined;
 
         if (!guestSessionId) {
             return res.status(400).json({ message: "Missing x-guest-id header" });
@@ -379,8 +387,8 @@ export const getGuestOrders = async (req, res) => {
 
         return res.status(200).json(orders);
 
-    } catch (error) {
-        console.error("Error fetching guest orders:", error);
-        return res.status(500).json({ message: "Internal server error" });
+    } catch (error: any) {
+        console.error("❌ Error fetching guest orders:", error);
+        return res.status(500).json({ message: "Internal server error", error: error.message });
     }
 };

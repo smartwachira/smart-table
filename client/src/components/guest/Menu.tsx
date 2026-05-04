@@ -140,10 +140,11 @@ export default function Menu() {
 
       <FloatingCart tableNumber={tableNumber} />
       <MyOrdersDrawer 
-    isOpen={isOrdersDrawerOpen} 
-    onClose={() => setIsOrdersDrawerOpen(false)} 
-    venueId={venueId} 
-/>
+          isOpen={isOrdersDrawerOpen} 
+          onOpen={() => setIsOrdersDrawerOpen(true)} // ⚡ Binds the floating pill to open the drawer
+          onClose={() => setIsOrdersDrawerOpen(false)} 
+          venueId={venueId} 
+      />
 
       <header className="bg-white px-4 md:px-8 pt-8 pb-6 md:pb-8 rounded-b-[2.5rem] shadow-sm relative z-10">
           <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-end justify-between gap-6 md:gap-12">

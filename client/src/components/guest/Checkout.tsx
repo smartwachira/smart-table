@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { jwtDecode } from 'jwt-decode'; 
-import axios, { AxiosError } from 'axios';
+import { AxiosError } from 'axios'; // ⚡ Only import the type from axios
 import { toast } from 'sonner';
 import { 
     ArrowLeft, ShieldCheck, Smartphone, 
     Receipt, Loader2, CheckCircle2, User, Banknote, XCircle
 } from 'lucide-react';
-import { useCustomerCartStore } from '../../store/useCustomerCartStore'; // ⚡ Global Persistent State
+
+import api from '../../utils/axiosConfig'; // ⚡ IMPORT THE GLOBAL INTERCEPTOR
+import { useCustomerCartStore } from '../../store/useCustomerCartStore';
 
 // 🛡️ Explicit Interfaces for Strict Typing
 interface GuestJwtPayload {
@@ -76,7 +78,7 @@ export default function Checkout() {
         }
     }, [navigate]);
 
-    // Handle Empty Cart (Redirects to clean /menu URL)
+    // Handle Empty Cart
     useEffect(() => {
         if (venueId && cartItems.length === 0 && paymentStatus === 'idle') {
             navigate(`/menu`); 
@@ -87,31 +89,28 @@ export default function Checkout() {
     useEffect(() => {
         let pollInterval: ReturnType<typeof setInterval>;
 
-        // Only run the poller if we are waiting for an M-Pesa response
         if (paymentStatus === 'pending' && pollingOrderId){
             pollInterval = setInterval(async () => {
                 try {
-                    const res = await axios.get<OrderStatusResponse>(`/api/orders/${pollingOrderId}/status`);
+                    // ⚡ FIX: Use 'api' instance
+                    const res = await api.get<OrderStatusResponse>(`/api/orders/${pollingOrderId}/status`);
                     const currentStatus = res.data.payment_status;
 
                     if (currentStatus === "PAID"){
-                        // Success! Stop polling and transition UI
                         clearInterval(pollInterval);
                         setPaymentStatus('success');
                         toast.success("Payment confirmed!");
 
                         setTimeout(() => {
-                            clearCart(); // Safely wipes local storage
+                            clearCart(); 
                             navigate(`/order-status/${pollingOrderId}`); 
                         }, 2000);
                     } else if (currentStatus === 'FAILED' || res.data.status === 'CANCELLED'){
-                        // Failure! Stop polling, reset UI and alert user
                         clearInterval(pollInterval);
                         setPaymentStatus('failed');
                         setIsProcessing(false);
                         toast.error("Payment failed, timed out, or was cancelled.");
 
-                        // Let them try again after 3 seconds
                         setTimeout(() => setPaymentStatus('idle'), 3000);
                     }
                 } catch (error){
@@ -120,7 +119,6 @@ export default function Checkout() {
             }, 3000);
         }
         
-        // Cleanup function to prevent memory leaks if component unmounts
         return () => {
             if (pollInterval) clearInterval(pollInterval);
         };
@@ -140,18 +138,6 @@ export default function Checkout() {
 
         setIsProcessing(true);
 
-        // ⚡ NEW: Grab the token and create the Axios config header
-        const token = localStorage.getItem('guest_token');
-        if (!token) {
-            toast.error("Session expired. Please scan the QR code again.");
-            navigate('/scan');
-            return;
-        }
-        
-        const config = {
-            headers: { Authorization: `Bearer ${token}` }
-        };
-
         try {
             // STEP 1: CREATE THE ORDER FIRST
             const orderPayload = {
@@ -169,8 +155,8 @@ export default function Checkout() {
                 }))
             };
             
-            // ⚡ FIX: Pass the config to the Order creation endpoint
-            const orderRes = await axios.post<{ orderId: string }>('/api/orders', orderPayload, config);
+            // ⚡ FIX: Use 'api' instance. No manual config/token needed!
+            const orderRes = await api.post<{ orderId: string }>('/api/orders', orderPayload);
             const orderId = orderRes.data.orderId;
 
             // STEP 2: HANDLE PAYMENT ROUTING
@@ -185,8 +171,8 @@ export default function Checkout() {
 
             } else {
                 setPaymentStatus('pending');
-                // ⚡ FIX: Pass the config to the STK Push endpoint
-                await axios.post('/api/mpesa/stkpush', { orderId, phone }, config);
+                // ⚡ FIX: Use 'api' instance here as well
+                await api.post('/api/mpesa/stkpush', { orderId, phone });
                 
                 setPollingOrderId(orderId);
             }
@@ -200,7 +186,6 @@ export default function Checkout() {
         }
     };
 
-    // Prevent rendering until the token is decoded
     if (!venueId) {
         return (
             <div className="min-h-screen bg-slate-50 flex items-center justify-center">
