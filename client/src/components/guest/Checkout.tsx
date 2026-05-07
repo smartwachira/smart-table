@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { jwtDecode } from 'jwt-decode'; 
-import { AxiosError } from 'axios'; // ⚡ Only import the type from axios
+import { AxiosError } from 'axios'; 
 import { toast } from 'sonner';
+import { usePaystackPayment } from 'react-paystack'; 
 import { 
     ArrowLeft, ShieldCheck, Smartphone, 
-    Receipt, Loader2, CheckCircle2, User, Banknote, XCircle
+    Receipt, Loader2, CheckCircle2, User, Banknote, XCircle, CreditCard 
 } from 'lucide-react';
 
-import api from '../../utils/axiosConfig'; // ⚡ IMPORT THE GLOBAL INTERCEPTOR
+import api from '../../utils/axiosConfig'; 
 import { useCustomerCartStore } from '../../store/useCustomerCartStore';
 
-// 🛡️ Explicit Interfaces for Strict Typing
+// 🛡️ Explicit Interfaces
 interface GuestJwtPayload {
     role: string;
     venueId: string;
@@ -20,7 +21,7 @@ interface GuestJwtPayload {
     exp?: number;
 }
 
-type PaymentMethod = 'M-PESA' | 'CASH';
+type PaymentMethod = 'M-PESA' | 'CASH' | 'CARD'; 
 type PaymentStatus = 'idle' | 'pending' | 'success' | 'failed';
 
 interface OrderStatusResponse {
@@ -28,35 +29,72 @@ interface OrderStatusResponse {
     status: string;
 }
 
+// 🛡️ Strict typing for the backend initialization response
+interface PaystackInitResponse {
+    reference: string;
+    access_code: string;
+    authorization_url: string;
+}
+
 export default function Checkout() {
     const navigate = useNavigate();
     
-    // ⚡ ZUSTAND: Persistent Cart State
     const { cart, clearCart, venueConfig } = useCustomerCartStore();
     const cartItems = Object.values(cart);
 
-    // ⚡ Dynamic Cart Math (Calculates Subtotal & Tax on the fly)
     const subtotal = cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     const taxRate = venueConfig?.tax_rate ? Number(venueConfig.tax_rate) / 100 : 0;
     const taxAmount = subtotal * taxRate;
     const total = subtotal + taxAmount;
 
-    // ⚡ 1. State for Token Data
     const [venueId, setVenueId] = useState<string | null>(null);
     const [tableNumber, setTableNumber] = useState<string>('');
     const [orderMode, setOrderMode] = useState<'KIOSK' | 'TAB'>('TAB'); 
 
-    // Form State
     const [customerName, setCustomerName] = useState<string>('');
-    const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('M-PESA'); 
+    const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CARD'); 
     const [phone, setPhone] = useState<string>('');
     
-    // Process State
     const [isProcessing, setIsProcessing] = useState<boolean>(false);
     const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('idle'); 
     const [pollingOrderId, setPollingOrderId] = useState<string | null>(null);
 
-    // ⚡ 2. Extract Data from Token on Mount
+    // ⚡ PAYSTACK STATE
+    const [paystackReference, setPaystackReference] = useState<string>('');
+
+    // The hook automatically re-registers when `paystackReference` changes
+    const initializePaystack = usePaystackPayment({
+        reference: paystackReference,
+        email: "guest@smarttable.com", 
+        amount: Math.round(total * 100), // Enforce cents mathematically
+        publicKey: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || '',
+    });
+
+    const onPaystackSuccess = (reference: any) => {
+        setPaymentStatus('success');
+        toast.success("Card Payment Successful!");
+        
+        setTimeout(() => {
+            clearCart();
+            if (pollingOrderId) navigate(`/order-status/${pollingOrderId}`); 
+        }, 2000);
+    };
+
+    const onPaystackClose = () => {
+        setPaymentStatus('idle');
+        setIsProcessing(false);
+        setPaystackReference(''); // Reset reference to allow re-trying
+        toast.error("Payment window closed.");
+    };
+
+    // ⚡ THE FIX: Safe lifecycle trigger. Watches for the reference to update before popping the modal.
+    useEffect(() => {
+        if (paystackReference && paymentStatus === 'pending' && paymentMethod === 'CARD') {
+            (initializePaystack as Function)(onPaystackSuccess, onPaystackClose);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [paystackReference]);
+
     useEffect(() => {
         const token = localStorage.getItem('guest_token');
         if (token) {
@@ -70,7 +108,6 @@ export default function Checkout() {
                     navigate('/scan', { replace: true });
                 }
             } catch (error) {
-                console.error("Token decoding failed", error);
                 navigate('/scan', { replace: true });
             }
         } else {
@@ -78,21 +115,18 @@ export default function Checkout() {
         }
     }, [navigate]);
 
-    // Handle Empty Cart
     useEffect(() => {
         if (venueId && cartItems.length === 0 && paymentStatus === 'idle') {
             navigate(`/menu`); 
         }
     }, [cartItems, navigate, venueId, paymentStatus]);
 
-    // --- ⚡ THE SHORT POLLING ENGINE ⚡ ---
     useEffect(() => {
         let pollInterval: ReturnType<typeof setInterval>;
 
-        if (paymentStatus === 'pending' && pollingOrderId){
+        if (paymentStatus === 'pending' && pollingOrderId && paymentMethod === 'M-PESA'){
             pollInterval = setInterval(async () => {
                 try {
-                    // ⚡ FIX: Use 'api' instance
                     const res = await api.get<OrderStatusResponse>(`/api/orders/${pollingOrderId}/status`);
                     const currentStatus = res.data.payment_status;
 
@@ -110,7 +144,6 @@ export default function Checkout() {
                         setPaymentStatus('failed');
                         setIsProcessing(false);
                         toast.error("Payment failed, timed out, or was cancelled.");
-
                         setTimeout(() => setPaymentStatus('idle'), 3000);
                     }
                 } catch (error){
@@ -122,7 +155,7 @@ export default function Checkout() {
         return () => {
             if (pollInterval) clearInterval(pollInterval);
         };
-    }, [paymentStatus, pollingOrderId, navigate, clearCart]);
+    }, [paymentStatus, pollingOrderId, navigate, clearCart, paymentMethod]);
 
     const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setPhone(e.target.value.replace(/\D/g, ''));
@@ -133,13 +166,12 @@ export default function Checkout() {
         if (!customerName.trim()) return toast.error("Please enter your name for the order.");
         
         if (paymentMethod === 'M-PESA' && (phone.length < 9 || phone.length > 12)) {
-            return toast.error("Please enter a valid Safaricom phone number.");
+            return toast.error("Please enter a valid phone number.");
         }
 
         setIsProcessing(true);
 
         try {
-            // STEP 1: CREATE THE ORDER FIRST
             const orderPayload = {
                 venue_id: venueId,
                 table_number: tableNumber,
@@ -155,34 +187,44 @@ export default function Checkout() {
                 }))
             };
             
-            // ⚡ FIX: Use 'api' instance. No manual config/token needed!
+            // 🛡️ Strict generic applied to Axios response
             const orderRes = await api.post<{ orderId: string }>('/api/orders', orderPayload);
             const orderId = orderRes.data.orderId;
+            setPollingOrderId(orderId);
 
-            // STEP 2: HANDLE PAYMENT ROUTING
             if (paymentMethod === 'CASH') {
                 setPaymentStatus('success');
                 toast.success("Order sent to kitchen! Please pay your waiter.");
-                
                 setTimeout(() => {
                     clearCart();
                     navigate(`/order-status/${orderId}`); 
                 }, 2000);
 
-            } else {
+            } else if (paymentMethod === 'M-PESA') {
                 setPaymentStatus('pending');
-                // ⚡ FIX: Use 'api' instance here as well
                 await api.post('/api/mpesa/stkpush', { orderId, phone });
                 
-                setPollingOrderId(orderId);
+            } else if (paymentMethod === 'CARD') {
+                setPaymentStatus('pending'); 
+                toast.loading("Connecting to secure gateway...", { id: 'gateway-load' });
+
+                // 🛡️ Strict generic applied to Paystack initialization response
+                const initRes = await api.post<PaystackInitResponse>('/api/paystack/initialize', { orderId });
+                
+                toast.dismiss('gateway-load');
+                
+                // Triggers the useEffect above to pop the modal safely
+                setPaystackReference(initRes.data.reference);
             }
 
         } catch (error) {
             console.error("Checkout Error:", error);
             const axiosError = error as AxiosError<{ message: string }>;
             toast.error(axiosError.response?.data?.message || "Checkout failed. Please try again.");
+            toast.dismiss('gateway-load');
             setPaymentStatus('idle');
             setIsProcessing(false);
+            setPaystackReference('');
         }
     };
 
@@ -199,7 +241,6 @@ export default function Checkout() {
     return (
         <div className="min-h-screen bg-slate-50 font-sans pb-12 relative overflow-hidden">
             
-            {/* Header */}
             <header className="bg-white px-4 pt-6 pb-4 border-b border-slate-200 sticky top-0 z-10 flex items-center justify-between shadow-sm">
                 <button onClick={() => navigate(-1)} disabled={isProcessing} className="w-10 h-10 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center text-slate-600 transition-colors disabled:opacity-50">
                     <ArrowLeft size={20} />
@@ -214,8 +255,6 @@ export default function Checkout() {
             </header>
 
             <main className="px-4 py-6 space-y-6 max-w-lg mx-auto">
-                
-                {/* Order Summary */}
                 <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
                     <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
                         <Receipt size={16} /> Order Summary
@@ -251,11 +290,9 @@ export default function Checkout() {
                     </div>
                 </div>
 
-                {/* Checkout Form */}
                 <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm relative overflow-hidden">
                     
-                    {/* Processing Overlays */}
-                    {paymentStatus === 'pending' && (
+                    {paymentStatus === 'pending' && paymentMethod === 'M-PESA' && (
                         <div className="absolute inset-0 z-20 bg-white/95 backdrop-blur-sm flex flex-col items-center justify-center animate-in fade-in duration-300">
                             <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mb-4 relative">
                                 <Loader2 size={32} className="animate-spin absolute" />
@@ -284,7 +321,6 @@ export default function Checkout() {
 
                     <form onSubmit={handleCheckoutSubmit} className="space-y-6">
                         
-                        {/* Customer Details */}
                         <div className="space-y-2">
                             <label className="text-sm font-bold text-slate-700 ml-1">Your Name</label>
                             <div className="relative">
@@ -301,34 +337,41 @@ export default function Checkout() {
                             </div>
                         </div>
 
-                        {/* Payment Method Toggle */}
                         <div className="space-y-2">
                             <label className="text-sm font-bold text-slate-700 ml-1">Payment Method</label>
-                            <div className={`grid gap-3 ${venueConfig?.allow_cash_payments ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                            <div className={`grid gap-3 ${venueConfig?.allow_cash_payments ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                                
+                                <button 
+                                    type="button"
+                                    onClick={() => setPaymentMethod('CARD')}
+                                    className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border-2 transition-all ${paymentMethod === 'CARD' ? 'border-indigo-600 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
+                                >
+                                    <CreditCard size={24}/>
+                                    <span className="font-bold text-xs">Bank Card</span>
+                                </button>
+
                                 <button 
                                     type="button"
                                     onClick={() => setPaymentMethod('M-PESA')}
-                                    className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 transition-all ${paymentMethod === 'M-PESA' ? 'border-[#52B44B] bg-[#52B44B]/5 text-[#52B44B] shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
+                                    className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border-2 transition-all ${paymentMethod === 'M-PESA' ? 'border-[#52B44B] bg-[#52B44B]/5 text-[#52B44B] shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
                                 >
                                     <Smartphone size={24}/>
-                                    <span className="font-bold text-sm">M-Pesa</span>
+                                    <span className="font-bold text-xs">M-Pesa</span>
                                 </button>
 
-                                {/* Only render this button if the venue allows it */}
                                 {venueConfig?.allow_cash_payments && (
                                     <button 
                                         type="button"
                                         onClick={() => setPaymentMethod('CASH')}
-                                        className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 transition-all ${paymentMethod === 'CASH' ? 'border-indigo-600 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
+                                        className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border-2 transition-all ${paymentMethod === 'CASH' ? 'border-amber-500 bg-amber-50 text-amber-700 shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
                                     >
                                         <Banknote size={24} />
-                                        <span className="font-bold text-sm">Pay Waiter</span>
+                                        <span className="font-bold text-xs">Pay Waiter</span>
                                     </button>
                                 )}
                             </div>
                         </div>
 
-                        {/* Conditional Phone Input */}
                         {paymentMethod === 'M-PESA' && (
                             <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
                                 <label className="text-sm font-bold text-slate-700 ml-1">M-Pesa Number</label>
@@ -344,17 +387,16 @@ export default function Checkout() {
                             </div>
                         )}
 
-                        {/* Dynamic Submit Button */}
                         <button 
                             type="submit"
                             disabled={isProcessing }
                             className={`w-full py-4 rounded-2xl font-black text-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed ${
-                                paymentMethod === 'M-PESA' 
-                                ? 'bg-[#52B44B] hover:bg-[#459e3f] shadow-[#52B44B]/30' 
-                                : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/30'
+                                paymentMethod === 'M-PESA' ? 'bg-[#52B44B] hover:bg-[#459e3f] shadow-[#52B44B]/30' : 
+                                paymentMethod === 'CARD' ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/30' :
+                                'bg-slate-900 hover:bg-slate-800 shadow-slate-900/30'
                             }`}
                         >
-                            {paymentMethod === 'M-PESA' ? `Pay ${total.toLocaleString('en-KE')}` : 'Send Order to Kitchen'}
+                            {paymentMethod === 'M-PESA' || paymentMethod === 'CARD' ? `Pay ${total.toLocaleString('en-KE')}` : 'Send Order to Kitchen'}
                         </button>
                     </form>
                 </div>

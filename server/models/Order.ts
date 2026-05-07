@@ -1,7 +1,8 @@
 import { DataTypes, Model, Optional } from "sequelize";
 import sequelize from '../config/db.js';
 
-export type PaymentStatus = 'PENDING' | 'PAID' | 'FAILED';
+export type PaymentStatus = 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED' | 'PARTIALLY_REFUNDED';
+export type PaymentMethod = 'CASH' | 'M-PESA' | 'CARD';
 export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'completed' | 'cancelled';
 
 export interface OrderAttributes {
@@ -10,7 +11,7 @@ export interface OrderAttributes {
     table_number: string;
     status: OrderStatus | string; 
     total_amount: number;
-    payment_method: string;
+    payment_method: PaymentMethod | string;
     venue_id: string;
     phone_number?: string | null;
     payment_status: PaymentStatus;
@@ -20,6 +21,9 @@ export interface OrderAttributes {
     cash_collected_by?: string | null;
     staff_id?: string | null;
     guest_session_id?: string | null; // ⚡ ADDED: The Anonymous Session Tracker
+    gateway_reference?: string | null;
+    gateway_fee: number;
+    platform_fee: number
 }
 
 export interface OrderCreationAttributes extends Optional<OrderAttributes, 'order_id' | 'status' | 'payment_status'> {}
@@ -40,6 +44,9 @@ class Order extends Model<OrderAttributes, OrderCreationAttributes> implements O
     public cash_collected_by!: string | null;
     public staff_id!: string | null;
     public guest_session_id!: string | null; // ⚡ ADDED
+    public gateway_reference!: string | null;
+    public gateway_fee!: number;
+    public platform_fee!: number;
 
     public readonly createdAt!: Date;
     public readonly updatedAt!: Date;
@@ -69,7 +76,7 @@ Order.init({
         allowNull: false
     },
     payment_method: {
-        type: DataTypes.STRING,
+        type: DataTypes.ENUM('CASH', 'M-PESA', 'CARD'), // ⚡ Expanded
         allowNull: false
     },
     venue_id: {
@@ -81,7 +88,7 @@ Order.init({
         allowNull: true
     },
     payment_status: {
-        type: DataTypes.ENUM('PENDING', 'PAID', 'FAILED'),
+        type: DataTypes.ENUM('PENDING', 'PAID', 'FAILED', 'REFUNDED', 'PARTIALLY_REFUNDED'), // ⚡ Expanded
         defaultValue: 'PENDING'
     },
     checkout_request_id: {
@@ -108,7 +115,23 @@ Order.init({
     guest_session_id: {
         type: DataTypes.STRING,
         allowNull: true
+    },
+    gateway_reference: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        unique: true
+    },
+    gateway_fee: {
+        type: DataTypes.DECIMAL(10, 2),
+        defaultValue: 0.00,
+        allowNull: false
+    },
+    platform_fee: {
+        type: DataTypes.DECIMAL(10, 2),
+        defaultValue: 0.00,
+        allowNull: false
     }
+
 }, {
     sequelize,
     timestamps: true,

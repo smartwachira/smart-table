@@ -23,6 +23,8 @@ interface JwtDecodedPayload {
 
 interface AuthContextType {
     user: User | null;
+    token: string | null;     // ⚡ ADD THIS
+    venueId: string | null;
     isLoading: boolean;
     login: (token: string) => Promise<void>;
     logout: () => void;
@@ -86,7 +88,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }, []);
 
     return (
-        <AuthContext.Provider value={{ user, login, logout, isLoading }}>
+        <AuthContext.Provider value={{ user,token,venueId, login, logout, isLoading }}>
             {children}
         </AuthContext.Provider>
     );

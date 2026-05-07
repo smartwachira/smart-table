@@ -1,6 +1,8 @@
 import sequelize from '../config/db.js';
 import { DataTypes, Model, Optional } from "sequelize";
 
+export type OnboardingStatus = 'PENDING' | 'VERIFIED' | 'REJECTED';
+
 // 1. Define the exact shape of a Venue in the database
 export interface VenueAttributes {
     venue_id: string;
@@ -16,6 +18,8 @@ export interface VenueAttributes {
     shift_duration_hours: number;
     wifi_ssid?: string | null;
     wifi_password?: string | null;
+    gateway_subaccount_id?: string | null;
+    payment_onboarding_status: OnboardingStatus
 }
 
 // 2. Define the attributes required to create a new Venue 
@@ -38,6 +42,8 @@ class Venue extends Model<VenueAttributes, VenueCreationAttributes> implements V
     public shift_duration_hours!: number;
     public wifi_ssid!: string | null;
     public wifi_password!: string | null;
+    public gateway_subaccount_id!: string | null;
+    public payment_onboarding_status!: OnboardingStatus;
 
     // timestamps!
     public readonly createdAt!: Date;
@@ -101,6 +107,15 @@ Venue.init({
     wifi_password: {
         type: DataTypes.STRING,
         allowNull: true
+    },
+    gateway_subaccount_id: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    payment_onboarding_status: {
+        type: DataTypes.ENUM('PENDING', 'VERIFIED', 'REJECTED'),
+        defaultValue: 'PENDING',
+        allowNull: false,
     }
 }, {
     sequelize,

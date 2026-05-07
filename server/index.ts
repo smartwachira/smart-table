@@ -27,7 +27,8 @@ import orderRoutes from './routes/orderRoutes.js';
 import authRoutes from './routes/authRoutes.js';
 import mpesaRoutes from './routes/mpesaRoutes.js';
 import settingsRoutes from './routes/settingsRoutes.js'
-import dashboardRoutes from './routes/dashboardRoutes.js'
+import dashboardRoutes from './routes/dashboardRoutes.js';
+import paystackRoutes from  './routes/paystackRoutes.js'
 
 //load environment variables
 dotenv.config(); //reads the .env file and attaches the variables to process.env
@@ -71,7 +72,8 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/mpesa',mpesaRoutes);
 app.use('/api/settings',settingsRoutes);
-app.use('/api/dashboard',dashboardRoutes)
+app.use('/api/dashboard',dashboardRoutes);
+app.use('/api/paystack', paystackRoutes);
 
 // Socket Connection Logic
 io.on('connection',(socket: Socket)=>{

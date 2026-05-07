@@ -1,16 +1,17 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import axios, { AxiosError } from 'axios';
 import { toast } from 'sonner';
+import { usePaystackPayment } from 'react-paystack'; 
 import { 
     Search, ShoppingCart, Plus, Minus, Trash2,Loader2, 
-    Smartphone, Banknote, ChefHat, User, Hash, X, MonitorSmartphone, ChevronRight
+    Smartphone, Banknote, ChefHat, User, Hash, X, MonitorSmartphone, ChevronRight, CreditCard
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { useCartStore } from '../../store/useCartStore'; // ⚡ Global Cart State
-import { useMenuStore } from '../../store/useMenuStore'; // ⚡ Global Menu UI State
+import { useCartStore } from '../../store/useCartStore'; 
+import { useMenuStore } from '../../store/useMenuStore'; 
 
-// 🛡️ Explicit Interfaces for POS Data Models
+// 🛡️ Strict Typings
 export interface POSCategory {
     category_id: string;
     name: string;
@@ -26,125 +27,94 @@ export interface POSItem {
     is_available?: boolean;
 }
 
-// ⚡ HELPER: Bulletproof Image Pathing
+type PaymentMethodType = 'CASH' | 'M-PESA' | 'CARD';
+
+// Defines all possible return shapes from our mutation
+type SubmitOrderResponse = 
+    | { status: 'success' }
+    | { status: 'mpesa_sent' }
+    | { status: 'card_init'; reference: string };
+
 const getImageUrl = (path?: string) => {
     if (!path) return '';
     if (path.startsWith('http')) return path; 
     const sanitizedPath = path.replace(/\\/g, '/');
     const cleanPath = sanitizedPath.startsWith('/') ? sanitizedPath : `/${sanitizedPath}`;
-    return `http://localhost:5000${cleanPath}`;
+    return `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}${cleanPath}`;
 };
 
 export default function POS() {
-    const { user } = useAuth();
-    const token = localStorage.getItem('auth_token');
-    const config = { headers: { Authorization: `Bearer ${token}` } };
+    const { token, venueId } = useAuth();
+    const { cart, addToCart, removeFromCart, updateQuantity, clearCart, getCartTotal } = useCartStore();
+    const { searchQuery, activeCategoryId, setSearchQuery, setActiveCategory } = useMenuStore();
+    
+    const [tableNumber, setTableNumber] = useState('');
+    const [customerName, setCustomerName] = useState('');
+    
+    const [isCartOpen, setIsCartOpen] = useState(false);
+    const [showPaymentModal, setShowPaymentModal] = useState(false);
+    const [phoneNumber, setPhoneNumber] = useState('');
 
-    // ============================================================================
-    // ⚡ ZUSTAND GLOBAL STATE: Survives all route changes and unmounting!
-    // ============================================================================
-    const { activeCategoryId, searchQuery, setActiveCategory, setSearchQuery } = useMenuStore();
-    const { 
-        items: cartItems, 
-        activeTable, 
-        setActiveTable, 
-        addItem, 
-        updateQuantity, 
-        removeItem, 
-        clearCart, 
-        getCartTotal, 
-        getItemCount 
-    } = useCartStore();
+    // ⚡ PAYSTACK STATE FIX
+    const [paystackReference, setPaystackReference] = useState<string>('');
 
-    // Local UI State
-    const [isMobileCartOpen, setIsMobileCartOpen] = useState<boolean>(false); 
-    const [customerName, setCustomerName] = useState<string>(''); // Can be moved to Zustand if needed
-    const [mpesaModalOpen, setMpesaModalOpen] = useState<boolean>(false);
-    const [phoneNumber, setPhoneNumber] = useState<string>('');
-
-    // ============================================================================
-    // ⚡ TANSTACK QUERY: Smart Server Caching (Replaces manual useEffect)
-    // ============================================================================
-    const { data: items = [], isLoading: isItemsLoading } = useQuery({
-        queryKey: ['posItems', user?.venueId],
-        queryFn: async () => {
-            const res = await axios.get<{ items?: POSItem[] } | POSItem[]>('/api/menu/items', config);
-            const fetchedItems = Array.isArray(res.data) ? res.data : res.data.items || [];
-            return fetchedItems.filter(i => i.is_available !== false); // Only available items
-        },
-        enabled: !!user?.venueId
+    const initializePaystack = usePaystackPayment({
+        reference: paystackReference,
+        email: "pos@smarttable.com", 
+        amount: Math.round(getCartTotal() * 100), 
+        publicKey: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || '',
     });
 
-    const { data: categories = [], isLoading: isCategoriesLoading } = useQuery({
-        queryKey: ['posCategories', user?.venueId],
-        queryFn: async () => {
-            const res = await axios.get<{ categories?: POSCategory[] } | POSCategory[]>('/api/menu/categories', config);
-            const fetchedCategories = Array.isArray(res.data) ? res.data : res.data.categories || [];
-            return fetchedCategories.filter(c => c.is_active !== false); // Only active categories
-        },
-        enabled: !!user?.venueId
-    });
-
-    // ============================================================================
-    // ⚡ TANSTACK MUTATION: Transaction Handling
-    // ============================================================================
-    const submitOrderMutation = useMutation({
-        mutationFn: async (paymentMethod: 'CASH' | 'M-PESA') => {
-            if (cartItems.length === 0) throw new Error("Cart is empty");
-            if (!activeTable?.trim()) throw new Error("Please enter a Table/Tab identifier");
-            if (paymentMethod === 'M-PESA' && (phoneNumber.length < 9 || phoneNumber.length > 12)) {
-                throw new Error("Valid phone number required for M-Pesa");
-            }
-
-            const orderPayload = {
-                table_number: activeTable,
-                customer_name: customerName || 'Walk-in',
-                payment_method: paymentMethod,
-                phone_number: paymentMethod === 'M-PESA' ? phoneNumber : null,
-                items: cartItems.map(i => ({ item_id: i.item_id, quantity: i.quantity }))
-            };
-
-            const orderRes = await axios.post<{ orderId: string }>('/api/orders', orderPayload, config);
-
-            // Trigger STK Push sequentially if M-PESA is selected
-            if (paymentMethod === 'M-PESA') {
-                await axios.post('/api/mpesa/stkpush', { 
-                    orderId: orderRes.data.orderId, 
-                    phone: phoneNumber 
-                }, config);
-                return { type: 'M-PESA' };
-            }
-            return { type: 'CASH' };
-        },
-        onSuccess: (data) => {
-            if (data.type === 'M-PESA') {
-                toast.success("M-Pesa prompt sent to customer!");
-                setMpesaModalOpen(false);
-                setPhoneNumber('');
-            } else {
-                toast.success("Order sent to kitchen!");
-            }
-            // Clear global and local state on success
-            clearCart();
-            setCustomerName('');
-            setIsMobileCartOpen(false);
-        },
-        onError: (error: any) => {
-            const axiosError = error as AxiosError<{ message: string }>;
-            toast.error(axiosError.response?.data?.message || error.message || "Failed to submit order");
-        }
-    });
-
-    // ============================================================================
-    // HANDLERS & DERIVED STATE
-    // ============================================================================
-    const handleClearCart = () => {
-        if (window.confirm('Are you sure you want to clear the current cart?')) {
-            clearCart();
-            setCustomerName('');
-            setIsMobileCartOpen(false);
-        }
+    const handleReset = () => {
+        clearCart();
+        setTableNumber('');
+        setCustomerName('');
+        setPhoneNumber('');
+        setShowPaymentModal(false);
+        setIsCartOpen(false);
+        setPaystackReference('');
     };
+
+    // ⚡ LIFECYCLE: Watch for reference update to safely pop modal
+    useEffect(() => {
+        if (paystackReference && showPaymentModal) {
+            setShowPaymentModal(false); // Hide internal modal
+            
+            (initializePaystack as Function)(
+                (ref: any) => { 
+                    toast.success("Card Payment Successful!");
+                    handleReset();
+                },
+                () => { 
+                    toast.error("Payment window closed. Order is still pending.");
+                    setPaystackReference('');
+                }
+            );
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [paystackReference]);
+
+    const { data: categories = [], isLoading: categoriesLoading } = useQuery({
+        queryKey: ['categories', venueId],
+        queryFn: async () => {
+            const res = await axios.get<POSCategory[]>(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/menu/categories/venue/${venueId}`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            return res.data.filter(c => c.is_active !== false);
+        },
+        enabled: !!venueId && !!token
+    });
+
+    const { data: items = [], isLoading: itemsLoading } = useQuery({
+        queryKey: ['menuItems', venueId],
+        queryFn: async () => {
+            const res = await axios.get<POSItem[]>(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/menu/items/venue/${venueId}`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            return res.data.filter(i => i.is_available !== false);
+        },
+        enabled: !!venueId && !!token
+    });
 
     const filteredItems = useMemo(() => {
         return items.filter(item => {
@@ -154,51 +124,104 @@ export default function POS() {
         });
     }, [items, activeCategoryId, searchQuery]);
 
-    if (isItemsLoading || isCategoriesLoading) {
-        return (
-            <div className="flex h-[calc(100dvh-80px)] items-center justify-center bg-slate-50 text-slate-400">
-                <div className="animate-pulse flex flex-col items-center">
-                    <MonitorSmartphone size={48} className="mb-4 text-indigo-300" />
-                    <p className="font-bold">Loading POS Terminal...</p>
-                </div>
-            </div>
-        );
-    }
+    // 🛡️ Explicitly typed mutation: <ReturnData, ErrorType, VariablesType>
+    const submitOrderMutation = useMutation<SubmitOrderResponse, AxiosError<{ message: string }>, PaymentMethodType>({
+        mutationFn: async (paymentMethod) => {
+            const payload = {
+                items: Object.values(cart).map(item => ({
+                    item_id: item.item_id,
+                    quantity: item.quantity,
+                })),
+                payment_method: paymentMethod,
+                customer_name: customerName,
+                table_number: tableNumber,
+                phone_number: paymentMethod === 'M-PESA' ? phoneNumber : undefined,
+            };
+
+            const orderRes = await axios.post<{ orderId: string }>(
+                `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/orders`, 
+                payload, 
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+
+            const orderId = orderRes.data.orderId;
+
+            if (paymentMethod === 'M-PESA') {
+                await axios.post(
+                    `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/mpesa/stkpush`,
+                    { orderId, phone: phoneNumber },
+                    { headers: { Authorization: `Bearer ${token}` } }
+                );
+                return { status: 'mpesa_sent' };
+            }
+
+            if (paymentMethod === 'CARD') {
+                const initRes = await axios.post<{ reference: string }>(
+                    `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/paystack/initialize`,
+                    { orderId },
+                    { headers: { Authorization: `Bearer ${token}` } }
+                );
+                return { status: 'card_init', reference: initRes.data.reference };
+            }
+
+            return { status: 'success' };
+        },
+        onSuccess: (data) => {
+            if (data.status === 'success') {
+                toast.success('Order sent to kitchen!');
+                handleReset();
+            } else if (data.status === 'mpesa_sent') {
+                toast.success('STK Push sent to customer!');
+                handleReset();
+            } else if (data.status === 'card_init') {
+                toast.loading("Opening Gateway...", { id: 'pos-gateway' });
+                // Triggers the useEffect
+                setPaystackReference(data.reference);
+                setTimeout(() => toast.dismiss('pos-gateway'), 500); 
+            }
+        },
+        onError: (error) => {
+            toast.error(error.response?.data?.message || 'Failed to submit order');
+        }
+    });
+
+    const cartItemsList = Object.values(cart);
+    const isCartEmpty = cartItemsList.length === 0;
+    const canCheckout = !isCartEmpty && tableNumber.trim() !== '';
 
     return (
-        <div className="h-[calc(100dvh-80px)] lg:h-[calc(100vh-80px)] flex bg-slate-100 overflow-hidden relative animate-in fade-in duration-300">
+        <div className="h-[calc(100vh-4rem)] flex overflow-hidden bg-slate-50 -m-6 md:-m-8">
             
-            {/* =========================================
-                LEFT SIDE: MENU GRID
-            ========================================= */}
-            <div className="flex-1 flex flex-col h-full overflow-hidden w-full">
+            <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${isCartOpen ? 'hidden md:flex' : 'flex'}`}>
                 
-                <div className="bg-white p-3 md:p-4 border-b border-slate-200 shrink-0 shadow-sm z-10">
-                    <div className="flex items-center gap-4 mb-3 md:mb-4">
+                <header className="bg-white px-6 py-4 border-b border-slate-200 shrink-0 shadow-sm z-10">
+                    <div className="flex items-center gap-4 max-w-4xl">
                         <div className="relative flex-1">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
                             <input 
-                                type="text" 
-                                placeholder="Search menu items..." 
+                                type="text"
+                                placeholder="Search menu items..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                className="w-full pl-10 pr-4 py-2.5 md:py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium transition-shadow text-sm md:text-base"
+                                className="w-full bg-slate-100/50 border border-slate-200 rounded-full pl-12 pr-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
                             />
                         </div>
                     </div>
-                    
+                </header>
+
+                <div className="bg-white px-6 py-3 border-b border-slate-200 shrink-0">
                     <div className="flex overflow-x-auto gap-2 pb-2 custom-scrollbar">
-                        <button 
-                            onClick={() => setActiveCategory('all')} 
-                            className={`px-4 py-2 md:px-5 md:py-2.5 rounded-xl font-bold text-xs md:text-sm shrink-0 transition-colors ${activeCategoryId === 'all' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                        <button
+                            onClick={() => setActiveCategory('all')}
+                            className={`shrink-0 px-5 py-2 rounded-xl text-sm font-bold transition-colors ${activeCategoryId === 'all' ? 'bg-slate-900 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                         >
                             All Items
                         </button>
                         {categories.map(cat => (
-                            <button 
-                                key={cat.category_id} 
+                            <button
+                                key={cat.category_id}
                                 onClick={() => setActiveCategory(cat.category_id)}
-                                className={`px-4 py-2 md:px-5 md:py-2.5 rounded-xl font-bold text-xs md:text-sm shrink-0 transition-colors ${activeCategoryId === cat.category_id ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                className={`shrink-0 px-5 py-2 rounded-xl text-sm font-bold transition-colors ${activeCategoryId === cat.category_id ? 'bg-slate-900 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                             >
                                 {cat.name}
                             </button>
@@ -206,215 +229,211 @@ export default function POS() {
                     </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-3 md:p-4 custom-scrollbar bg-slate-50/50">
-                    {filteredItems.length === 0 ? (
-                        <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                            <ChefHat size={48} className="mb-4 opacity-30" />
+                <main className="flex-1 overflow-y-auto p-6 bg-slate-50 custom-scrollbar">
+                    {itemsLoading ? (
+                        <div className="flex items-center justify-center h-full"><Loader2 className="animate-spin text-indigo-500" size={32}/></div>
+                    ) : filteredItems.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                            <ChefHat size={48} className="mb-4 opacity-50" />
                             <p className="font-bold">No items found</p>
                         </div>
                     ) : (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 md:gap-4 pb-28 lg:pb-4">
-                            {filteredItems.map(item => (
-                                <button 
-                                    key={item.item_id}
-                                    onClick={() => addItem(item as any)} // Ensure types align with CartItem
-                                    className="bg-white p-2.5 md:p-3 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all text-left flex flex-col active:scale-95 group"
-                                >
-                                    <div className="w-full aspect-video bg-slate-100 rounded-xl mb-2.5 overflow-hidden relative">
-                                        {item.image_url ? (
-                                            <img src={getImageUrl(item.image_url)} alt={item.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" onError={(e:any)=>{e.target.style.display='none'}}/>
-                                        ) : (
-                                            <div className="w-full h-full flex items-center justify-center text-slate-300"><ChefHat size={24}/></div>
+                        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-24 md:pb-6">
+                            {filteredItems.map(item => {
+                                const qty = cart[item.item_id]?.quantity || 0;
+                                return (
+                                    <div 
+                                        key={item.item_id} 
+                                        onClick={() => addToCart({ ...item, price: Number(item.price) })}
+                                        className="bg-white rounded-2xl border border-slate-200 p-3 flex flex-col gap-3 shadow-sm hover:shadow-md transition-all cursor-pointer active:scale-[0.98] group relative"
+                                    >
+                                        {qty > 0 && (
+                                            <div className="absolute -top-2 -right-2 w-7 h-7 bg-indigo-600 text-white rounded-full flex items-center justify-center font-black text-sm shadow-md border-2 border-white z-10">
+                                                {qty}
+                                            </div>
                                         )}
-                                        <div className="absolute inset-0 bg-indigo-600/20 opacity-0 group-active:opacity-100 transition-opacity flex items-center justify-center">
-                                            <Plus size={32} className="text-indigo-700 bg-white rounded-full p-1 shadow-lg" />
+                                        <div className="aspect-square bg-slate-100 rounded-xl overflow-hidden shrink-0 relative border border-slate-100">
+                                            {item.image_url ? (
+                                                <img src={getImageUrl(item.image_url)} alt={item.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" onError={(e:any)=>{e.target.style.display='none'}}/>
+                                            ) : (
+                                                <div className="w-full h-full flex items-center justify-center text-slate-300">
+                                                    <ChefHat size={24}/>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="flex flex-col flex-1">
+                                            <h3 className="font-bold text-sm text-slate-900 leading-tight line-clamp-2 mb-1">{item.name}</h3>
+                                            <span className="font-black text-indigo-600 text-base mt-auto">
+                                                {Number(item.price).toLocaleString('en-KE')}
+                                            </span>
                                         </div>
                                     </div>
-                                    <h4 className="font-black text-slate-800 text-xs md:text-sm leading-tight mb-1 line-clamp-2">{item.name}</h4>
-                                    <span className="font-bold text-indigo-600 text-[11px] md:text-xs mt-auto">
-                                        {Number(item.price).toLocaleString('en-KE')} KES
-                                    </span>
-                                </button>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
-                </div>
+                </main>
+
+                {!isCartOpen && !isCartEmpty && (
+                    <div className="md:hidden absolute bottom-6 left-6 right-6">
+                        <button 
+                            onClick={() => setIsCartOpen(true)}
+                            className="w-full bg-slate-900 text-white p-4 rounded-2xl font-black text-lg flex items-center justify-between shadow-xl"
+                        >
+                            <span className="flex items-center gap-2"><ShoppingCart size={20}/> View Order ({cartItemsList.reduce((acc, curr) => acc + curr.quantity, 0)})</span>
+                            <span>{getCartTotal().toLocaleString('en-KE')}</span>
+                        </button>
+                    </div>
+                )}
             </div>
 
-            {/* =========================================
-                MOBILE FLOATING ACTION BUTTON (FAB)
-            ========================================= */}
-            {!isMobileCartOpen && cartItems.length > 0 && (
-                <div className="lg:hidden absolute bottom-4 left-4 right-4 z-30 animate-in slide-in-from-bottom-4">
-                    <button 
-                        onClick={() => setIsMobileCartOpen(true)}
-                        className="w-full bg-slate-900 text-white p-4 rounded-2xl shadow-2xl flex justify-between items-center active:scale-95 transition-transform border border-slate-700"
-                    >
-                        <div className="flex items-center gap-3">
-                            <div className="bg-slate-800 p-2.5 rounded-xl relative">
-                                <ShoppingCart size={20} />
-                                <span className="absolute -top-2 -right-2 bg-indigo-600 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full shadow-sm border-2 border-slate-900">
-                                    {getItemCount()}
-                                </span>
-                            </div>
-                            <div className="text-left">
-                                <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Current Order</span>
-                                <span className="block font-black text-sm">{cartItems.length} items</span>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <span className="text-lg font-black">{getCartTotal().toLocaleString()} <span className="text-xs text-slate-400">KES</span></span>
-                            <ChevronRight size={20} className="text-slate-500" />
-                        </div>
-                    </button>
-                </div>
-            )}
-
-            {/* =========================================
-                RIGHT SIDE: POS CART (Powered by Zustand)
-            ========================================= */}
-            {isMobileCartOpen && (
-                <div 
-                    className="lg:hidden absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-40 transition-opacity"
-                    onClick={() => setIsMobileCartOpen(false)}
-                />
-            )}
-
-            <div className={`
-                absolute inset-y-0 right-0 z-50 w-[90%] max-w-[400px] bg-white shadow-2xl flex flex-col transition-transform duration-300 ease-in-out
-                lg:static lg:w-[400px] lg:border-l lg:border-slate-200 lg:translate-x-0 lg:shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.05)]
-                ${isMobileCartOpen ? 'translate-x-0' : 'translate-x-full'}
-            `}>
-                <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between shrink-0">
-                    <div className="flex items-center gap-3">
-                        <button onClick={() => setIsMobileCartOpen(false)} className="lg:hidden p-2 -ml-2 bg-slate-200 text-slate-600 rounded-xl active:bg-slate-300 transition-colors">
-                            <X size={20} />
+            <div className={`w-full md:w-96 bg-white border-l border-slate-200 flex flex-col shadow-2xl md:shadow-none z-20 transition-transform duration-300 absolute md:relative right-0 h-full ${isCartOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'}`}>
+                
+                <header className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
+                    <h2 className="font-black text-lg text-slate-900 flex items-center gap-2">
+                        Current Order
+                    </h2>
+                    <div className="flex items-center gap-2">
+                        {cartItemsList.length > 0 && (
+                            <button onClick={clearCart} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Clear Order">
+                                <Trash2 size={18} />
+                            </button>
+                        )}
+                        <button onClick={() => setIsCartOpen(false)} className="md:hidden p-2 text-slate-500 bg-slate-100 rounded-full">
+                            <X size={20}/>
                         </button>
-                        <ShoppingCart className="text-indigo-600 hidden lg:block" size={20} />
-                        <h2 className="text-lg font-black text-slate-900 tracking-tight">Checkout</h2>
                     </div>
-                    {cartItems.length > 0 && (
-                        <button onClick={handleClearCart} className="text-xs font-bold text-red-500 hover:text-red-600 flex items-center gap-1 bg-red-50 px-2.5 py-1.5 rounded-lg active:scale-95">
-                            <Trash2 size={14} /> Clear
-                        </button>
-                    )}
+                </header>
+
+                <div className="p-4 border-b border-slate-200 space-y-3 shrink-0">
+                    <div className="relative">
+                        <Hash className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                        <input 
+                            type="text" 
+                            placeholder="Table Number (Required)" 
+                            value={tableNumber}
+                            onChange={(e) => setTableNumber(e.target.value)}
+                            className={`w-full pl-9 pr-4 py-2.5 bg-slate-50 border rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all ${!tableNumber && !isCartEmpty ? 'border-amber-400 ring-4 ring-amber-400/10' : 'border-slate-200'}`}
+                        />
+                    </div>
+                    <div className="relative">
+                        <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                        <input 
+                            type="text" 
+                            placeholder="Customer Name (Optional)" 
+                            value={customerName}
+                            onChange={(e) => setCustomerName(e.target.value)}
+                            className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
+                        />
+                    </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar bg-white">
-                    {cartItems.length === 0 ? (
-                        <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                            <ShoppingCart size={48} className="mb-4 opacity-20"/>
-                            <p className="font-bold text-sm">Cart is empty</p>
-                            <p className="text-xs mt-1">Tap items to add them.</p>
+                <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar bg-slate-50/30">
+                    {isCartEmpty ? (
+                        <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-4">
+                            <div className="w-20 h-20 border-2 border-dashed border-slate-200 rounded-full flex items-center justify-center">
+                                <ShoppingCart size={32} className="text-slate-300"/>
+                            </div>
+                            <p className="font-bold text-sm">Order is empty</p>
                         </div>
                     ) : (
-                        cartItems.map(item => (
-                            <div key={item.cart_id} className="flex flex-col gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100 animate-in slide-in-from-right-4 duration-200">
-                                <div className="flex items-start justify-between gap-3">
-                                    <div className="flex-1 pr-2">
-                                        <h4 className="font-bold text-slate-800 text-sm leading-snug">{item.name}</h4>
-                                        <p className="font-bold text-indigo-600 text-xs mt-0.5">{(Number(item.price) * item.quantity).toLocaleString()} KES</p>
-                                    </div>
-                                    <button 
-                                        onClick={() => removeItem(item.cart_id)} 
-                                        className="text-slate-300 hover:text-red-500 bg-white rounded-full p-1 transition-colors border border-transparent hover:border-red-100 shadow-sm"
-                                    >
-                                        <X size={14} />
-                                    </button>
+                        cartItemsList.map(item => (
+                            <div key={item.item_id} className="bg-white border border-slate-100 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
+                                <div className="flex-1 min-w-0">
+                                    <h4 className="font-bold text-sm text-slate-900 truncate">{item.name}</h4>
+                                    <span className="font-black text-indigo-600 text-xs">{(item.price * item.quantity).toLocaleString()}</span>
                                 </div>
-                                
-                                <div className="flex items-center justify-end mt-1">
-                                    <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-lg p-1 shadow-sm shrink-0">
-                                        <button onClick={() => updateQuantity(item.cart_id, item.quantity - 1)} className="w-8 h-8 flex items-center justify-center bg-slate-50 hover:bg-slate-100 text-slate-600 rounded active:scale-95 transition-colors"><Minus size={16}/></button>
-                                        <span className="font-black text-sm w-4 text-center">{item.quantity}</span>
-                                        <button onClick={() => updateQuantity(item.cart_id, item.quantity + 1)} className="w-8 h-8 flex items-center justify-center bg-slate-50 hover:bg-slate-100 text-slate-600 rounded active:scale-95 transition-colors"><Plus size={16}/></button>
-                                    </div>
+                                <div className="flex items-center gap-2 bg-slate-50 rounded-lg p-1 border border-slate-100">
+                                    <button onClick={() => updateQuantity(item.item_id, -1)} className="w-8 h-8 flex items-center justify-center bg-white rounded shadow-sm text-slate-600 active:scale-95"><Minus size={14}/></button>
+                                    <span className="w-6 text-center font-black text-sm">{item.quantity}</span>
+                                    <button onClick={() => updateQuantity(item.item_id, 1)} className="w-8 h-8 flex items-center justify-center bg-indigo-600 rounded shadow-sm text-white active:scale-95"><Plus size={14}/></button>
                                 </div>
                             </div>
                         ))
                     )}
                 </div>
 
-                {/* Ticket Footer / Checkout */}
-                <div className="p-4 border-t border-slate-200 bg-slate-50 shrink-0 space-y-4 pb-safe">
-                    <div className="grid grid-cols-2 gap-3">
-                        <div className="relative">
-                            <Hash className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
-                            <input 
-                                type="text" 
-                                placeholder="Table/Tab *" 
-                                value={activeTable || ''}
-                                onChange={(e) => setActiveTable(e.target.value)}
-                                className="w-full pl-9 pr-3 py-3 lg:py-2.5 rounded-xl border border-slate-200 text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none uppercase shadow-inner"
-                            />
-                        </div>
-                        <div className="relative">
-                            <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
-                            <input 
-                                type="text" 
-                                placeholder="Customer" 
-                                value={customerName}
-                                onChange={(e) => setCustomerName(e.target.value)}
-                                className="w-full pl-9 pr-3 py-3 lg:py-2.5 rounded-xl border border-slate-200 text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none shadow-inner"
-                            />
-                        </div>
+                <div className="p-4 bg-white border-t border-slate-200 shrink-0 space-y-4 shadow-[0_-10px_20px_-15px_rgba(0,0,0,0.05)]">
+                    <div className="flex justify-between items-end">
+                        <span className="text-slate-500 font-bold text-sm">Order Total</span>
+                        <span className="font-black text-3xl text-slate-900">{getCartTotal().toLocaleString('en-KE')}</span>
                     </div>
 
-                    <div className="flex justify-between items-end border-t border-slate-200 pt-4">
-                        <span className="text-sm font-bold text-slate-500">Total Due</span>
-                        <span className="text-2xl lg:text-3xl font-black text-slate-900">{getCartTotal().toLocaleString()} <span className="text-sm lg:text-lg">KES</span></span>
-                    </div>
-
-                    <div className="flex flex-col gap-2 pt-2">
+                    <div className="grid grid-cols-2 gap-2">
                         <button 
-                            disabled={submitOrderMutation.isPending || cartItems.length === 0}
+                            disabled={!canCheckout || submitOrderMutation.isPending}
                             onClick={() => submitOrderMutation.mutate('CASH')}
-                            className="w-full flex items-center justify-center gap-2 py-4 lg:py-3.5 bg-slate-900 hover:bg-black text-white text-sm font-bold rounded-xl active:scale-95 disabled:opacity-50 transition-all shadow-md"
+                            className="flex flex-col items-center justify-center gap-1 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold active:scale-95 disabled:opacity-50 transition-all shadow-md"
                         >
-                            {submitOrderMutation.isPending ? <Loader2 size={18} className="animate-spin" /> : <Banknote size={18}/>}
-                            Process Cash Order
+                            <Banknote size={20} />
+                            <span className="text-xs">Cash</span>
                         </button>
+                        
                         <button 
-                            disabled={submitOrderMutation.isPending || cartItems.length === 0}
-                            onClick={() => setMpesaModalOpen(true)}
-                            className="w-full flex items-center justify-center gap-2 py-4 lg:py-3.5 bg-[#52B44B] hover:bg-[#459a3f] text-white text-sm font-bold rounded-xl active:scale-95 disabled:opacity-50 transition-all shadow-md shadow-[#52B44B]/30"
+                            disabled={!canCheckout || submitOrderMutation.isPending}
+                            onClick={() => setShowPaymentModal(true)}
+                            className="flex flex-col items-center justify-center gap-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold active:scale-95 disabled:opacity-50 transition-all shadow-md shadow-indigo-600/20"
                         >
-                            <Smartphone size={18}/> STK Push to Phone
+                            <MonitorSmartphone size={20} />
+                            <span className="text-xs">Digital Pay</span>
                         </button>
                     </div>
                 </div>
             </div>
 
-            {/* M-PESA MODAL */}
-            {mpesaModalOpen && (
-                <div className="absolute inset-0 z-[100] flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setMpesaModalOpen(false)}></div>
-                    <div className="relative bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95 duration-200">
-                        <button onClick={() => setMpesaModalOpen(false)} className="absolute top-4 right-4 text-slate-400 hover:bg-slate-100 p-2 rounded-full transition-colors">
-                            <X size={20} />
-                        </button>
+            {showPaymentModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowPaymentModal(false)}></div>
+                    <div className="relative w-full max-w-sm bg-white rounded-[2rem] p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+                        <button onClick={() => setShowPaymentModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><X size={20}/></button>
                         
-                        <div className="w-16 h-16 bg-[#52B44B]/10 text-[#52B44B] rounded-full flex items-center justify-center mx-auto mb-4">
-                            <Smartphone size={32} />
+                        <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <MonitorSmartphone size={32} />
                         </div>
-                        <h2 className="text-xl font-black text-center text-slate-900 mb-2">Initiate M-Pesa Push</h2>
-                        <p className="text-center text-sm text-slate-500 mb-6">Enter customer's phone number to send an STK push for <span className="font-bold text-slate-800">{getCartTotal().toLocaleString()} KES</span>.</p>
                         
-                        <input 
-                            type="tel" 
-                            placeholder="07XX XXX XXX" 
-                            value={phoneNumber}
-                            onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
-                            className="w-full text-center text-xl tracking-widest font-black py-4 bg-slate-50 border border-slate-200 rounded-xl mb-4 focus:ring-2 focus:ring-[#52B44B] outline-none shadow-inner"
-                        />
+                        <h3 className="text-2xl font-black text-center text-slate-900 mb-2">Digital Payment</h3>
+                        <p className="text-center text-sm text-slate-500 mb-6">Total Amount: <span className="font-bold text-slate-800">{getCartTotal().toLocaleString()} KES</span></p>
                         
-                        <button 
-                            disabled={submitOrderMutation.isPending || phoneNumber.length < 9}
-                            onClick={() => submitOrderMutation.mutate('M-PESA')}
-                            className="w-full flex justify-center py-4 bg-[#52B44B] hover:bg-[#459a3f] text-white font-black rounded-xl active:scale-95 disabled:opacity-50 transition-all shadow-lg shadow-[#52B44B]/30"
-                        >
-                            {submitOrderMutation.isPending ? <Loader2 size={24} className="animate-spin" /> : 'Send Prompt to Phone'}
-                        </button>
+                        <div className="space-y-3">
+                            <button 
+                                disabled={submitOrderMutation.isPending}
+                                onClick={() => submitOrderMutation.mutate('CARD')}
+                                className="w-full flex items-center justify-between p-4 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 text-indigo-700 rounded-2xl active:scale-95 disabled:opacity-50 transition-all group"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm">
+                                        <CreditCard size={20} className="text-indigo-600"/>
+                                    </div>
+                                    <div className="text-left">
+                                        <span className="block font-bold">Bank Card (PDQ bypass)</span>
+                                        <span className="text-xs text-indigo-500 font-medium">Customer enters card on device</span>
+                                    </div>
+                                </div>
+                                <ChevronRight size={20} className="opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
+                            </button>
+
+                            <div className="relative flex py-2 items-center">
+                                <div className="flex-grow border-t border-slate-200"></div>
+                                <span className="flex-shrink-0 mx-4 text-slate-400 text-xs font-bold uppercase">OR M-PESA</span>
+                                <div className="flex-grow border-t border-slate-200"></div>
+                            </div>
+
+                            <input 
+                                type="tel" 
+                                placeholder="Customer M-Pesa (07XX...)" 
+                                value={phoneNumber}
+                                onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
+                                className="w-full text-center text-lg font-bold py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#52B44B] outline-none"
+                            />
+                            
+                            <button 
+                                disabled={submitOrderMutation.isPending || phoneNumber.length < 9}
+                                onClick={() => submitOrderMutation.mutate('M-PESA')}
+                                className="w-full flex justify-center items-center gap-2 py-4 bg-[#52B44B] hover:bg-[#459a3f] text-white font-black rounded-xl active:scale-95 disabled:opacity-50 transition-all shadow-md"
+                            >
+                                {submitOrderMutation.isPending ? <Loader2 size={24} className="animate-spin" /> : <><Smartphone size={20}/> Send STK Push</>}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
