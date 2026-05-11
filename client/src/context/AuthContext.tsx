@@ -23,8 +23,8 @@ interface JwtDecodedPayload {
 
 interface AuthContextType {
     user: User | null;
-    token: string | null;     // ⚡ ADD THIS
-    venueId: string | null;
+    token: string | null;     // ⚡ Explicitly requested by POS
+    venueId: string | null;   // ⚡ Explicitly requested by POS
     isLoading: boolean;
     login: (token: string) => Promise<void>;
     logout: () => void;
@@ -33,23 +33,27 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-    // ⚡ FIX 1: Explicitly tell TypeScript this can be a User OR null
+    // ⚡ Add explicit state for the token
     const [user, setUser] = useState<User | null>(null);
+    const [token, setToken] = useState<string | null>(null); 
     const [isLoading, setIsLoading] = useState<boolean>(true);
     
-    const login = async (token: string) => {
-        localStorage.setItem('auth_token', token);
+    // ⚡ Derived State: venueId is always tied to the logged-in user
+    const venueId = user?.venueId || null;
+    
+    const login = async (newToken: string) => {
+        localStorage.setItem('auth_token', newToken);
+        setToken(newToken); // Update React State
         
         try {
-            const decoded = jwtDecode<JwtDecodedPayload>(token);
+            const decoded = jwtDecode<JwtDecodedPayload>(newToken);
             setUser({
                 userId: decoded.userId,
-                // ⚡ FIX 2: Explicitly cast the generic string role to our strict UserRole type
                 role: decoded.role as UserRole,
                 venueId: decoded.venueId,
                 name: decoded.name
             });
-            axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+            axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
         } catch (error) {
             toast.error('Failed to login staff');
             console.error('Failed to process login token:', error);
@@ -60,22 +64,31 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         localStorage.removeItem('auth_token');
         delete axios.defaults.headers.common['Authorization'];
         setUser(null);
+        setToken(null); // Clear token state
     };
 
     useEffect(() => {
         const initializeWorkspace = () => {
-            const token = localStorage.getItem('auth_token');
-            if (token) {
+            const storedToken = localStorage.getItem('auth_token');
+            if (storedToken) {
                 try {
-                    const decoded = jwtDecode<JwtDecodedPayload>(token);
+                    const decoded = jwtDecode<JwtDecodedPayload>(storedToken);
                     // Check if the token has expired
                     if (decoded.exp * 1000 < Date.now()){
                         console.warn("Session expired.");
                         logout();
                     } else {
                         // Globalize the token for all future axios requests
-                        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-                        login(token);
+                        axios.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
+                        
+                        // Hydrate the state directly to avoid re-render loops
+                        setToken(storedToken);
+                        setUser({
+                            userId: decoded.userId,
+                            role: decoded.role as UserRole,
+                            venueId: decoded.venueId,
+                            name: decoded.name
+                        });
                     }
                 } catch (err) {
                     console.log("Invalid token format.", err);
@@ -88,13 +101,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }, []);
 
     return (
-        <AuthContext.Provider value={{ user,token,venueId, login, logout, isLoading }}>
+        <AuthContext.Provider value={{ user, token, venueId, login, logout, isLoading }}>
             {children}
         </AuthContext.Provider>
     );
 };
 
-// ⚡ FIX 3: Enforce strict non-undefined return type so child components don't throw errors
 export const useAuth = (): AuthContextType => {
     const context = useContext(AuthContext);
     if (context === undefined) {

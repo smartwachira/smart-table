@@ -138,10 +138,50 @@ export const updatedMenuItem = async (req: Request<{ itemId: string }, {}, MenuP
     }
 }
 
+// ⚡ ADDED: POS SPECIFIC ENDPOINTS
+export const getPosCategories = async (req: Request, res: Response): Promise<Response | void> => {
+    try {
+        const { venueId } = req.params;
+        const categories = await MenuCategory.findAll({
+            where: { venue_id: venueId },
+            order: [['createdAt', 'ASC']]
+        });
+        return res.status(200).json(categories);
+    } catch (error) {
+        console.error("Error fetching POS categories:", error);
+        return res.status(500).json({ message: "Failed to fetch categories" });
+    }
+};
+
+export const getPosItems = async (req: Request, res: Response): Promise<Response | void> => {
+    try {
+        const { venueId } = req.params;
+        
+        // Join with MenuCategory to ensure items belong to the requested venue
+        const items = await MenuItem.findAll({
+            where: { is_available: true }, // POS only shows available items
+            include: [{
+                model: MenuCategory,
+                attributes: [],
+                where: { venue_id: venueId }
+            }],
+            order: [
+                [col('MenuItem.category_id'), 'ASC'],
+                [col('MenuItem.name'), 'ASC']
+            ]
+        });
+
+        return res.status(200).json(items);
+    } catch (error) {
+        console.error("Error fetching POS items:", error);
+        return res.status(500).json({ message: "Failed to fetch items" });
+    }
+};
+
 // --- PUBLIC CUSTOMER MENU ---
 export const getPublicMenu = async (req: Request, res: Response): Promise<Response | void> => {
     try {
-        // ⚡ FIX: Safely fallback to req.user if a Manager is previewing the menu!
+        // Safely fallback to req.user if a Manager is previewing the menu!
         const venueId = req.guest?.venueId || req.user?.venueId;
 
         if (!venueId) {
@@ -167,7 +207,6 @@ export const getPublicMenu = async (req: Request, res: Response): Promise<Respon
                 attributes: [],
                 where: { venue_id: venueId }
             }],
-            // ⚡ FIX: Use explicit column mapping to prevent PostgreSQL "ambiguous column" crashes during the join
             order: [
                 [col('MenuItem.category_id'), 'ASC'],
                 [col('MenuItem.name'), 'ASC']
@@ -181,7 +220,7 @@ export const getPublicMenu = async (req: Request, res: Response): Promise<Respon
     }
 }
 
-// ⚡ DELETE CATEGORY (Only if empty)
+// DELETE CATEGORY (Only if empty)
 export const deleteCategory = async (req: Request<{ categoryId: string }, {}>, res: Response): Promise<Response | void> => {
     try {
         const { categoryId } = req.params;
@@ -214,7 +253,7 @@ export const deleteCategory = async (req: Request<{ categoryId: string }, {}>, r
     }
 };
 
-// ⚡ DELETE MENU ITEM (Safe Delete)
+// DELETE MENU ITEM (Safe Delete)
 export const deleteMenuItem = async (req: Request<{ itemId: string }, {}>, res: Response): Promise<Response | void> => {
     try {
         const { itemId } = req.params;

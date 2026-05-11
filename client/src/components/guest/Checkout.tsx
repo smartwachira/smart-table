@@ -29,7 +29,6 @@ interface OrderStatusResponse {
     status: string;
 }
 
-// 🛡️ Strict typing for the backend initialization response
 interface PaystackInitResponse {
     reference: string;
     access_code: string;
@@ -59,41 +58,40 @@ export default function Checkout() {
     const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('idle'); 
     const [pollingOrderId, setPollingOrderId] = useState<string | null>(null);
 
-    // ⚡ PAYSTACK STATE
-    const [paystackReference, setPaystackReference] = useState<string>('');
+    // ⚡ FIX: Use Access Code instead of Reference
+    const [paystackAccessCode, setPaystackAccessCode] = useState<string>('');
 
-    // The hook automatically re-registers when `paystackReference` changes
+    // ⚡ Pass access_code (using 'as any' to bypass strict TS library definitions)
     const initializePaystack = usePaystackPayment({
-        reference: paystackReference,
-        email: "guest@smarttable.com", 
-        amount: Math.round(total * 100), // Enforce cents mathematically
         publicKey: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || '',
-    });
+        email: "guest@smarttable.com", 
+        amount: Math.round(total * 100), 
+        currency: 'KES',
+        access_code: paystackAccessCode, 
+    } as any);
 
-    const onPaystackSuccess = (reference: any) => {
-        setPaymentStatus('success');
-        toast.success("Card Payment Successful!");
-        
-        setTimeout(() => {
-            clearCart();
-            if (pollingOrderId) navigate(`/order-status/${pollingOrderId}`); 
-        }, 2000);
-    };
-
-    const onPaystackClose = () => {
-        setPaymentStatus('idle');
-        setIsProcessing(false);
-        setPaystackReference(''); // Reset reference to allow re-trying
-        toast.error("Payment window closed.");
-    };
-
-    // ⚡ THE FIX: Safe lifecycle trigger. Watches for the reference to update before popping the modal.
+    // ⚡ Watch for access_code updates to trigger the modal safely
     useEffect(() => {
-        if (paystackReference && paymentStatus === 'pending' && paymentMethod === 'CARD') {
-            (initializePaystack as Function)(onPaystackSuccess, onPaystackClose);
+        if (paystackAccessCode && paymentStatus === 'pending' && paymentMethod === 'CARD') {
+            (initializePaystack as Function)(
+                (ref: any) => { 
+                    setPaymentStatus('success');
+                    toast.success("Card Payment Successful!");
+                    setTimeout(() => {
+                        clearCart();
+                        if (pollingOrderId) navigate(`/order-status/${pollingOrderId}`); 
+                    }, 2000);
+                },
+                () => { 
+                    setPaymentStatus('idle');
+                    setIsProcessing(false);
+                    setPaystackAccessCode(''); // Reset on close
+                    toast.error("Payment window closed.");
+                }
+            );
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [paystackReference]);
+    }, [paystackAccessCode]);
 
     useEffect(() => {
         const token = localStorage.getItem('guest_token');
@@ -187,7 +185,6 @@ export default function Checkout() {
                 }))
             };
             
-            // 🛡️ Strict generic applied to Axios response
             const orderRes = await api.post<{ orderId: string }>('/api/orders', orderPayload);
             const orderId = orderRes.data.orderId;
             setPollingOrderId(orderId);
@@ -208,13 +205,12 @@ export default function Checkout() {
                 setPaymentStatus('pending'); 
                 toast.loading("Connecting to secure gateway...", { id: 'gateway-load' });
 
-                // 🛡️ Strict generic applied to Paystack initialization response
                 const initRes = await api.post<PaystackInitResponse>('/api/paystack/initialize', { orderId });
                 
                 toast.dismiss('gateway-load');
                 
-                // Triggers the useEffect above to pop the modal safely
-                setPaystackReference(initRes.data.reference);
+                // ⚡ FIX: Update access_code state to trigger useEffect
+                setPaystackAccessCode(initRes.data.access_code);
             }
 
         } catch (error) {
@@ -224,7 +220,7 @@ export default function Checkout() {
             toast.dismiss('gateway-load');
             setPaymentStatus('idle');
             setIsProcessing(false);
-            setPaystackReference('');
+            setPaystackAccessCode('');
         }
     };
 

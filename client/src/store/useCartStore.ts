@@ -1,81 +1,89 @@
 import { create } from 'zustand';
-import { MenuItem } from '../components/dashboard/MenuManagement';
 
-export interface CartItem extends MenuItem {
-    cart_id: string; // Unique ID for the specific cart entry (in case of duplicates)
+// ⚡ 1. Define exactly what a CartItem looks like for the POS
+export interface CartItem {
+    item_id: string;
+    name: string;
+    price: number;
     quantity: number;
-    notes?: string;
+    image_url?: string;
 }
 
-interface CartState {
-    items: CartItem[];
-    activeTable: string | null;
+// ⚡ 2. Define the exact blueprint of the store
+export interface CartState {
+    // Defines 'cart' as a dictionary object for instant O(1) lookups
+    cart: Record<string, CartItem>; 
     
-    // Actions
-    addItem: (item: MenuItem, quantity?: number, notes?: string) => void;
-    removeItem: (cartId: string) => void;
-    updateQuantity: (cartId: string, quantity: number) => void;
-    updateNotes: (cartId: string, notes: string) => void;
+    // Explicitly define the methods POS is trying to destructure
+    addToCart: (item: Omit<CartItem, 'quantity'> & { quantity?: number }) => void;
+    removeFromCart: (item_id: string) => void;
+    updateQuantity: (item_id: string, delta: number) => void;
     clearCart: () => void;
-    setActiveTable: (tableId: string | null) => void;
-    
-    // Computed (Getters)
     getCartTotal: () => number;
-    getItemCount: () => number;
 }
 
+// ⚡ 3. Implement the store using the blueprint
 export const useCartStore = create<CartState>((set, get) => ({
-    items: [],
-    activeTable: null,
+    cart: {}, // Start with an empty dictionary
 
-    addItem: (item, quantity = 1, notes = '') => set((state) => {
-        // Check if identical item (same ID and notes) already exists to stack them
-        const existingItemIndex = state.items.findIndex(
-            i => i.item_id === item.item_id && i.notes === notes
-        );
-
-        if (existingItemIndex > -1) {
-            const newItems = [...state.items];
-            newItems[existingItemIndex].quantity += quantity;
-            return { items: newItems };
+    addToCart: (item) => set((state) => {
+        const existingItem = state.cart[item.item_id];
+        
+        // If it exists, stack the quantity
+        if (existingItem) {
+            return {
+                cart: {
+                    ...state.cart,
+                    [item.item_id]: { 
+                        ...existingItem, 
+                        quantity: existingItem.quantity + (item.quantity || 1) 
+                    }
+                }
+            };
         }
-
-        // Add new unique entry
-        return { 
-            items: [...state.items, { 
-                ...item, 
-                cart_id: crypto.randomUUID(), 
-                quantity, 
-                notes 
-            }] 
+        
+        // If it's new, add it to the dictionary
+        return {
+            cart: {
+                ...state.cart,
+                [item.item_id]: { ...item, quantity: item.quantity || 1 } as CartItem
+            }
         };
     }),
 
-    removeItem: (cartId) => set((state) => ({
-        items: state.items.filter(i => i.cart_id !== cartId)
-    })),
+    removeFromCart: (item_id) => set((state) => {
+        const newCart = { ...state.cart };
+        delete newCart[item_id]; // Remove key from dictionary
+        return { cart: newCart };
+    }),
 
-    updateQuantity: (cartId, quantity) => set((state) => ({
-        items: quantity <= 0 
-            ? state.items.filter(i => i.cart_id !== cartId) 
-            : state.items.map(i => i.cart_id === cartId ? { ...i, quantity } : i)
-    })),
+    // Delta math (+1 or -1) as expected by the new POS UI
+    updateQuantity: (item_id, delta) => set((state) => {
+        const item = state.cart[item_id];
+        if (!item) return state;
 
-    updateNotes: (cartId, notes) => set((state) => ({
-        items: state.items.map(i => i.cart_id === cartId ? { ...i, notes } : i)
-    })),
+        const newQuantity = item.quantity + delta;
+        
+        // If quantity drops to 0 or below, remove the item entirely
+        if (newQuantity <= 0) {
+            const newCart = { ...state.cart };
+            delete newCart[item_id];
+            return { cart: newCart };
+        }
 
-    clearCart: () => set({ items: [], activeTable: null }),
-    
-    setActiveTable: (tableId) => set({ activeTable: tableId }),
+        return {
+            cart: {
+                ...state.cart,
+                [item_id]: { ...item, quantity: newQuantity }
+            }
+        };
+    }),
+
+    clearCart: () => set({ cart: {} }),
 
     getCartTotal: () => {
-        const state = get();
-        return state.items.reduce((total, item) => total + (Number(item.price) * item.quantity), 0);
-    },
-    
-    getItemCount: () => {
-        const state = get();
-        return state.items.reduce((count, item) => count + item.quantity, 0);
+        const { cart } = get();
+        // Convert dictionary back to array just to calculate the sum
+        return Object.values(cart).reduce((total, item) => total + (item.price * item.quantity), 0);
     }
 }));

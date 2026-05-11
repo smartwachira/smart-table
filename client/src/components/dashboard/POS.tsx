@@ -5,13 +5,12 @@ import { toast } from 'sonner';
 import { usePaystackPayment } from 'react-paystack'; 
 import { 
     Search, ShoppingCart, Plus, Minus, Trash2,Loader2, 
-    Smartphone, Banknote, ChefHat, User, Hash, X, MonitorSmartphone, ChevronRight, CreditCard
+    Smartphone, Banknote, ChefHat, User, Hash, X, MonitorSmartphone, ChevronRight, CreditCard, ArrowLeft
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useCartStore } from '../../store/useCartStore'; 
 import { useMenuStore } from '../../store/useMenuStore'; 
 
-// 🛡️ Strict Typings
 export interface POSCategory {
     category_id: string;
     name: string;
@@ -29,11 +28,10 @@ export interface POSItem {
 
 type PaymentMethodType = 'CASH' | 'M-PESA' | 'CARD';
 
-// Defines all possible return shapes from our mutation
 type SubmitOrderResponse = 
     | { status: 'success' }
     | { status: 'mpesa_sent' }
-    | { status: 'card_init'; reference: string };
+    | { status: 'card_init'; access_code: string }; // ⚡ FIX: Use access_code here
 
 const getImageUrl = (path?: string) => {
     if (!path) return '';
@@ -55,15 +53,17 @@ export default function POS() {
     const [showPaymentModal, setShowPaymentModal] = useState(false);
     const [phoneNumber, setPhoneNumber] = useState('');
 
-    // ⚡ PAYSTACK STATE FIX
-    const [paystackReference, setPaystackReference] = useState<string>('');
+    // ⚡ FIX: Use Access Code instead of Reference
+    const [paystackAccessCode, setPaystackAccessCode] = useState<string>('');
 
+    // ⚡ Pass access_code (using 'as any' to bypass strict TS library definitions)
     const initializePaystack = usePaystackPayment({
-        reference: paystackReference,
+        publicKey: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || '',
         email: "pos@smarttable.com", 
         amount: Math.round(getCartTotal() * 100), 
-        publicKey: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || '',
-    });
+        currency: 'KES',
+        access_code: paystackAccessCode, 
+    } as any);
 
     const handleReset = () => {
         clearCart();
@@ -72,13 +72,13 @@ export default function POS() {
         setPhoneNumber('');
         setShowPaymentModal(false);
         setIsCartOpen(false);
-        setPaystackReference('');
+        setPaystackAccessCode(''); // ⚡ Reset access code
     };
 
-    // ⚡ LIFECYCLE: Watch for reference update to safely pop modal
+    // ⚡ Watch for access_code updates to trigger the modal safely
     useEffect(() => {
-        if (paystackReference && showPaymentModal) {
-            setShowPaymentModal(false); // Hide internal modal
+        if (paystackAccessCode && showPaymentModal) {
+            setShowPaymentModal(false); 
             
             (initializePaystack as Function)(
                 (ref: any) => { 
@@ -87,20 +87,21 @@ export default function POS() {
                 },
                 () => { 
                     toast.error("Payment window closed. Order is still pending.");
-                    setPaystackReference('');
+                    setPaystackAccessCode('');
                 }
             );
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [paystackReference]);
+    }, [paystackAccessCode]);
 
     const { data: categories = [], isLoading: categoriesLoading } = useQuery({
         queryKey: ['categories', venueId],
         queryFn: async () => {
-            const res = await axios.get<POSCategory[]>(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/menu/categories/venue/${venueId}`, {
+            const res = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/menu/categories/venue/${venueId}`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
-            return res.data.filter(c => c.is_active !== false);
+            const catsArray = Array.isArray(res.data) ? res.data : (res.data.categories || []);
+            return catsArray.filter((c: POSCategory) => c.is_active !== false);
         },
         enabled: !!venueId && !!token
     });
@@ -108,23 +109,24 @@ export default function POS() {
     const { data: items = [], isLoading: itemsLoading } = useQuery({
         queryKey: ['menuItems', venueId],
         queryFn: async () => {
-            const res = await axios.get<POSItem[]>(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/menu/items/venue/${venueId}`, {
+            const res = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/menu/items/venue/${venueId}`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
-            return res.data.filter(i => i.is_available !== false);
+            const itemsArray = Array.isArray(res.data) ? res.data : (res.data.items || []);
+            return itemsArray.filter((i: POSItem) => i.is_available !== false);
         },
         enabled: !!venueId && !!token
     });
 
     const filteredItems = useMemo(() => {
-        return items.filter(item => {
-            const matchesCat = activeCategoryId === 'all' || item.category_id === activeCategoryId;
-            const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase());
+        return items.filter((item: POSItem) => {
+            const matchesCat = !activeCategoryId || activeCategoryId === 'all' || item.category_id === activeCategoryId;
+            const itemName = item.name || '';
+            const matchesSearch = itemName.toLowerCase().includes((searchQuery || '').toLowerCase());
             return matchesCat && matchesSearch;
         });
     }, [items, activeCategoryId, searchQuery]);
 
-    // 🛡️ Explicitly typed mutation: <ReturnData, ErrorType, VariablesType>
     const submitOrderMutation = useMutation<SubmitOrderResponse, AxiosError<{ message: string }>, PaymentMethodType>({
         mutationFn: async (paymentMethod) => {
             const payload = {
@@ -156,12 +158,13 @@ export default function POS() {
             }
 
             if (paymentMethod === 'CARD') {
-                const initRes = await axios.post<{ reference: string }>(
+                const initRes = await axios.post<{ access_code: string, reference: string }>(
                     `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/paystack/initialize`,
                     { orderId },
                     { headers: { Authorization: `Bearer ${token}` } }
                 );
-                return { status: 'card_init', reference: initRes.data.reference };
+                // ⚡ FIX: Extract and return the access code
+                return { status: 'card_init', access_code: initRes.data.access_code };
             }
 
             return { status: 'success' };
@@ -175,8 +178,8 @@ export default function POS() {
                 handleReset();
             } else if (data.status === 'card_init') {
                 toast.loading("Opening Gateway...", { id: 'pos-gateway' });
-                // Triggers the useEffect
-                setPaystackReference(data.reference);
+                // ⚡ FIX: Trigger the useEffect with the access code
+                setPaystackAccessCode(data.access_code);
                 setTimeout(() => toast.dismiss('pos-gateway'), 500); 
             }
         },
@@ -190,34 +193,32 @@ export default function POS() {
     const canCheckout = !isCartEmpty && tableNumber.trim() !== '';
 
     return (
-        <div className="h-[calc(100vh-4rem)] flex overflow-hidden bg-slate-50 -m-6 md:-m-8">
+        <div className="h-[100dvh] md:h-[calc(100vh-4rem)] flex overflow-hidden bg-slate-50 absolute inset-0 md:relative z-40 md:z-0">
             
             <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${isCartOpen ? 'hidden md:flex' : 'flex'}`}>
                 
-                <header className="bg-white px-6 py-4 border-b border-slate-200 shrink-0 shadow-sm z-10">
-                    <div className="flex items-center gap-4 max-w-4xl">
-                        <div className="relative flex-1">
-                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-                            <input 
-                                type="text"
-                                placeholder="Search menu items..."
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                className="w-full bg-slate-100/50 border border-slate-200 rounded-full pl-12 pr-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
-                            />
-                        </div>
+                <header className="bg-white px-4 md:px-6 py-4 border-b border-slate-200 shrink-0 shadow-sm z-10 flex gap-3">
+                    <div className="relative flex-1">
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                        <input 
+                            type="text"
+                            placeholder="Search menu items..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="w-full bg-slate-100/50 border border-slate-200 rounded-full pl-12 pr-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
+                        />
                     </div>
                 </header>
 
-                <div className="bg-white px-6 py-3 border-b border-slate-200 shrink-0">
+                <div className="bg-white px-4 md:px-6 py-3 border-b border-slate-200 shrink-0">
                     <div className="flex overflow-x-auto gap-2 pb-2 custom-scrollbar">
                         <button
                             onClick={() => setActiveCategory('all')}
-                            className={`shrink-0 px-5 py-2 rounded-xl text-sm font-bold transition-colors ${activeCategoryId === 'all' ? 'bg-slate-900 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                            className={`shrink-0 px-5 py-2 rounded-xl text-sm font-bold transition-colors ${!activeCategoryId || activeCategoryId === 'all' ? 'bg-slate-900 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                         >
                             All Items
                         </button>
-                        {categories.map(cat => (
+                        {categories.map((cat: POSCategory) => (
                             <button
                                 key={cat.category_id}
                                 onClick={() => setActiveCategory(cat.category_id)}
@@ -229,7 +230,7 @@ export default function POS() {
                     </div>
                 </div>
 
-                <main className="flex-1 overflow-y-auto p-6 bg-slate-50 custom-scrollbar">
+                <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-slate-50 custom-scrollbar relative">
                     {itemsLoading ? (
                         <div className="flex items-center justify-center h-full"><Loader2 className="animate-spin text-indigo-500" size={32}/></div>
                     ) : filteredItems.length === 0 ? (
@@ -238,14 +239,14 @@ export default function POS() {
                             <p className="font-bold">No items found</p>
                         </div>
                     ) : (
-                        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-24 md:pb-6">
-                            {filteredItems.map(item => {
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4 pb-24 md:pb-6">
+                            {filteredItems.map((item: POSItem) => {
                                 const qty = cart[item.item_id]?.quantity || 0;
                                 return (
                                     <div 
                                         key={item.item_id} 
                                         onClick={() => addToCart({ ...item, price: Number(item.price) })}
-                                        className="bg-white rounded-2xl border border-slate-200 p-3 flex flex-col gap-3 shadow-sm hover:shadow-md transition-all cursor-pointer active:scale-[0.98] group relative"
+                                        className="bg-white rounded-2xl border border-slate-200 p-2 md:p-3 flex flex-col gap-2 md:gap-3 shadow-sm hover:shadow-md transition-all cursor-pointer active:scale-[0.98] group relative"
                                     >
                                         {qty > 0 && (
                                             <div className="absolute -top-2 -right-2 w-7 h-7 bg-indigo-600 text-white rounded-full flex items-center justify-center font-black text-sm shadow-md border-2 border-white z-10">
@@ -262,8 +263,8 @@ export default function POS() {
                                             )}
                                         </div>
                                         <div className="flex flex-col flex-1">
-                                            <h3 className="font-bold text-sm text-slate-900 leading-tight line-clamp-2 mb-1">{item.name}</h3>
-                                            <span className="font-black text-indigo-600 text-base mt-auto">
+                                            <h3 className="font-bold text-xs md:text-sm text-slate-900 leading-tight line-clamp-2 mb-1">{item.name}</h3>
+                                            <span className="font-black text-indigo-600 text-sm md:text-base mt-auto">
                                                 {Number(item.price).toLocaleString('en-KE')}
                                             </span>
                                         </div>
@@ -272,37 +273,41 @@ export default function POS() {
                             })}
                         </div>
                     )}
-                </main>
 
-                {!isCartOpen && !isCartEmpty && (
-                    <div className="md:hidden absolute bottom-6 left-6 right-6">
-                        <button 
-                            onClick={() => setIsCartOpen(true)}
-                            className="w-full bg-slate-900 text-white p-4 rounded-2xl font-black text-lg flex items-center justify-between shadow-xl"
-                        >
-                            <span className="flex items-center gap-2"><ShoppingCart size={20}/> View Order ({cartItemsList.reduce((acc, curr) => acc + curr.quantity, 0)})</span>
-                            <span>{getCartTotal().toLocaleString('en-KE')}</span>
-                        </button>
-                    </div>
-                )}
+                    {!isCartOpen && !isCartEmpty && (
+                        <div className="md:hidden fixed bottom-6 left-4 right-4 z-20 animate-in slide-in-from-bottom-10">
+                            <button 
+                                onClick={() => setIsCartOpen(true)}
+                                className="w-full bg-slate-900 text-white p-4 rounded-2xl font-black text-lg flex items-center justify-between shadow-2xl active:scale-[0.98] transition-transform"
+                            >
+                                <span className="flex items-center gap-2">
+                                    <ShoppingCart size={20}/> 
+                                    View Ticket ({cartItemsList.reduce((acc, curr) => acc + curr.quantity, 0)})
+                                </span>
+                                <span>{getCartTotal().toLocaleString('en-KE')}</span>
+                            </button>
+                        </div>
+                    )}
+                </main>
             </div>
 
-            <div className={`w-full md:w-96 bg-white border-l border-slate-200 flex flex-col shadow-2xl md:shadow-none z-20 transition-transform duration-300 absolute md:relative right-0 h-full ${isCartOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'}`}>
+            <div className={`w-full md:w-96 bg-white md:border-l border-slate-200 flex flex-col shadow-2xl md:shadow-none z-50 transition-transform duration-300 absolute md:relative right-0 h-full ${isCartOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'}`}>
                 
-                <header className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
-                    <h2 className="font-black text-lg text-slate-900 flex items-center gap-2">
-                        Current Order
-                    </h2>
-                    <div className="flex items-center gap-2">
-                        {cartItemsList.length > 0 && (
-                            <button onClick={clearCart} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Clear Order">
-                                <Trash2 size={18} />
-                            </button>
-                        )}
-                        <button onClick={() => setIsCartOpen(false)} className="md:hidden p-2 text-slate-500 bg-slate-100 rounded-full">
-                            <X size={20}/>
+                <header className="px-4 md:px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/50 shrink-0">
+                    <div className="flex items-center gap-3">
+                        <button onClick={() => setIsCartOpen(false)} className="md:hidden p-2 text-slate-500 bg-slate-200 hover:bg-slate-300 rounded-full transition-colors">
+                            <ArrowLeft size={20}/>
                         </button>
+                        <h2 className="font-black text-lg text-slate-900 flex items-center gap-2">
+                            Ticket
+                        </h2>
                     </div>
+                    
+                    {cartItemsList.length > 0 && (
+                        <button onClick={clearCart} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors flex items-center gap-1 text-sm font-bold">
+                            <Trash2 size={16} /> <span className="hidden md:inline">Clear</span>
+                        </button>
+                    )}
                 </header>
 
                 <div className="p-4 border-b border-slate-200 space-y-3 shrink-0">
@@ -313,7 +318,7 @@ export default function POS() {
                             placeholder="Table Number (Required)" 
                             value={tableNumber}
                             onChange={(e) => setTableNumber(e.target.value)}
-                            className={`w-full pl-9 pr-4 py-2.5 bg-slate-50 border rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all ${!tableNumber && !isCartEmpty ? 'border-amber-400 ring-4 ring-amber-400/10' : 'border-slate-200'}`}
+                            className={`w-full pl-9 pr-4 py-3 bg-slate-50 border rounded-xl text-base font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all ${!tableNumber && !isCartEmpty ? 'border-amber-400 ring-4 ring-amber-400/10' : 'border-slate-200'}`}
                         />
                     </div>
                     <div className="relative">
@@ -323,7 +328,7 @@ export default function POS() {
                             placeholder="Customer Name (Optional)" 
                             value={customerName}
                             onChange={(e) => setCustomerName(e.target.value)}
-                            className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
+                            className="w-full pl-9 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
                         />
                     </div>
                 </div>
@@ -331,90 +336,91 @@ export default function POS() {
                 <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar bg-slate-50/30">
                     {isCartEmpty ? (
                         <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-4">
-                            <div className="w-20 h-20 border-2 border-dashed border-slate-200 rounded-full flex items-center justify-center">
+                            <div className="w-24 h-24 border-2 border-dashed border-slate-200 rounded-full flex items-center justify-center bg-slate-50">
                                 <ShoppingCart size={32} className="text-slate-300"/>
                             </div>
-                            <p className="font-bold text-sm">Order is empty</p>
+                            <p className="font-bold text-sm">Ticket is empty</p>
                         </div>
                     ) : (
                         cartItemsList.map(item => (
                             <div key={item.item_id} className="bg-white border border-slate-100 p-3 rounded-2xl flex items-center gap-3 shadow-sm">
                                 <div className="flex-1 min-w-0">
                                     <h4 className="font-bold text-sm text-slate-900 truncate">{item.name}</h4>
-                                    <span className="font-black text-indigo-600 text-xs">{(item.price * item.quantity).toLocaleString()}</span>
+                                    <span className="font-black text-indigo-600 text-xs">{(item.price * item.quantity).toLocaleString()} KES</span>
                                 </div>
-                                <div className="flex items-center gap-2 bg-slate-50 rounded-lg p-1 border border-slate-100">
-                                    <button onClick={() => updateQuantity(item.item_id, -1)} className="w-8 h-8 flex items-center justify-center bg-white rounded shadow-sm text-slate-600 active:scale-95"><Minus size={14}/></button>
+                                <div className="flex items-center gap-2 bg-slate-50 rounded-xl p-1 border border-slate-100">
+                                    <button onClick={() => updateQuantity(item.item_id, -1)} className="w-8 h-8 flex items-center justify-center bg-white rounded-lg shadow-sm text-slate-600 active:scale-95"><Minus size={16}/></button>
                                     <span className="w-6 text-center font-black text-sm">{item.quantity}</span>
-                                    <button onClick={() => updateQuantity(item.item_id, 1)} className="w-8 h-8 flex items-center justify-center bg-indigo-600 rounded shadow-sm text-white active:scale-95"><Plus size={14}/></button>
+                                    <button onClick={() => updateQuantity(item.item_id, 1)} className="w-8 h-8 flex items-center justify-center bg-indigo-600 rounded-lg shadow-sm text-white active:scale-95"><Plus size={16}/></button>
                                 </div>
                             </div>
                         ))
                     )}
                 </div>
 
-                <div className="p-4 bg-white border-t border-slate-200 shrink-0 space-y-4 shadow-[0_-10px_20px_-15px_rgba(0,0,0,0.05)]">
-                    <div className="flex justify-between items-end">
-                        <span className="text-slate-500 font-bold text-sm">Order Total</span>
+                <div className="p-4 bg-white border-t border-slate-200 shrink-0 space-y-4 shadow-[0_-10px_20px_-15px_rgba(0,0,0,0.05)] pb-6 md:pb-4">
+                    <div className="flex justify-between items-end px-1">
+                        <span className="text-slate-500 font-bold text-sm">Total</span>
                         <span className="font-black text-3xl text-slate-900">{getCartTotal().toLocaleString('en-KE')}</span>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-3">
                         <button 
                             disabled={!canCheckout || submitOrderMutation.isPending}
                             onClick={() => submitOrderMutation.mutate('CASH')}
-                            className="flex flex-col items-center justify-center gap-1 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold active:scale-95 disabled:opacity-50 transition-all shadow-md"
+                            className="flex flex-col items-center justify-center gap-1 py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-bold active:scale-95 disabled:opacity-50 transition-all shadow-md"
                         >
-                            <Banknote size={20} />
-                            <span className="text-xs">Cash</span>
+                            <Banknote size={24} />
+                            <span className="text-sm">Cash</span>
                         </button>
                         
                         <button 
                             disabled={!canCheckout || submitOrderMutation.isPending}
                             onClick={() => setShowPaymentModal(true)}
-                            className="flex flex-col items-center justify-center gap-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold active:scale-95 disabled:opacity-50 transition-all shadow-md shadow-indigo-600/20"
+                            className="flex flex-col items-center justify-center gap-1 py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold active:scale-95 disabled:opacity-50 transition-all shadow-md shadow-indigo-600/20"
                         >
-                            <MonitorSmartphone size={20} />
-                            <span className="text-xs">Digital Pay</span>
+                            <MonitorSmartphone size={24} />
+                            <span className="text-sm">Digital Pay</span>
                         </button>
                     </div>
                 </div>
             </div>
 
+            {/* PAYMENT MODAL */}
             {showPaymentModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowPaymentModal(false)}></div>
-                    <div className="relative w-full max-w-sm bg-white rounded-[2rem] p-6 shadow-2xl animate-in zoom-in-95 duration-200">
-                        <button onClick={() => setShowPaymentModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><X size={20}/></button>
+                <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center md:px-4">
+                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm animate-in fade-in" onClick={() => setShowPaymentModal(false)}></div>
+                    <div className="relative w-full md:max-w-sm bg-white md:rounded-[2rem] rounded-t-[2rem] p-6 shadow-2xl animate-in slide-in-from-bottom-10 md:zoom-in-95 duration-200">
+                        <button onClick={() => setShowPaymentModal(false)} className="absolute top-4 right-4 w-10 h-10 bg-slate-100 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600"><X size={20}/></button>
                         
-                        <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4 mt-2">
                             <MonitorSmartphone size={32} />
                         </div>
                         
-                        <h3 className="text-2xl font-black text-center text-slate-900 mb-2">Digital Payment</h3>
+                        <h3 className="text-2xl font-black text-center text-slate-900 mb-2">Checkout Options</h3>
                         <p className="text-center text-sm text-slate-500 mb-6">Total Amount: <span className="font-bold text-slate-800">{getCartTotal().toLocaleString()} KES</span></p>
                         
-                        <div className="space-y-3">
+                        <div className="space-y-3 pb-6 md:pb-0">
                             <button 
                                 disabled={submitOrderMutation.isPending}
                                 onClick={() => submitOrderMutation.mutate('CARD')}
                                 className="w-full flex items-center justify-between p-4 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 text-indigo-700 rounded-2xl active:scale-95 disabled:opacity-50 transition-all group"
                             >
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm">
-                                        <CreditCard size={20} className="text-indigo-600"/>
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm">
+                                        <CreditCard size={24} className="text-indigo-600"/>
                                     </div>
                                     <div className="text-left">
-                                        <span className="block font-bold">Bank Card (PDQ bypass)</span>
-                                        <span className="text-xs text-indigo-500 font-medium">Customer enters card on device</span>
+                                        <span className="block font-black text-base">Bank Card</span>
+                                        <span className="text-xs text-indigo-500 font-bold">Generate payment link</span>
                                     </div>
                                 </div>
-                                <ChevronRight size={20} className="opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
+                                <ChevronRight size={24} className="opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
                             </button>
 
-                            <div className="relative flex py-2 items-center">
+                            <div className="relative flex py-4 items-center">
                                 <div className="flex-grow border-t border-slate-200"></div>
-                                <span className="flex-shrink-0 mx-4 text-slate-400 text-xs font-bold uppercase">OR M-PESA</span>
+                                <span className="flex-shrink-0 mx-4 text-slate-400 text-xs font-bold uppercase tracking-widest">OR M-PESA</span>
                                 <div className="flex-grow border-t border-slate-200"></div>
                             </div>
 
@@ -423,15 +429,15 @@ export default function POS() {
                                 placeholder="Customer M-Pesa (07XX...)" 
                                 value={phoneNumber}
                                 onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
-                                className="w-full text-center text-lg font-bold py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#52B44B] outline-none"
+                                className="w-full text-center text-xl tracking-widest font-black py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-[#52B44B] outline-none transition-all"
                             />
                             
                             <button 
                                 disabled={submitOrderMutation.isPending || phoneNumber.length < 9}
                                 onClick={() => submitOrderMutation.mutate('M-PESA')}
-                                className="w-full flex justify-center items-center gap-2 py-4 bg-[#52B44B] hover:bg-[#459a3f] text-white font-black rounded-xl active:scale-95 disabled:opacity-50 transition-all shadow-md"
+                                className="w-full flex justify-center items-center gap-2 py-4 bg-[#52B44B] hover:bg-[#459a3f] text-white font-black text-lg rounded-2xl active:scale-95 disabled:opacity-50 transition-all shadow-md mt-2"
                             >
-                                {submitOrderMutation.isPending ? <Loader2 size={24} className="animate-spin" /> : <><Smartphone size={20}/> Send STK Push</>}
+                                {submitOrderMutation.isPending ? <Loader2 size={24} className="animate-spin" /> : <><Smartphone size={24}/> Send STK Push</>}
                             </button>
                         </div>
                     </div>
