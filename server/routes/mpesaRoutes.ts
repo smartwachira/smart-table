@@ -8,5 +8,5 @@ const router = express.Router();
 //POST /api/mpesa/stkpush
 //The request must pass through generate MpesaToken b4 it hits initiateSTKPush
 router.post('/stkpush', generateMpesaToken, initiateSTK);
-router.post('/callback',mpesaCallBack);
+router.post('/webhook',mpesaCallBack);
 export default router;

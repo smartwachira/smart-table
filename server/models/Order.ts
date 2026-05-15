@@ -20,13 +20,16 @@ export interface OrderAttributes {
     notes?: string | null;
     cash_collected_by?: string | null;
     staff_id?: string | null;
-    guest_session_id?: string | null; // ⚡ ADDED: The Anonymous Session Tracker
+    guest_session_id?: string | null;
     gateway_reference?: string | null;
     gateway_fee: number;
-    platform_fee: number
+    platform_fee: number;
 }
 
-export interface OrderCreationAttributes extends Optional<OrderAttributes, 'order_id' | 'status' | 'payment_status'> {}
+// ⚡ FIX: Added gateway_fee and platform_fee to the Optional array
+export interface OrderCreationAttributes extends Optional<OrderAttributes, 
+    'order_id' | 'status' | 'payment_status' | 'gateway_fee' | 'platform_fee'
+> {}
 
 class Order extends Model<OrderAttributes, OrderCreationAttributes> implements OrderAttributes {
     public order_id!: string;
@@ -40,11 +43,11 @@ class Order extends Model<OrderAttributes, OrderCreationAttributes> implements O
     public payment_status!: PaymentStatus;
     public checkout_request_id!: string | null;
     public mpesa_receipt!: string | null;
+    public gateway_reference!: string | null;
     public notes!: string | null;
     public cash_collected_by!: string | null;
     public staff_id!: string | null;
-    public guest_session_id!: string | null; // ⚡ ADDED
-    public gateway_reference!: string | null;
+    public guest_session_id!: string | null; 
     public gateway_fee!: number;
     public platform_fee!: number;
 
@@ -76,7 +79,7 @@ Order.init({
         allowNull: false
     },
     payment_method: {
-        type: DataTypes.ENUM('CASH', 'M-PESA', 'CARD'), // ⚡ Expanded
+        type: DataTypes.ENUM('CASH', 'M-PESA', 'CARD'),
         allowNull: false
     },
     venue_id: {
@@ -88,7 +91,7 @@ Order.init({
         allowNull: true
     },
     payment_status: {
-        type: DataTypes.ENUM('PENDING', 'PAID', 'FAILED', 'REFUNDED', 'PARTIALLY_REFUNDED'), // ⚡ Expanded
+        type: DataTypes.ENUM('PENDING', 'PAID', 'FAILED', 'REFUNDED', 'PARTIALLY_REFUNDED'),
         defaultValue: 'PENDING'
     },
     checkout_request_id: {
@@ -98,6 +101,11 @@ Order.init({
     mpesa_receipt: {
         type: DataTypes.STRING, 
         allowNull: true
+    },
+    gateway_reference: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        unique: true
     },
     notes: {
         type: DataTypes.TEXT,
@@ -111,27 +119,18 @@ Order.init({
         type: DataTypes.UUID,
         allowNull: true,
     },
-    // ⚡ ADDED: Let Express and PostgreSQL know this exists
     guest_session_id: {
         type: DataTypes.STRING,
         allowNull: true
     },
-    gateway_reference: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        unique: true
-    },
     gateway_fee: {
-        type: DataTypes.DECIMAL(10, 2),
-        defaultValue: 0.00,
-        allowNull: false
+        type: DataTypes.DECIMAL(10,2),
+        defaultValue: 0.00
     },
     platform_fee: {
-        type: DataTypes.DECIMAL(10, 2),
-        defaultValue: 0.00,
-        allowNull: false
+        type: DataTypes.DECIMAL(10,2),
+        defaultValue: 0.00
     }
-
 }, {
     sequelize,
     timestamps: true,

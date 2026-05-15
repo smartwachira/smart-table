@@ -62,7 +62,6 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
         const currentRevenueResult = await Order.sum('total_amount', { where: { ...currentPeriodFilter, ...completedFilter, ...paidFilter } });
         const previousRevenueResult = await Order.sum('total_amount', { where: { ...previousPeriodFilter, ...completedFilter, ...paidFilter } });
         
-        // ⚡ GUARANTEE NUMBERS, PREVENT NaN
         const totalRevenue = Number(currentRevenueResult) || 0;
         const prevRevenue = Number(previousRevenueResult) || 0;
 
@@ -74,9 +73,16 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
         const aov = totalOrders > 0 ? (totalRevenue / totalOrders) : 0;
         const prevAov = prevTotalOrders > 0 ? (prevRevenue / prevTotalOrders) : 0;
 
-        // KPI 4: Live Kitchen Pulse
+        // KPI 4: Live Kitchen Pulse (⚡ UPDATED LOGIC)
         const liveActiveOrders = Number(await Order.count({
-            where: { venue_id: venueId, status: { [Op.in]: ['PENDING', 'PREPARING', 'READY'] } }
+            where: { 
+                venue_id: venueId, 
+                status: { [Op.notIn]: ['COMPLETED', 'CANCELLED'] }, // Condition C
+                [Op.or]: [ // Condition A & B
+                    { payment_method: { [Op.in]: ['CARD', 'M-PESA'] }, payment_status: 'PAID' },
+                    { payment_method: 'CASH' }
+                ]
+            }
         })) || 0;
 
         // Postgres specific time extract mapping
@@ -103,7 +109,7 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
             group: ['OrderItem.item_id', 'MenuItem.item_id', 'MenuItem.name', 'MenuItem.image_url'],
             order: [[literal('total_sold'), 'DESC']],
             limit: 5,
-            raw: true // ⚡ CRITICAL FIX: Retain aggregations!
+            raw: true
         });
 
         // Chart 3: Category Breakdown
@@ -119,7 +125,7 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
             ],
             group: ['MenuItem.MenuCategory.category_id', 'MenuItem.MenuCategory.name'],
             order: [[literal('total_sold'), 'DESC']],
-            raw: true // ⚡ CRITICAL FIX: Retain aggregations!
+            raw: true
         });
 
         // Chart 4: Payment Methods
@@ -130,7 +136,7 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
                 [fn('COUNT', col('order_id')), 'value']
             ],
             group: ['payment_method'],
-            raw: true // ⚡ CRITICAL FIX: Retain aggregations!
+            raw: true 
         });
 
         // Live Trends Construction
@@ -147,7 +153,7 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
             ],
             group: ['time_label'],
             order: [[literal('time_label'), 'ASC']],
-            raw: true // ⚡ CRITICAL FIX: Retain aggregations!
+            raw: true 
         });
 
         const previousTrends = await Order.findAll({
@@ -159,12 +165,11 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
             ],
             group: ['time_label'],
             order: [[literal('time_label'), 'ASC']],
-            raw: true // ⚡ CRITICAL FIX: Retain aggregations!
+            raw: true 
         });
 
         const unifiedTrendsMap: Record<string, any> = {};
         
-        // ⚡ Since we used raw: true, `row` is now a plain JS object. No need to .toJSON()
         currentTrends.forEach((row: any) => {
             unifiedTrendsMap[row.time_label] = {
                 timeLabel: row.time_label,
@@ -205,7 +210,6 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
             kpis: {
                 revenue: { value: totalRevenue, trend: calculateTrend(totalRevenue, prevRevenue) },
                 orders: { value: totalOrders, trend: calculateTrend(totalOrders, prevTotalOrders) },
-                // ⚡ Safely formatted
                 aov: { value: Number(aov.toFixed(2)), trend: calculateTrend(aov, prevAov) } 
             },
             livePulse: {

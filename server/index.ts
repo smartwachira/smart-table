@@ -46,6 +46,9 @@ const io = new Server(server, {
   }
 });
 
+// ⚡  Make 'io' globally accessible to your webhook controllers
+app.set("io", io);
+
 // ============================================================================
 // ⚡ CORS SECURITY CONFIGURATION
 // ============================================================================
@@ -84,6 +87,12 @@ io.on('connection',(socket: Socket)=>{
     socket.join(venueId);
     console.log(`User joined venue room: ${venueId}`)
   });
+
+  // Clients will ask to join a specific "room" for their exact order
+    socket.on('join_order_room', (orderId) => {
+        socket.join(`order_${orderId}`);
+        console.log(`📡 Client joined room: order_${orderId}`);
+    });
 
   //Listen for "New Order" event from Customer
   socket.on('new_order',(data: { venueId: string; [key: string]: any})=>{

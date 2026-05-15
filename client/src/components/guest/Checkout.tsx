@@ -3,16 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import { jwtDecode } from 'jwt-decode'; 
 import { AxiosError } from 'axios'; 
 import { toast } from 'sonner';
-import { usePaystackPayment } from 'react-paystack'; 
 import { 
     ArrowLeft, ShieldCheck, Smartphone, 
     Receipt, Loader2, CheckCircle2, User, Banknote, XCircle, CreditCard 
 } from 'lucide-react';
 
 import api from '../../utils/axiosConfig'; 
+import { socket } from '../../utils/socket';
 import { useCustomerCartStore } from '../../store/useCustomerCartStore';
 
-// 🛡️ Explicit Interfaces
 interface GuestJwtPayload {
     role: string;
     venueId: string;
@@ -34,6 +33,61 @@ interface PaystackInitResponse {
     access_code: string;
     authorization_url: string;
 }
+
+// ⚡ V2 FIX: Uses PaystackPop V2 which correctly resumes backend transactions via access_code ONLY
+const NativePaystackLauncher = ({ accessCode, onSuccess, onClose }: { accessCode: string, onSuccess: Function, onClose: Function }) => {
+    useEffect(() => {
+        const scriptId = 'paystack-v2-script';
+
+        // 1. Inject the script if it doesn't exist
+        let script = document.getElementById(scriptId) as HTMLScriptElement;
+        if (!script) {
+            script = document.createElement('script');
+            script.id = scriptId;
+            script.src = 'https://js.paystack.co/v2/inline.js'; // ⚡ Upgraded to V2
+            script.async = true;
+            document.body.appendChild(script);
+        }
+
+        // 2. Launch the modal when the script loads
+        const launchPaystack = () => {
+            const popup = new (window as any).PaystackPop();
+            popup.resumeTransaction(accessCode, {
+                onSuccess: (response: any) => onSuccess(response),
+                onCancel: () => onClose(),
+                onError: (error: any) => {
+                    console.error("Paystack SDK Error:", error);
+                    onClose();
+                }
+            });
+
+        };
+
+        if ((window as any).PaystackPop) {
+            launchPaystack();
+        } else {
+            script.onload = launchPaystack;
+        }
+
+        // 3. AGGRESSIVE TEARDOWN: Destroy foreign DOM elements when unmounted
+        return () => {
+            if (script && document.body.contains(script)){
+                document.body.removeChild(script);
+            }
+
+            // Paystack injects an invisible iframe into the body.
+            // We aggressively seek out and destroy it to prevent zombie transactions
+            const paystackIframe = document.querySelector('iframe[name="paystack-checkout-iframe"]');
+            if (paystackIframe && paystackIframe.parentNode) {
+                paystackIframe.parentNode.removeChild(paystackIframe);
+            }
+
+        };
+        
+    }, [accessCode, onSuccess, onClose]);
+
+    return null;
+};
 
 export default function Checkout() {
     const navigate = useNavigate();
@@ -58,40 +112,8 @@ export default function Checkout() {
     const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('idle'); 
     const [pollingOrderId, setPollingOrderId] = useState<string | null>(null);
 
-    // ⚡ FIX: Use Access Code instead of Reference
     const [paystackAccessCode, setPaystackAccessCode] = useState<string>('');
-
-    // ⚡ Pass access_code (using 'as any' to bypass strict TS library definitions)
-    const initializePaystack = usePaystackPayment({
-        publicKey: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || '',
-        email: "guest@smarttable.com", 
-        amount: Math.round(total * 100), 
-        currency: 'KES',
-        access_code: paystackAccessCode, 
-    } as any);
-
-    // ⚡ Watch for access_code updates to trigger the modal safely
-    useEffect(() => {
-        if (paystackAccessCode && paymentStatus === 'pending' && paymentMethod === 'CARD') {
-            (initializePaystack as Function)(
-                (ref: any) => { 
-                    setPaymentStatus('success');
-                    toast.success("Card Payment Successful!");
-                    setTimeout(() => {
-                        clearCart();
-                        if (pollingOrderId) navigate(`/order-status/${pollingOrderId}`); 
-                    }, 2000);
-                },
-                () => { 
-                    setPaymentStatus('idle');
-                    setIsProcessing(false);
-                    setPaystackAccessCode(''); // Reset on close
-                    toast.error("Payment window closed.");
-                }
-            );
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [paystackAccessCode]);
+    const [isGatewayLoading, setIsGatewayLoading] = useState<boolean>(false);
 
     useEffect(() => {
         const token = localStorage.getItem('guest_token');
@@ -119,40 +141,54 @@ export default function Checkout() {
         }
     }, [cartItems, navigate, venueId, paymentStatus]);
 
+    // ⚡ LIFECYCLE: Hybrid Socket + Polling Receptor
     useEffect(() => {
         let pollInterval: ReturnType<typeof setInterval>;
 
-        if (paymentStatus === 'pending' && pollingOrderId && paymentMethod === 'M-PESA'){
+        if (paymentStatus === 'pending' && pollingOrderId) {
+            
+            socket.emit('join_order_room', pollingOrderId);
+
+            const handleSuccess = (data: { orderId: string, method: string }) => {
+                setPaymentStatus('success');
+                toast.success("Payment confirmed by Bank!");
+                setTimeout(() => {
+                    clearCart(); 
+                    navigate(`/order-status/${data.orderId}`); 
+                }, 2000);
+            };
+
+            const handleFailure = (data: { orderId: string, method: string, reason: string }) => {
+                setPaymentStatus('failed');
+                setIsProcessing(false);
+                toast.error(`Payment Failed: ${data.reason}`);
+                setTimeout(() => setPaymentStatus('idle'), 3000);
+            };
+
+            socket.on('payment_success', handleSuccess);
+            socket.on('payment_failed', handleFailure);
+
             pollInterval = setInterval(async () => {
                 try {
                     const res = await api.get<OrderStatusResponse>(`/api/orders/${pollingOrderId}/status`);
                     const currentStatus = res.data.payment_status;
 
                     if (currentStatus === "PAID"){
-                        clearInterval(pollInterval);
-                        setPaymentStatus('success');
-                        toast.success("Payment confirmed!");
-
-                        setTimeout(() => {
-                            clearCart(); 
-                            navigate(`/order-status/${pollingOrderId}`); 
-                        }, 2000);
-                    } else if (currentStatus === 'FAILED' || res.data.status === 'CANCELLED'){
-                        clearInterval(pollInterval);
-                        setPaymentStatus('failed');
-                        setIsProcessing(false);
-                        toast.error("Payment failed, timed out, or was cancelled.");
-                        setTimeout(() => setPaymentStatus('idle'), 3000);
+                        handleSuccess({ orderId: pollingOrderId, method: paymentMethod });
+                    } else if (currentStatus === 'FAILED' || res.data.status === 'CANCELLED' || res.data.status === 'cancelled'){
+                        handleFailure({ orderId: pollingOrderId, method: paymentMethod, reason: "Cancelled or Insufficient Funds" });
                     }
                 } catch (error){
                     console.error("Polling error:", error);
                 }
-            }, 3000);
+            }, 4000);
+
+            return () => {
+                socket.off('payment_success', handleSuccess);
+                socket.off('payment_failed', handleFailure);
+                clearInterval(pollInterval);
+            };
         }
-        
-        return () => {
-            if (pollInterval) clearInterval(pollInterval);
-        };
     }, [paymentStatus, pollingOrderId, navigate, clearCart, paymentMethod]);
 
     const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -198,18 +234,15 @@ export default function Checkout() {
                 }, 2000);
 
             } else if (paymentMethod === 'M-PESA') {
-                setPaymentStatus('pending');
+                setPaymentStatus('pending'); 
                 await api.post('/api/mpesa/stkpush', { orderId, phone });
                 
             } else if (paymentMethod === 'CARD') {
                 setPaymentStatus('pending'); 
-                toast.loading("Connecting to secure gateway...", { id: 'gateway-load' });
-
+                setIsGatewayLoading(true);
                 const initRes = await api.post<PaystackInitResponse>('/api/paystack/initialize', { orderId });
                 
-                toast.dismiss('gateway-load');
                 
-                // ⚡ FIX: Update access_code state to trigger useEffect
                 setPaystackAccessCode(initRes.data.access_code);
             }
 
@@ -397,6 +430,33 @@ export default function Checkout() {
                     </form>
                 </div>
             </main>
+
+            {isGatewayLoading && (
+                <div className="fixed inset-0 z-[9999] bg-slate-900/70 backdrop-blur-sm flex flex-col items-center justify-center text-white animate-in fade-in duration-200">
+                    <Loader2 size={48} className="animate-spin mb-4 text-indigo-400" />
+                    <h3 className="text-xl font-black tracking-wide">Connecting to your bank...</h3>
+                    <p className="text-slate-300 text-sm mt-2 font-medium">Secured by Paystack</p>
+                </div>
+            )}
+
+            {/* ⚡ V2 FIX: Passes ONLY accessCode to flawlessly fetch backend transaction details */}
+            {paystackAccessCode && (
+                <NativePaystackLauncher 
+                    accessCode={paystackAccessCode}
+                    onSuccess={() => {
+                        setPaystackAccessCode(''); // Sever the access code
+                        setIsGatewayLoading(false); // Drop the overlay
+                        toast.success("Authorizing payment...");
+                    }}
+                    onClose={() => {
+                        setPaystackAccessCode(''); // Sever the access code
+                        setIsGatewayLoading(false); // Drop the overlay
+                        setPaymentStatus('idle');
+                        setIsProcessing(false);
+                        toast.error("Payment window closed.");
+                    }}
+                />
+            )}
         </div>
     );
 }

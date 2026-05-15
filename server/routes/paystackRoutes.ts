@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { initializePayment } from '../controllers/paystackController.js'; // Ensure the .js extension for Node ESM
+import { initializePayment,paystackWebhookHandler } from '../controllers/paystackController.js'; // Ensure the .js extension for Node ESM
 
 const router = Router();
 
@@ -10,6 +10,7 @@ const router = Router();
  * @access  Public (Guest Checkout) or Protected (Waitstaff)
  */
 router.post('/initialize', initializePayment);
+router.post('/webhook',paystackWebhookHandler)
 
 // ⚡ PLACEHOLDER FOR NEXT STEP: 
 // We will build the webhook controller next. It requires raw body parsing for signature verification.

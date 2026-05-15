@@ -2,7 +2,6 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import axios, { AxiosError } from 'axios';
 import { toast } from 'sonner';
-import { usePaystackPayment } from 'react-paystack'; 
 import { 
     Search, ShoppingCart, Plus, Minus, Trash2,Loader2, 
     Smartphone, Banknote, ChefHat, User, Hash, X, MonitorSmartphone, ChevronRight, CreditCard, ArrowLeft
@@ -10,6 +9,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useCartStore } from '../../store/useCartStore'; 
 import { useMenuStore } from '../../store/useMenuStore'; 
+import { socket } from '../../utils/socket'; 
 
 export interface POSCategory {
     category_id: string;
@@ -30,8 +30,13 @@ type PaymentMethodType = 'CASH' | 'M-PESA' | 'CARD';
 
 type SubmitOrderResponse = 
     | { status: 'success' }
-    | { status: 'mpesa_sent' }
-    | { status: 'card_init'; access_code: string }; // ⚡ FIX: Use access_code here
+    | { status: 'mpesa_sent'; orderId: string }
+    | { status: 'card_init'; access_code: string; orderId: string; reference: string; }; 
+
+interface OrderStatusResponse {
+    payment_status: string;
+    status: string;
+}
 
 const getImageUrl = (path?: string) => {
     if (!path) return '';
@@ -39,6 +44,39 @@ const getImageUrl = (path?: string) => {
     const sanitizedPath = path.replace(/\\/g, '/');
     const cleanPath = sanitizedPath.startsWith('/') ? sanitizedPath : `/${sanitizedPath}`;
     return `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}${cleanPath}`;
+};
+
+// ⚡ V2 FIX: Uses PaystackPop V2 which correctly resumes backend transactions via access_code ONLY
+const NativePaystackLauncher = ({ accessCode, onSuccess, onClose }: { accessCode: string, onSuccess: Function, onClose: Function }) => {
+    useEffect(() => {
+        const script = document.createElement('script');
+        script.src = 'https://js.paystack.co/v2/inline.js'; // ⚡ Upgraded to V2
+        script.async = true;
+        
+        script.onload = () => {
+            const popup = new (window as any).PaystackPop();
+            
+            // ⚡ Resume the exact transaction created by your Node.js backend
+            popup.resumeTransaction(accessCode, {
+                onSuccess: (response: any) => onSuccess(response),
+                onCancel: () => onClose(),
+                onError: (error: any) => {
+                    console.error("Paystack SDK Error:", error);
+                    onClose();
+                }
+            });
+        };
+
+        document.body.appendChild(script);
+
+        return () => {
+            if (document.body.contains(script)) {
+                document.body.removeChild(script); 
+            }
+        };
+    }, [accessCode, onSuccess, onClose]);
+
+    return null;
 };
 
 export default function POS() {
@@ -53,17 +91,8 @@ export default function POS() {
     const [showPaymentModal, setShowPaymentModal] = useState(false);
     const [phoneNumber, setPhoneNumber] = useState('');
 
-    // ⚡ FIX: Use Access Code instead of Reference
     const [paystackAccessCode, setPaystackAccessCode] = useState<string>('');
-
-    // ⚡ Pass access_code (using 'as any' to bypass strict TS library definitions)
-    const initializePaystack = usePaystackPayment({
-        publicKey: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || '',
-        email: "pos@smarttable.com", 
-        amount: Math.round(getCartTotal() * 100), 
-        currency: 'KES',
-        access_code: paystackAccessCode, 
-    } as any);
+    const [pendingOrderId, setPendingOrderId] = useState<string | null>(null); 
 
     const handleReset = () => {
         clearCart();
@@ -72,27 +101,55 @@ export default function POS() {
         setPhoneNumber('');
         setShowPaymentModal(false);
         setIsCartOpen(false);
-        setPaystackAccessCode(''); // ⚡ Reset access code
+        setPaystackAccessCode('');
+        setPendingOrderId(null); 
     };
 
-    // ⚡ Watch for access_code updates to trigger the modal safely
+    // ⚡ LIFECYCLE: Hybrid Socket + Polling Receptor for POS
     useEffect(() => {
-        if (paystackAccessCode && showPaymentModal) {
-            setShowPaymentModal(false); 
-            
-            (initializePaystack as Function)(
-                (ref: any) => { 
-                    toast.success("Card Payment Successful!");
-                    handleReset();
-                },
-                () => { 
-                    toast.error("Payment window closed. Order is still pending.");
-                    setPaystackAccessCode('');
+        let pollInterval: ReturnType<typeof setInterval>;
+
+        if (pendingOrderId) {
+            socket.emit('join_order_room', pendingOrderId);
+
+            const handleSuccess = () => {
+                toast.success("Payment Confirmed!");
+                handleReset(); 
+            };
+
+            const handleFailure = (data: { orderId: string, method: string, reason: string }) => {
+                toast.error(`Customer Payment Failed: ${data.reason}`);
+                setPendingOrderId(null); 
+            };
+
+            socket.on('payment_success', handleSuccess);
+            socket.on('payment_failed', handleFailure);
+
+            pollInterval = setInterval(async () => {
+                try {
+                    const res = await axios.get<OrderStatusResponse>(
+                        `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/orders/${pendingOrderId}/status`,
+                        { headers: { Authorization: `Bearer ${token}` } } 
+                    );
+                    const currentStatus = res.data.payment_status;
+
+                    if (currentStatus === "PAID"){
+                        handleSuccess();
+                    } else if (currentStatus === 'FAILED' || res.data.status === 'CANCELLED' || res.data.status === 'cancelled'){
+                        handleFailure({ orderId: pendingOrderId, method: 'POLL', reason: "Cancelled or Insufficient Funds" });
+                    }
+                } catch (error){
+                    console.error("Polling error:", error);
                 }
-            );
+            }, 4000);
+
+            return () => {
+                socket.off('payment_success', handleSuccess);
+                socket.off('payment_failed', handleFailure);
+                clearInterval(pollInterval);
+            };
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [paystackAccessCode]);
+    }, [pendingOrderId, token]);
 
     const { data: categories = [], isLoading: categoriesLoading } = useQuery({
         queryKey: ['categories', venueId],
@@ -154,7 +211,7 @@ export default function POS() {
                     { orderId, phone: phoneNumber },
                     { headers: { Authorization: `Bearer ${token}` } }
                 );
-                return { status: 'mpesa_sent' };
+                return { status: 'mpesa_sent', orderId }; 
             }
 
             if (paymentMethod === 'CARD') {
@@ -163,8 +220,7 @@ export default function POS() {
                     { orderId },
                     { headers: { Authorization: `Bearer ${token}` } }
                 );
-                // ⚡ FIX: Extract and return the access code
-                return { status: 'card_init', access_code: initRes.data.access_code };
+                return { status: 'card_init', access_code: initRes.data.access_code, reference: initRes.data.reference, orderId }; 
             }
 
             return { status: 'success' };
@@ -174,12 +230,14 @@ export default function POS() {
                 toast.success('Order sent to kitchen!');
                 handleReset();
             } else if (data.status === 'mpesa_sent') {
-                toast.success('STK Push sent to customer!');
-                handleReset();
+                toast.success('STK Push sent! Waiting for payment...');
+                setShowPaymentModal(false);
+                setPendingOrderId(data.orderId); 
             } else if (data.status === 'card_init') {
                 toast.loading("Opening Gateway...", { id: 'pos-gateway' });
-                // ⚡ FIX: Trigger the useEffect with the access code
+                setShowPaymentModal(false); 
                 setPaystackAccessCode(data.access_code);
+                setPendingOrderId(data.orderId); 
                 setTimeout(() => toast.dismiss('pos-gateway'), 500); 
             }
         },
@@ -193,7 +251,7 @@ export default function POS() {
     const canCheckout = !isCartEmpty && tableNumber.trim() !== '';
 
     return (
-        <div className="h-[100dvh] md:h-[calc(100vh-4rem)] flex overflow-hidden bg-slate-50 absolute inset-0 md:relative z-40 md:z-0">
+        <div className="flex-1 w-full h-[calc(100dvh-4rem)] md:h-[calc(100vh-4rem)] flex overflow-hidden bg-slate-50 relative">
             
             <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${isCartOpen ? 'hidden md:flex' : 'flex'}`}>
                 
@@ -442,6 +500,19 @@ export default function POS() {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* ⚡ V2 FIX: Passes ONLY accessCode to flawlessly fetch backend transaction details */}
+            {paystackAccessCode && (
+                <NativePaystackLauncher 
+                    accessCode={paystackAccessCode}
+                    onSuccess={() => toast.success("Card Payment Initialized...")}
+                    onClose={() => {
+                        toast.error("Payment window closed.");
+                        setPaystackAccessCode('');
+                        setPendingOrderId(null); 
+                    }}
+                />
             )}
         </div>
     );

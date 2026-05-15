@@ -36,19 +36,17 @@ interface HistoricalOrdersQuery {
 export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Response): Promise<Response | void> => {
 
     console.log("🕵️ EXTRACTED GUEST ID:", req.headers['x-guest-id']);
-    const t = await sequelize.transaction(); // Start a "Safety Net"
+    const t = await sequelize.transaction(); 
 
     try {
         const { items, payment_method, customer_name, phone_number } = req.body;
         
-        // ⚡ ADDED: Extract the session UUID injected by the React Axios Interceptor
         const guestSessionId = req.headers['x-guest-id'] as string | undefined;
         
         let venue_id: string;
         let table_number: string;
         let staffId: string | null = null;
 
-        // ⚡ ZERO-TRUST POLYMORPHIC IDENTITY CHECK
         if (req.guest) {
             venue_id = req.guest.venueId;
             table_number = req.guest.tableName;
@@ -99,20 +97,20 @@ export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Re
 
         const newOrder = await Order.create({
             venue_id, 
-            staff_id: staffId, 
+            staff_id: staffId || null, 
             customer_name: customer_name || (staffId ? `Walk-in (Staff)` : `Guest (table ${table_number})`),
             table_number, 
-            phone_number,
+            phone_number: phone_number || null,
             total_amount: trueTotalAmount,
             payment_method,
-            status: 'PENDING',
+            status: 'pending',
             payment_status: 'PENDING',
-            // ⚡ ADDED: Explicitly map the UUID into the PostgreSQL row
-            guest_session_id: guestSessionId || null 
+            guest_session_id: guestSessionId || null,
+            gateway_fee: 0, // ⚡ Explicitly pass default
+            platform_fee: 0 // ⚡ Explicitly pass default
         }, { transaction: t });
 
 
-        // 🛡️ Map the associated foreign key before bulk insertion
         const orderItemsData = validatedItems.map(item => ({
             ...item,
             order_id: newOrder.order_id || newOrder.getDataValue('order_id')
@@ -146,7 +144,6 @@ export const getOrders = async (req: Request, res: Response): Promise<Response |
     try {
         const venueId = req.user!.venueId; 
         
-        // ⚡ FIX 1: Removed strict attributes to prevent "Column does not exist" crashes
         const venue = await Venue.findByPk(venueId);
         const shiftHours = venue?.shift_duration_hours || 14; 
         
@@ -166,10 +163,11 @@ export const getOrders = async (req: Request, res: Response): Promise<Response |
                             }
                         ]
                     },
+                    // ⚡ UPDATED LOGIC: Strict payment conditions
                     {
                         [Op.or]: [
-                            { payment_status: 'PAID' },
-                            { payment_method: 'CASH' } 
+                            { payment_method: { [Op.in]: ['CARD', 'M-PESA'] }, payment_status: 'PAID' },
+                            { payment_method: 'CASH' }
                         ]
                     }
                 ]
@@ -182,13 +180,11 @@ export const getOrders = async (req: Request, res: Response): Promise<Response |
                 {
                     model: User, 
                     as: 'CashCollector'
-                    // ⚡ FIX 2: Removed strict username mapping that caused SQL crashes
                 }
             ],
             order: [['createdAt', 'ASC']] 
         });
 
-        // Ensure the frontend always gets the 'name' property it expects without crashing SQL
         const safeOrders = orders.map(order => {
             const orderJson = order.toJSON() as any;
             if (orderJson.CashCollector) {
@@ -294,7 +290,6 @@ export const markCashCollected = async (req: Request<{orderId: string}, {}>, res
         order.payment_status = 'PAID';
         order.cash_collected_by = staffId; 
 
-        // ⚡ FIX 3: Removed strict username mapping
         const staffMember = await User.findByPk(staffId);
 
         const updatedOrderData = order.toJSON() as any;
@@ -342,7 +337,6 @@ export const getHistoricalOrders = async (req: Request<{}, {}, {}, HistoricalOrd
                 {
                     model: User, 
                     as: 'CashCollector'
-                    // ⚡ FIX 4: Removed strict mapping here too
                 }
             ],
             order: [['createdAt', 'DESC']] 
@@ -364,10 +358,8 @@ export const getHistoricalOrders = async (req: Request<{}, {}, {}, HistoricalOrd
     }
 };
 
-// ⚡ NEW: Fetch all orders for a specific device's session (Strict TypeScript)
 export const getGuestOrders = async (req: Request, res: Response): Promise<Response | void> => {
     try {
-        // Explicitly cast the header to a string to satisfy TypeScript
         const guestSessionId = req.headers['x-guest-id'] as string | undefined;
 
         if (!guestSessionId) {
@@ -375,14 +367,22 @@ export const getGuestOrders = async (req: Request, res: Response): Promise<Respo
         }
 
         const orders = await Order.findAll({
-            where: { guest_session_id: guestSessionId },
+            where: { 
+                guest_session_id: guestSessionId,
+                status: { [Op.ne]: 'CANCELLED' }, // Hide cancelled orders
+                // ⚡ UPDATED LOGIC: Hide failed/pending digital ghost orders
+                [Op.or]: [
+                    { payment_method: { [Op.in]: ['CARD', 'M-PESA'] }, payment_status: 'PAID' },
+                    { payment_method: 'CASH' }
+                ]
+            },
             include: [
                 {
                     model: OrderItem,
                     include: [{ model: MenuItem, attributes: ['name', 'image_url'] }]
                 }
             ],
-            order: [['createdAt', 'DESC']] // Most recent orders at the top
+            order: [['createdAt', 'DESC']] 
         });
 
         return res.status(200).json(orders);

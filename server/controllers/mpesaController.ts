@@ -1,32 +1,11 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
-import Order from '../models/Order.js'; // Keep the .js extension for NodeNext
+import Order from '../models/Order.js'; 
 import { MpesaRequest } from '../middleware/mpesaAuth.js';
 
-// 🛡️ Strict typing for the expected frontend payload
 interface StkPushRequestBody {
     orderId: string;
     phone: string;
-}
-
-// 🛡️ Strict typing for Safaricom's deeply nested Webhook payload
-interface MpesaCallbackItem {
-    Name: string;
-    Value?: string | number;
-}
-
-interface MpesaCallbackPayload {
-    Body: {
-        stkCallback: {
-            MerchantRequestID: string;
-            CheckoutRequestID: string;
-            ResultCode: number;
-            ResultDesc: string;
-            CallbackMetadata?: {
-                Item: MpesaCallbackItem[];
-            };
-        };
-    };
 }
 
 export const initiateSTK = async (req: MpesaRequest, res: Response): Promise<Response | void> => {
@@ -44,9 +23,9 @@ export const initiateSTK = async (req: MpesaRequest, res: Response): Promise<Res
             return res.status(400).json({ message: "Invalid Safaricom phone format." });
         }
 
-        const shortCode = process.env.DARAJA_SHORTCODE as string;
-        const passkey = process.env.DARAJA_PASSKEY as string;
-        const callbackUrl = process.env.DARAJA_CALLBACK_URL as string;
+        const shortCode = process.env.MPESA_SHORTCODE as string; 
+        const passkey = process.env.MPESA_PASSKEY as string;
+        const callbackUrl = `${process.env.PUBLIC_API_URL}/api/mpesa/webhook`; 
         const environment = process.env.DARAJA_ENVIRONMENT || 'sandbox';
 
         const date = new Date();
@@ -77,12 +56,9 @@ export const initiateSTK = async (req: MpesaRequest, res: Response): Promise<Res
             AccountReference: `Table ${order.table_number}`,
             TransactionDesc: `SmartTable Order`
         }, {
-            headers: {
-                Authorization: `Bearer ${req.mpesaToken}`
-            }
+            headers: { Authorization: `Bearer ${req.mpesaToken}` }
         });
 
-        // Save the CheckoutRequestID to match it during the callback later
         order.checkout_request_id = response.data.CheckoutRequestID;
         await order.save();
 
@@ -94,47 +70,71 @@ export const initiateSTK = async (req: MpesaRequest, res: Response): Promise<Res
     }
 };
 
-// 🛡️ Note how we inject MpesaCallbackPayload directly into the Express Request generic
-export const mpesaCallBack = async (req: Request<{}, {}, MpesaCallbackPayload>, res: Response): Promise<void> => {
+export const mpesaCallBack = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { MerchantRequestID, CheckoutRequestID, ResultCode, ResultDesc, CallbackMetadata } = req.body.Body.stkCallback;
-
-        const order = await Order.findOne({ where: { checkout_request_id: CheckoutRequestID } });
-        
-        if (!order) {
-            console.log(`⚠️ M-Pesa Callback received for unknown order: ${CheckoutRequestID}`);
+        // ⚡ Safely extract payload to prevent "Cannot read properties of undefined" 500 errors
+        const stkCallback = req.body?.Body?.stkCallback;
+        if (!stkCallback) {
+            console.warn("⚠️ Invalid M-Pesa Webhook Payload Received");
             res.status(200).send("Acknowledged");
             return;
         }
 
-        if (ResultCode === 0) {
-            // SUCCESS
+        const { MerchantRequestID, CheckoutRequestID, ResultCode, ResultDesc, CallbackMetadata } = stkCallback;
+
+        const order = await Order.findOne({ where: { checkout_request_id: CheckoutRequestID } });
+        
+        if (!order) {
+            console.warn(`⚠️ M-Pesa Callback received for unknown order: ${CheckoutRequestID}`);
+            res.status(200).send("Acknowledged");
+            return;
+        }
+
+        // ⚡ Safely grab the socket instance regardless of what it was named in index.ts
+        const io = req.app.get('socketio') || req.app.get('io'); 
+
+        // ⚡ Cast ResultCode to Number to ensure string "1032" doesn't bypass the switch statement
+        if (Number(ResultCode) === 0) {
+            
             const items = CallbackMetadata?.Item || [];
-            const receiptItem = items.find((item) => item.Name === 'MpesaReceiptNumber');
+            const receiptItem = items.find((item: any) => item.Name === 'MpesaReceiptNumber');
             const receiptNumber = receiptItem ? String(receiptItem.Value) : 'UNKNOWN';
 
-            order.payment_status = 'PAID';
-            order.status = 'pending'; // Moves from unpaid to pending kitchen queue
-            order.mpesa_receipt = receiptNumber;
-            await order.save();
+            // ⚡ Use .update() and strictly enforce UPPERCASE statuses
+            await order.update({
+                payment_status: 'PAID',
+                status: 'PENDING', 
+                mpesa_receipt: receiptNumber
+            });
 
-            // Emit Socket event to kitchen here...
+            if(io) {
+                io.to(`order_${order.order_id}`).emit('payment_success', { orderId: order.order_id, method: 'MPESA' });
+            }
             
         } else {
-            // FAILURE
-            let failureReason = "Payment Failed";
             
-            switch (ResultCode) {
+            let failureReason = "Payment Failed";
+            switch (Number(ResultCode)) {
                 case 1032: failureReason = "Cancelled by Customer"; break;
                 case 1037: failureReason = "Timeout (Customer didn't enter PIN)"; break;
                 case 1: failureReason = "Insufficient Funds"; break;
-                default: failureReason = ResultDesc;
+                default: failureReason = ResultDesc || "Failed";
             }
 
-            order.payment_status = 'FAILED';
-            order.status = 'cancelled';
-            order.notes = failureReason;
-            await order.save();
+            // ⚡ Use .update() and strictly enforce UPPERCASE statuses
+            await order.update({
+                payment_status: 'FAILED',
+                status: 'CANCELLED',
+                notes: failureReason
+            });
+
+            if(io) {
+                io.to(`order_${order.order_id}`).emit('payment_failed', {
+                    orderId: order.order_id,
+                    method: 'MPESA',
+                    reason: failureReason
+                });
+            }
         }
 
         res.status(200).json({ ResultCode: 0, ResultDesc: "Accepted" });
