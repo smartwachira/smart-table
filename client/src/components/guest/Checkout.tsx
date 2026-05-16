@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { jwtDecode } from 'jwt-decode'; 
+import { useMutation } from '@tanstack/react-query'; // ⚡ ADDED REACT QUERY
 import { AxiosError } from 'axios'; 
 import { toast } from 'sonner';
 import { 
@@ -34,22 +35,20 @@ interface PaystackInitResponse {
     authorization_url: string;
 }
 
-// ⚡ V2 FIX: Uses PaystackPop V2 which correctly resumes backend transactions via access_code ONLY
+// ⚡ V2 FIX: Aggressive Teardown & DOM Cleanup
 const NativePaystackLauncher = ({ accessCode, onSuccess, onClose }: { accessCode: string, onSuccess: Function, onClose: Function }) => {
     useEffect(() => {
         const scriptId = 'paystack-v2-script';
 
-        // 1. Inject the script if it doesn't exist
         let script = document.getElementById(scriptId) as HTMLScriptElement;
         if (!script) {
             script = document.createElement('script');
             script.id = scriptId;
-            script.src = 'https://js.paystack.co/v2/inline.js'; // ⚡ Upgraded to V2
+            script.src = 'https://js.paystack.co/v2/inline.js';
             script.async = true;
             document.body.appendChild(script);
         }
 
-        // 2. Launch the modal when the script loads
         const launchPaystack = () => {
             const popup = new (window as any).PaystackPop();
             popup.resumeTransaction(accessCode, {
@@ -60,7 +59,6 @@ const NativePaystackLauncher = ({ accessCode, onSuccess, onClose }: { accessCode
                     onClose();
                 }
             });
-
         };
 
         if ((window as any).PaystackPop) {
@@ -69,21 +67,16 @@ const NativePaystackLauncher = ({ accessCode, onSuccess, onClose }: { accessCode
             script.onload = launchPaystack;
         }
 
-        // 3. AGGRESSIVE TEARDOWN: Destroy foreign DOM elements when unmounted
         return () => {
-            if (script && document.body.contains(script)){
+            if (script && document.body.contains(script)) {
                 document.body.removeChild(script);
             }
-
-            // Paystack injects an invisible iframe into the body.
-            // We aggressively seek out and destroy it to prevent zombie transactions
+            
             const paystackIframe = document.querySelector('iframe[name="paystack-checkout-iframe"]');
             if (paystackIframe && paystackIframe.parentNode) {
                 paystackIframe.parentNode.removeChild(paystackIframe);
             }
-
         };
-        
     }, [accessCode, onSuccess, onClose]);
 
     return null;
@@ -108,7 +101,7 @@ export default function Checkout() {
     const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CARD'); 
     const [phone, setPhone] = useState<string>('');
     
-    const [isProcessing, setIsProcessing] = useState<boolean>(false);
+    // ⚡ DELETED manual isProcessing state!
     const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('idle'); 
     const [pollingOrderId, setPollingOrderId] = useState<string | null>(null);
 
@@ -160,7 +153,6 @@ export default function Checkout() {
 
             const handleFailure = (data: { orderId: string, method: string, reason: string }) => {
                 setPaymentStatus('failed');
-                setIsProcessing(false);
                 toast.error(`Payment Failed: ${data.reason}`);
                 setTimeout(() => setPaymentStatus('idle'), 3000);
             };
@@ -195,17 +187,9 @@ export default function Checkout() {
         setPhone(e.target.value.replace(/\D/g, ''));
     };
 
-    const handleCheckoutSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!customerName.trim()) return toast.error("Please enter your name for the order.");
-        
-        if (paymentMethod === 'M-PESA' && (phone.length < 9 || phone.length > 12)) {
-            return toast.error("Please enter a valid phone number.");
-        }
-
-        setIsProcessing(true);
-
-        try {
+    // ⚡ REFACTOR: The powerful React Query Mutation
+    const submitOrderMutation = useMutation({
+        mutationFn: async () => {
             const orderPayload = {
                 venue_id: venueId,
                 table_number: tableNumber,
@@ -223,38 +207,55 @@ export default function Checkout() {
             
             const orderRes = await api.post<{ orderId: string }>('/api/orders', orderPayload);
             const orderId = orderRes.data.orderId;
-            setPollingOrderId(orderId);
 
             if (paymentMethod === 'CASH') {
+                return { status: 'success', method: 'CASH', orderId };
+            } else if (paymentMethod === 'M-PESA') {
+                await api.post('/api/mpesa/stkpush', { orderId, phone });
+                return { status: 'pending', method: 'M-PESA', orderId };
+            } else if (paymentMethod === 'CARD') {
+                const initRes = await api.post<PaystackInitResponse>('/api/paystack/initialize', { orderId });
+                return { status: 'pending', method: 'CARD', orderId, access_code: initRes.data.access_code };
+            }
+            throw new Error("Invalid payment method");
+        },
+        onSuccess: (data) => {
+            setPollingOrderId(data.orderId);
+
+            if (data.method === 'CASH') {
                 setPaymentStatus('success');
                 toast.success("Order sent to kitchen! Please pay your waiter.");
                 setTimeout(() => {
                     clearCart();
-                    navigate(`/order-status/${orderId}`); 
+                    navigate(`/order-status/${data.orderId}`); 
                 }, 2000);
-
-            } else if (paymentMethod === 'M-PESA') {
+            } else if (data.method === 'M-PESA') {
                 setPaymentStatus('pending'); 
-                await api.post('/api/mpesa/stkpush', { orderId, phone });
-                
-            } else if (paymentMethod === 'CARD') {
+            } else if (data.method === 'CARD') {
                 setPaymentStatus('pending'); 
-                setIsGatewayLoading(true);
-                const initRes = await api.post<PaystackInitResponse>('/api/paystack/initialize', { orderId });
-                
-                
-                setPaystackAccessCode(initRes.data.access_code);
+                setIsGatewayLoading(true); // Trigger UI block
+                setPaystackAccessCode(data.access_code!); // Opens Native SDK
             }
-
-        } catch (error) {
+        },
+        onError: (error: any) => {
             console.error("Checkout Error:", error);
             const axiosError = error as AxiosError<{ message: string }>;
             toast.error(axiosError.response?.data?.message || "Checkout failed. Please try again.");
-            toast.dismiss('gateway-load');
             setPaymentStatus('idle');
-            setIsProcessing(false);
             setPaystackAccessCode('');
+            setIsGatewayLoading(false);
         }
+    });
+
+    const handleCheckoutSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!customerName.trim()) return toast.error("Please enter your name for the order.");
+        if (paymentMethod === 'M-PESA' && (phone.length < 9 || phone.length > 12)) {
+            return toast.error("Please enter a valid phone number.");
+        }
+        
+        // Trigger the mutation
+        submitOrderMutation.mutate();
     };
 
     if (!venueId) {
@@ -271,7 +272,7 @@ export default function Checkout() {
         <div className="min-h-screen bg-slate-50 font-sans pb-12 relative overflow-hidden">
             
             <header className="bg-white px-4 pt-6 pb-4 border-b border-slate-200 sticky top-0 z-10 flex items-center justify-between shadow-sm">
-                <button onClick={() => navigate(-1)} disabled={isProcessing} className="w-10 h-10 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center text-slate-600 transition-colors disabled:opacity-50">
+                <button onClick={() => navigate(-1)} disabled={submitOrderMutation.isPending} className="w-10 h-10 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center text-slate-600 transition-colors disabled:opacity-50">
                     <ArrowLeft size={20} />
                 </button>
                 <div className="text-center">
@@ -284,6 +285,7 @@ export default function Checkout() {
             </header>
 
             <main className="px-4 py-6 space-y-6 max-w-lg mx-auto">
+                {/* ... (Order Summary UI remains exactly the same) ... */}
                 <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
                     <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
                         <Receipt size={16} /> Order Summary
@@ -360,7 +362,7 @@ export default function Checkout() {
                                     placeholder="What should we call you?"
                                     value={customerName}
                                     onChange={(e) => setCustomerName(e.target.value)}
-                                    disabled={isProcessing}
+                                    disabled={submitOrderMutation.isPending}
                                     className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-11 pr-4 py-4 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:bg-white transition-all disabled:opacity-50 shadow-inner"
                                 />
                             </div>
@@ -410,7 +412,7 @@ export default function Checkout() {
                                     placeholder="07XX XXX XXX"
                                     value={phone}
                                     onChange={handlePhoneChange}
-                                    disabled={isProcessing}
+                                    disabled={submitOrderMutation.isPending}
                                     className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4 text-slate-900 font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-[#52B44B]/50 focus:bg-white transition-all disabled:opacity-50 shadow-inner text-center text-lg"
                                 />
                             </div>
@@ -418,7 +420,7 @@ export default function Checkout() {
 
                         <button 
                             type="submit"
-                            disabled={isProcessing }
+                            disabled={submitOrderMutation.isPending || (paymentMethod === 'M-PESA' && phone.length < 9)}
                             className={`w-full py-4 rounded-2xl font-black text-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed ${
                                 paymentMethod === 'M-PESA' ? 'bg-[#52B44B] hover:bg-[#459e3f] shadow-[#52B44B]/30' : 
                                 paymentMethod === 'CARD' ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/30' :
@@ -431,6 +433,7 @@ export default function Checkout() {
                 </div>
             </main>
 
+            {/* ⚡ OPTIMISTIC UI: The Blocking Gateway Overlay */}
             {isGatewayLoading && (
                 <div className="fixed inset-0 z-[9999] bg-slate-900/70 backdrop-blur-sm flex flex-col items-center justify-center text-white animate-in fade-in duration-200">
                     <Loader2 size={48} className="animate-spin mb-4 text-indigo-400" />
@@ -452,7 +455,6 @@ export default function Checkout() {
                         setPaystackAccessCode(''); // Sever the access code
                         setIsGatewayLoading(false); // Drop the overlay
                         setPaymentStatus('idle');
-                        setIsProcessing(false);
                         toast.error("Payment window closed.");
                     }}
                 />

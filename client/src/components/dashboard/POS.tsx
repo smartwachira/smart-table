@@ -46,17 +46,24 @@ const getImageUrl = (path?: string) => {
     return `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}${cleanPath}`;
 };
 
-// ⚡ V2 FIX: Uses PaystackPop V2 which correctly resumes backend transactions via access_code ONLY
+// ⚡ V2 FIX: Aggressive Teardown & DOM Cleanup
 const NativePaystackLauncher = ({ accessCode, onSuccess, onClose }: { accessCode: string, onSuccess: Function, onClose: Function }) => {
     useEffect(() => {
-        const script = document.createElement('script');
-        script.src = 'https://js.paystack.co/v2/inline.js'; // ⚡ Upgraded to V2
-        script.async = true;
-        
-        script.onload = () => {
+        const scriptId = 'paystack-v2-script';
+
+        // 1. Inject the script if it doesn't exist
+        let script = document.getElementById(scriptId) as HTMLScriptElement;
+        if (!script) {
+            script = document.createElement('script');
+            script.id = scriptId;
+            script.src = 'https://js.paystack.co/v2/inline.js';
+            script.async = true;
+            document.body.appendChild(script);
+        }
+
+        // 2. Launch the modal when the script loads
+        const launchPaystack = () => {
             const popup = new (window as any).PaystackPop();
-            
-            // ⚡ Resume the exact transaction created by your Node.js backend
             popup.resumeTransaction(accessCode, {
                 onSuccess: (response: any) => onSuccess(response),
                 onCancel: () => onClose(),
@@ -67,11 +74,22 @@ const NativePaystackLauncher = ({ accessCode, onSuccess, onClose }: { accessCode
             });
         };
 
-        document.body.appendChild(script);
+        if ((window as any).PaystackPop) {
+            launchPaystack();
+        } else {
+            script.onload = launchPaystack;
+        }
 
+        // 3. AGGRESSIVE TEARDOWN: Destroy foreign DOM elements when unmounted
         return () => {
-            if (document.body.contains(script)) {
-                document.body.removeChild(script); 
+            if (script && document.body.contains(script)) {
+                document.body.removeChild(script);
+            }
+            
+            // Aggressively seek out and destroy the zombie iframe
+            const paystackIframe = document.querySelector('iframe[name="paystack-checkout-iframe"]');
+            if (paystackIframe && paystackIframe.parentNode) {
+                paystackIframe.parentNode.removeChild(paystackIframe);
             }
         };
     }, [accessCode, onSuccess, onClose]);
@@ -93,6 +111,7 @@ export default function POS() {
 
     const [paystackAccessCode, setPaystackAccessCode] = useState<string>('');
     const [pendingOrderId, setPendingOrderId] = useState<string | null>(null); 
+    const [isGatewayLoading, setIsGatewayLoading] = useState<boolean>(false); // ⚡ NEW STATE
 
     const handleReset = () => {
         clearCart();
@@ -102,6 +121,7 @@ export default function POS() {
         setShowPaymentModal(false);
         setIsCartOpen(false);
         setPaystackAccessCode('');
+        setIsGatewayLoading(false);
         setPendingOrderId(null); 
     };
 
@@ -234,11 +254,10 @@ export default function POS() {
                 setShowPaymentModal(false);
                 setPendingOrderId(data.orderId); 
             } else if (data.status === 'card_init') {
-                toast.loading("Opening Gateway...", { id: 'pos-gateway' });
+                setIsGatewayLoading(true); // ⚡ Instantly trigger the blocking UI overlay
                 setShowPaymentModal(false); 
                 setPaystackAccessCode(data.access_code);
                 setPendingOrderId(data.orderId); 
-                setTimeout(() => toast.dismiss('pos-gateway'), 500); 
             }
         },
         onError: (error) => {
@@ -502,15 +521,29 @@ export default function POS() {
                 </div>
             )}
 
-            {/* ⚡ V2 FIX: Passes ONLY accessCode to flawlessly fetch backend transaction details */}
+            {/* ⚡ OPTIMISTIC UI: The Blocking Gateway Overlay */}
+            {isGatewayLoading && (
+                <div className="fixed inset-0 z-[9999] bg-slate-900/70 backdrop-blur-sm flex flex-col items-center justify-center text-white animate-in fade-in duration-200">
+                    <Loader2 size={48} className="animate-spin mb-4 text-indigo-400" />
+                    <h3 className="text-xl font-black tracking-wide">Connecting to Gateway...</h3>
+                    <p className="text-slate-300 text-sm mt-2 font-medium">Secured by Paystack</p>
+                </div>
+            )}
+
+            {/* ⚡ SYNCHRONOUS CLEANSING: State is wiped the millisecond a callback fires */}
             {paystackAccessCode && (
                 <NativePaystackLauncher 
                     accessCode={paystackAccessCode}
-                    onSuccess={() => toast.success("Card Payment Initialized...")}
+                    onSuccess={() => {
+                        setPaystackAccessCode(''); // Sever the access code
+                        setIsGatewayLoading(false); // Drop the overlay
+                        toast.success("Authorizing payment...");
+                    }}
                     onClose={() => {
+                        setPaystackAccessCode(''); // Sever the access code
+                        setIsGatewayLoading(false); // Drop the overlay
+                        setPendingOrderId(null); // Clear the pending order so POS can try again
                         toast.error("Payment window closed.");
-                        setPaystackAccessCode('');
-                        setPendingOrderId(null); 
                     }}
                 />
             )}
