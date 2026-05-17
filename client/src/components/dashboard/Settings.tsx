@@ -1,44 +1,19 @@
 import React, { useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import axios, { AxiosError } from 'axios';
 import { toast } from 'sonner';
 import { Store, CreditCard, Sliders, Save, Loader2, Power, ImagePlus, Wifi } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { useSettingsStore } from '../../store/useSettingsStore'; // ⚡ Global UI State
+import { useSettingsStore } from '../../store/useSettingsStore'; 
 
-// 🛡️ Explicit Interfaces
-export interface VenueSettingsFormData {
-    name: string;
-    location: string;
-    contact_email: string;
-    phone_number: string;
-    tax_rate: number | string;
-    is_accepting_orders: boolean | string;
-    allow_cash_payments: boolean | string;
-    wifi_ssid: string;
-    wifi_password?: string;
-    shift_duration_hours?: number | string;
-    logo_url?: string;
-}
-
-// ⚡ HELPER: Bulletproof Image Pathing for the Venue Logo
-const getImageUrl = (path?: string) => {
-    if (!path) return '';
-    if (path.startsWith('http')) return path; 
-    const sanitizedPath = path.replace(/\\/g, '/');
-    const cleanPath = sanitizedPath.startsWith('/') ? sanitizedPath : `/${sanitizedPath}`;
-    return `http://localhost:5000${cleanPath}`;
-};
+// ⚡ IMPORT THE NEW CUSTOM HOOKS AND TYPES
+import { 
+    useFetchSettings, useUpdateSettings, useUploadLogo, 
+    VenueSettingsFormData, getImageUrl 
+} from '../../hooks/useSettings';
 
 export default function Settings() {
     const { user } = useAuth();
-    const queryClient = useQueryClient();
-    const token = localStorage.getItem('auth_token');
+    const venueId = user?.venueId;
     
-    const config = { 
-        headers: { Authorization: `Bearer ${token}` } 
-    };
-
     // ⚡ ZUSTAND: Preserve tab state across route unmounts
     const { activeTab, setActiveTab } = useSettingsStore();
 
@@ -51,16 +26,12 @@ export default function Settings() {
     });
 
     // ============================================================================
-    // ⚡ TANSTACK QUERY: Server State Caching
+    // ⚡ TANSTACK QUERY: Abstracted Custom Hooks
     // ============================================================================
-    const { data: venueSettings, isLoading } = useQuery({
-        queryKey: ['venueSettings', user?.venueId],
-        queryFn: async () => {
-            const res = await axios.get<VenueSettingsFormData>('/api/settings/venue', config);
-            return res.data;
-        },
-        enabled: !!user?.venueId && !!token
-    });
+    const { data: venueSettings, isLoading } = useFetchSettings(venueId);
+    
+    const saveSettingsMutation = useUpdateSettings(venueId);
+    const uploadLogoMutation = useUploadLogo(venueId);
 
     // Synchronize cached server data into local form state for editing
     useEffect(() => {
@@ -73,42 +44,6 @@ export default function Settings() {
             setLogoPreview(venueSettings.logo_url ? getImageUrl(venueSettings.logo_url) : null);
         }
     }, [venueSettings]);
-
-    // ============================================================================
-    // ⚡ TANSTACK MUTATIONS
-    // ============================================================================
-    const saveSettingsMutation = useMutation({
-        mutationFn: async (updatedData: VenueSettingsFormData) => {
-            return axios.put('/api/settings/venue', updatedData, config);
-        },
-        onSuccess: () => {
-            toast.success("Settings saved successfully!");
-            queryClient.invalidateQueries({ queryKey: ['venueSettings', user?.venueId] });
-        },
-        onError: (error: AxiosError<{ message: string }>) => {
-            toast.error(error.response?.data?.message || "Failed to save settings.");
-        }
-    });
-
-    const uploadLogoMutation = useMutation({
-        mutationFn: async (file: File) => {
-            const uploadData = new FormData();
-            uploadData.append('image', file);
-            const res = await axios.post<{ logo_url: string }>('/api/settings/venue/logo', uploadData, {
-                headers: { 'Content-Type': 'multipart/form-data', Authorization: `Bearer ${token}` }
-            });
-            return res.data;
-        },
-        onSuccess: (data) => {
-            toast.success("Logo uploaded successfully!");
-            setFormData(prev => ({ ...prev, logo_url: data.logo_url }));
-            queryClient.invalidateQueries({ queryKey: ['venueSettings', user?.venueId] });
-        },
-        onError: () => {
-            toast.error("Failed to upload logo.");
-            setLogoPreview(venueSettings?.logo_url ? getImageUrl(venueSettings.logo_url) : null); // Revert on failure
-        }
-    });
 
     // ============================================================================
     // HANDLERS
@@ -127,7 +62,16 @@ export default function Settings() {
 
         // Instant local preview for premium UX
         setLogoPreview(URL.createObjectURL(file));
-        uploadLogoMutation.mutate(file);
+        
+        uploadLogoMutation.mutate(file, {
+            onSuccess: (data) => {
+                setFormData(prev => ({ ...prev, logo_url: data.logo_url }));
+            },
+            onError: () => {
+                toast.error("Failed to upload logo.");
+                setLogoPreview(venueSettings?.logo_url ? getImageUrl(venueSettings.logo_url) : null); // Revert on failure
+            }
+        });
     };
 
     if (isLoading && !venueSettings) {

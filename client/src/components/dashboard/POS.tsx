@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
-import axios, { AxiosError } from 'axios';
+import axios from 'axios';
 import { toast } from 'sonner';
 import { 
     Search, ShoppingCart, Plus, Minus, Trash2,Loader2, 
@@ -11,47 +10,22 @@ import { useCartStore } from '../../store/useCartStore';
 import { useMenuStore } from '../../store/useMenuStore'; 
 import { socket } from '../../utils/socket'; 
 
-export interface POSCategory {
-    category_id: string;
-    name: string;
-    is_active?: boolean;
-}
-
-export interface POSItem {
-    item_id: string;
-    name: string;
-    price: number | string;
-    category_id: string;
-    image_url?: string;
-    is_available?: boolean;
-}
-
-type PaymentMethodType = 'CASH' | 'M-PESA' | 'CARD';
-
-type SubmitOrderResponse = 
-    | { status: 'success' }
-    | { status: 'mpesa_sent'; orderId: string }
-    | { status: 'card_init'; access_code: string; orderId: string; reference: string; }; 
+// ⚡ IMPORT THE NEW CUSTOM HOOKS AND TYPES
+import { 
+    usePOSCategories, usePOSItems, useSubmitPOSOrder, 
+    POSCategory, POSItem, getImageUrl 
+} from '../../hooks/usePOS';
 
 interface OrderStatusResponse {
     payment_status: string;
     status: string;
 }
 
-const getImageUrl = (path?: string) => {
-    if (!path) return '';
-    if (path.startsWith('http')) return path; 
-    const sanitizedPath = path.replace(/\\/g, '/');
-    const cleanPath = sanitizedPath.startsWith('/') ? sanitizedPath : `/${sanitizedPath}`;
-    return `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}${cleanPath}`;
-};
-
 // ⚡ V2 FIX: Aggressive Teardown & DOM Cleanup
 const NativePaystackLauncher = ({ accessCode, onSuccess, onClose }: { accessCode: string, onSuccess: Function, onClose: Function }) => {
     useEffect(() => {
         const scriptId = 'paystack-v2-script';
 
-        // 1. Inject the script if it doesn't exist
         let script = document.getElementById(scriptId) as HTMLScriptElement;
         if (!script) {
             script = document.createElement('script');
@@ -61,7 +35,6 @@ const NativePaystackLauncher = ({ accessCode, onSuccess, onClose }: { accessCode
             document.body.appendChild(script);
         }
 
-        // 2. Launch the modal when the script loads
         const launchPaystack = () => {
             const popup = new (window as any).PaystackPop();
             popup.resumeTransaction(accessCode, {
@@ -80,13 +53,10 @@ const NativePaystackLauncher = ({ accessCode, onSuccess, onClose }: { accessCode
             script.onload = launchPaystack;
         }
 
-        // 3. AGGRESSIVE TEARDOWN: Destroy foreign DOM elements when unmounted
         return () => {
             if (script && document.body.contains(script)) {
                 document.body.removeChild(script);
             }
-            
-            // Aggressively seek out and destroy the zombie iframe
             const paystackIframe = document.querySelector('iframe[name="paystack-checkout-iframe"]');
             if (paystackIframe && paystackIframe.parentNode) {
                 paystackIframe.parentNode.removeChild(paystackIframe);
@@ -111,7 +81,7 @@ export default function POS() {
 
     const [paystackAccessCode, setPaystackAccessCode] = useState<string>('');
     const [pendingOrderId, setPendingOrderId] = useState<string | null>(null); 
-    const [isGatewayLoading, setIsGatewayLoading] = useState<boolean>(false); // ⚡ NEW STATE
+    const [isGatewayLoading, setIsGatewayLoading] = useState<boolean>(false);
 
     const handleReset = () => {
         clearCart();
@@ -124,6 +94,14 @@ export default function POS() {
         setIsGatewayLoading(false);
         setPendingOrderId(null); 
     };
+
+    // ============================================================================
+    // ⚡ TANSTACK QUERY: Abstracted Custom Hooks
+    // ============================================================================
+    const { data: categories = [], isLoading: categoriesLoading } = usePOSCategories(venueId as string);
+    const { data: items = [], isLoading: itemsLoading } = usePOSItems(venueId as string);
+    
+    const submitOrderMutation = useSubmitPOSOrder();
 
     // ⚡ LIFECYCLE: Hybrid Socket + Polling Receptor for POS
     useEffect(() => {
@@ -171,30 +149,6 @@ export default function POS() {
         }
     }, [pendingOrderId, token]);
 
-    const { data: categories = [], isLoading: categoriesLoading } = useQuery({
-        queryKey: ['categories', venueId],
-        queryFn: async () => {
-            const res = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/menu/categories/venue/${venueId}`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            const catsArray = Array.isArray(res.data) ? res.data : (res.data.categories || []);
-            return catsArray.filter((c: POSCategory) => c.is_active !== false);
-        },
-        enabled: !!venueId && !!token
-    });
-
-    const { data: items = [], isLoading: itemsLoading } = useQuery({
-        queryKey: ['menuItems', venueId],
-        queryFn: async () => {
-            const res = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/menu/items/venue/${venueId}`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            const itemsArray = Array.isArray(res.data) ? res.data : (res.data.items || []);
-            return itemsArray.filter((i: POSItem) => i.is_available !== false);
-        },
-        enabled: !!venueId && !!token
-    });
-
     const filteredItems = useMemo(() => {
         return items.filter((item: POSItem) => {
             const matchesCat = !activeCategoryId || activeCategoryId === 'all' || item.category_id === activeCategoryId;
@@ -204,66 +158,39 @@ export default function POS() {
         });
     }, [items, activeCategoryId, searchQuery]);
 
-    const submitOrderMutation = useMutation<SubmitOrderResponse, AxiosError<{ message: string }>, PaymentMethodType>({
-        mutationFn: async (paymentMethod) => {
-            const payload = {
-                items: Object.values(cart).map(item => ({
-                    item_id: item.item_id,
-                    quantity: item.quantity,
-                })),
-                payment_method: paymentMethod,
-                customer_name: customerName,
-                table_number: tableNumber,
-                phone_number: paymentMethod === 'M-PESA' ? phoneNumber : undefined,
-            };
+    const handleCheckout = (paymentMethod: 'CASH' | 'M-PESA' | 'CARD') => {
+        const payload = {
+            cartItems: Object.values(cart).map(item => ({
+                item_id: item.item_id,
+                quantity: item.quantity,
+            })),
+            paymentMethod,
+            customerName,
+            tableNumber,
+            phoneNumber
+        };
 
-            const orderRes = await axios.post<{ orderId: string }>(
-                `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/orders`, 
-                payload, 
-                { headers: { Authorization: `Bearer ${token}` } }
-            );
-
-            const orderId = orderRes.data.orderId;
-
-            if (paymentMethod === 'M-PESA') {
-                await axios.post(
-                    `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/mpesa/stkpush`,
-                    { orderId, phone: phoneNumber },
-                    { headers: { Authorization: `Bearer ${token}` } }
-                );
-                return { status: 'mpesa_sent', orderId }; 
+        submitOrderMutation.mutate(payload, {
+            onSuccess: (data) => {
+                if (data.status === 'success') {
+                    toast.success('Order sent to kitchen!');
+                    handleReset();
+                } else if (data.status === 'mpesa_sent') {
+                    toast.success('STK Push sent! Waiting for payment...');
+                    setShowPaymentModal(false);
+                    setPendingOrderId(data.orderId); 
+                } else if (data.status === 'card_init') {
+                    setIsGatewayLoading(true); 
+                    setShowPaymentModal(false); 
+                    setPaystackAccessCode(data.access_code);
+                    setPendingOrderId(data.orderId); 
+                }
+            },
+            onError: (error: any) => {
+                toast.error(error.response?.data?.message || 'Failed to submit order');
             }
-
-            if (paymentMethod === 'CARD') {
-                const initRes = await axios.post<{ access_code: string, reference: string }>(
-                    `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/paystack/initialize`,
-                    { orderId },
-                    { headers: { Authorization: `Bearer ${token}` } }
-                );
-                return { status: 'card_init', access_code: initRes.data.access_code, reference: initRes.data.reference, orderId }; 
-            }
-
-            return { status: 'success' };
-        },
-        onSuccess: (data) => {
-            if (data.status === 'success') {
-                toast.success('Order sent to kitchen!');
-                handleReset();
-            } else if (data.status === 'mpesa_sent') {
-                toast.success('STK Push sent! Waiting for payment...');
-                setShowPaymentModal(false);
-                setPendingOrderId(data.orderId); 
-            } else if (data.status === 'card_init') {
-                setIsGatewayLoading(true); // ⚡ Instantly trigger the blocking UI overlay
-                setShowPaymentModal(false); 
-                setPaystackAccessCode(data.access_code);
-                setPendingOrderId(data.orderId); 
-            }
-        },
-        onError: (error) => {
-            toast.error(error.response?.data?.message || 'Failed to submit order');
-        }
-    });
+        });
+    };
 
     const cartItemsList = Object.values(cart);
     const isCartEmpty = cartItemsList.length === 0;
@@ -444,7 +371,7 @@ export default function POS() {
                     <div className="grid grid-cols-2 gap-3">
                         <button 
                             disabled={!canCheckout || submitOrderMutation.isPending}
-                            onClick={() => submitOrderMutation.mutate('CASH')}
+                            onClick={() => handleCheckout('CASH')}
                             className="flex flex-col items-center justify-center gap-1 py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-bold active:scale-95 disabled:opacity-50 transition-all shadow-md"
                         >
                             <Banknote size={24} />
@@ -480,7 +407,7 @@ export default function POS() {
                         <div className="space-y-3 pb-6 md:pb-0">
                             <button 
                                 disabled={submitOrderMutation.isPending}
-                                onClick={() => submitOrderMutation.mutate('CARD')}
+                                onClick={() => handleCheckout('CARD')}
                                 className="w-full flex items-center justify-between p-4 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 text-indigo-700 rounded-2xl active:scale-95 disabled:opacity-50 transition-all group"
                             >
                                 <div className="flex items-center gap-4">
@@ -511,7 +438,7 @@ export default function POS() {
                             
                             <button 
                                 disabled={submitOrderMutation.isPending || phoneNumber.length < 9}
-                                onClick={() => submitOrderMutation.mutate('M-PESA')}
+                                onClick={() => handleCheckout('M-PESA')}
                                 className="w-full flex justify-center items-center gap-2 py-4 bg-[#52B44B] hover:bg-[#459a3f] text-white font-black text-lg rounded-2xl active:scale-95 disabled:opacity-50 transition-all shadow-md mt-2"
                             >
                                 {submitOrderMutation.isPending ? <Loader2 size={24} className="animate-spin" /> : <><Smartphone size={24}/> Send STK Push</>}

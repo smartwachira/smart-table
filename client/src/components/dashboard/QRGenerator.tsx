@@ -2,22 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { jwtDecode } from 'jwt-decode';
 import { toast } from 'sonner';
-import axios from 'axios';
 import html2canvas from 'html2canvas'; 
 import { 
     QrCode, Printer, Download, Plus, Trash2, 
-    Settings2, Grid3X3, ChevronDown, ChevronUp, Store, Wifi, UtensilsCrossed,
+    Grid3X3, ChevronDown, ChevronUp, Store, Wifi, UtensilsCrossed,
     Palette, Type, Maximize
 } from 'lucide-react';
-import { useQRStore } from '../../store/useQRStore'; // ⚡ Global State
+import { useQRStore } from '../../store/useQRStore'; 
 
-// 🛡️ Explicit Interfaces
+// ⚡ IMPORT THE NEW CUSTOM HOOK AND TYPES
+import { useVenueSettings } from '../../hooks/useVenueSettings';
+
 interface JwtPayload { venueId: string; [key: string]: any; }
-interface VenueSettings { name?: string; logo_url?: string; wifi_ssid?: string; wifi_password?: string; }
 
 export default function QRGenerator() {
     const [venueId, setVenueId] = useState<string>('');
-    const [venueSettings, setVenueSettings] = useState<VenueSettings | null>(null);
     
     // Local Transient UI State
     const [singleTableInput, setSingleTableInput] = useState<string>('');
@@ -32,24 +31,18 @@ export default function QRGenerator() {
         setFgColor, setBgColor, setIncludeLogo, setLogoSize, setMenuCta, setWifiCta 
     } = useQRStore();
 
+    // ============================================================================
+    // ⚡ TANSTACK QUERY: Abstracted Settings Fetch
+    // ============================================================================
+    const { data: venueSettings } = useVenueSettings();
+
+    // Decode token to get venueId for the QR Payload URLs
     useEffect(() => {
         const token = localStorage.getItem('auth_token');
         if (token) {
             try {
                 const decoded = jwtDecode<JwtPayload>(token);
                 setVenueId(decoded.venueId);
-                
-                const fetchVenueDetails = async () => {
-                    try {
-                        const res = await axios.get<VenueSettings>('/api/settings/venue', {
-                            headers: { Authorization: `Bearer ${token}` }
-                        });
-                        setVenueSettings(res.data);
-                    } catch (error) {
-                        console.warn("Could not fetch venue settings.");
-                    }
-                };
-                fetchVenueDetails();
             } catch (err) {
                 console.error("Token decode error", err);
             }
@@ -337,7 +330,7 @@ export default function QRGenerator() {
                                                         level={"Q"} 
                                                         imageSettings={includeLogo && venueSettings?.logo_url ? { 
                                                             src: getFormattedLogoUrl() || '', 
-                                                            height: logoSize * 0.5, // Scale down slightly for the smaller WiFi QR
+                                                            height: logoSize * 0.5, 
                                                             width: logoSize * 0.5,
                                                             excavate: true,
                                                             crossOrigin: "anonymous"

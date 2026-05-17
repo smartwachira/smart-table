@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom'; 
-import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Search, ShoppingBag, Info, UtensilsCrossed, AlertCircle, Moon, Smartphone, Receipt, Plus, Minus } from 'lucide-react';
+import { Search, ShoppingBag, UtensilsCrossed, AlertCircle, Moon, Smartphone, Receipt, Plus, Minus } from 'lucide-react';
 import { jwtDecode } from 'jwt-decode';
-import { useSwipeable } from 'react-swipeable'; // ⚡ NEW: Swipe gesture hook
+import { useSwipeable } from 'react-swipeable'; 
 
-import api from '../../utils/axiosConfig'; 
+// ⚡ IMPORT THE NEW CUSTOM HOOK AND TYPES
+import { usePublicMenu, MenuItemType } from '../../hooks/useMenu'; 
 import { useCustomerCartStore } from '../../store/useCustomerCartStore';
 import { useCustomerStore } from '../../store/useCustomerStore'; 
 import FloatingCart from './FloatingCart'; 
@@ -19,29 +19,6 @@ interface GuestJwtPayload {
     tableName: string;
     orderMode: 'KIOSK' | 'TAB';
     exp: number;
-}
-
-export interface MenuCategoryType {
-    category_id: string;
-    name: string;
-    venue_id: string;
-}
-
-export interface MenuItemType {
-    item_id: string;
-    name: string;
-    price: string | number;
-    description?: string;
-    image_url?: string;
-    is_available: boolean;
-    category_id: string;
-    MenuCategory?: MenuCategoryType;
-}
-
-interface MenuResponse {
-    categories: MenuCategoryType[];
-    items: MenuItemType[];
-    venue: any; 
 }
 
 export default function Menu() {
@@ -76,17 +53,8 @@ export default function Menu() {
     }
   }, [navigate]);
 
-  const { data: menuData, isLoading, error } = useQuery({
-      queryKey: ['publicMenu', venueId],
-      queryFn: async () => {
-          if (!venueId) throw new Error("No venue ID");
-          const res = await api.get<MenuResponse>(`/api/menu/public`); 
-          return res.data;
-      },
-      enabled: !!venueId,
-      staleTime: 1000 * 60 * 5, 
-      retry: 1
-  });
+  // ⚡ REFACTOR: The component is now clean, relying entirely on the custom hook!
+  const { data: menuData, isLoading, error } = usePublicMenu(venueId);
 
   useEffect(() => {
       if (menuData?.venue && !venueConfig) {
@@ -101,28 +69,24 @@ export default function Menu() {
   // ⚡ GESTURE LOGIC: Handle Swiping between categories
   // ============================================================================
   
-  // Combine 'all' with the fetched categories to create a unified searchable array
   const activeCategoryList = ['all', ...categories.map(c => c.category_id)];
 
   const handlers = useSwipeable({
       onSwipedLeft: () => {
-          // Swipe Left means moving to the NEXT category (Right)
           const currentIndex = activeCategoryList.indexOf(activeCategory);
           if (currentIndex < activeCategoryList.length - 1) {
               setActiveCategory(activeCategoryList[currentIndex + 1]);
           }
       },
       onSwipedRight: () => {
-          // Swipe Right means moving to the PREVIOUS category (Left)
           const currentIndex = activeCategoryList.indexOf(activeCategory);
           if (currentIndex > 0) {
               setActiveCategory(activeCategoryList[currentIndex - 1]);
           }
       },
-      // Ensure swiping doesn't trigger on scrolling up/down or when trying to tap/drag UI elements
       preventScrollOnSwipe: true,
-      trackMouse: false, // Optional: Enable if you want to test swiping on desktop with mouse drag
-      delta: 50 // The distance (px) a user must swipe to trigger the event
+      trackMouse: false, 
+      delta: 50 
   });
 
 
@@ -160,7 +124,6 @@ export default function Menu() {
   }
 
   return (
-    // ⚡ Attach the gesture handlers to the main wrapper
     <div {...handlers} className="min-h-screen bg-slate-50 font-sans pb-32 relative">
 
       <FloatingCart tableNumber={tableNumber} />
@@ -227,7 +190,6 @@ export default function Menu() {
 
       <div className="sticky top-0 z-20 bg-white/90 backdrop-blur-xl pt-3 pb-3 border-b border-slate-200 shadow-sm">
         <div className="flex overflow-x-auto px-4 gap-2 custom-scrollbar pb-1 max-w-6xl mx-auto">
-          {/* ⚡ UPDATED: ID match to allow smooth scrolling if we add scrollIntoView later */}
           <button
             id="cat-all"
             onClick={()=>setActiveCategory('all')}
@@ -250,7 +212,6 @@ export default function Menu() {
         </div>
       </div>
 
-      {/* Add a subtle animation class to the main content when category changes */}
       <main className="px-4 py-6 space-y-4 max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-300" key={activeCategory}>
         {filteredItems.length === 0 ? (
           <div className="text-center py-16 flex flex-col items-center opacity-70">

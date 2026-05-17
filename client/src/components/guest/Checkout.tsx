@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { jwtDecode } from 'jwt-decode'; 
-import { useMutation } from '@tanstack/react-query'; // ⚡ ADDED REACT QUERY
 import { AxiosError } from 'axios'; 
 import { toast } from 'sonner';
 import { 
@@ -13,6 +12,9 @@ import api from '../../utils/axiosConfig';
 import { socket } from '../../utils/socket';
 import { useCustomerCartStore } from '../../store/useCustomerCartStore';
 
+// ⚡ IMPORT THE NEW CUSTOM HOOK AND TYPES
+import { useSubmitGuestOrder, PaymentMethod } from '../../hooks/useCheckout';
+
 interface GuestJwtPayload {
     role: string;
     venueId: string;
@@ -21,18 +23,11 @@ interface GuestJwtPayload {
     exp?: number;
 }
 
-type PaymentMethod = 'M-PESA' | 'CASH' | 'CARD'; 
 type PaymentStatus = 'idle' | 'pending' | 'success' | 'failed';
 
 interface OrderStatusResponse {
     payment_status: string;
     status: string;
-}
-
-interface PaystackInitResponse {
-    reference: string;
-    access_code: string;
-    authorization_url: string;
 }
 
 // ⚡ V2 FIX: Aggressive Teardown & DOM Cleanup
@@ -101,12 +96,14 @@ export default function Checkout() {
     const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CARD'); 
     const [phone, setPhone] = useState<string>('');
     
-    // ⚡ DELETED manual isProcessing state!
     const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('idle'); 
     const [pollingOrderId, setPollingOrderId] = useState<string | null>(null);
 
     const [paystackAccessCode, setPaystackAccessCode] = useState<string>('');
     const [isGatewayLoading, setIsGatewayLoading] = useState<boolean>(false);
+
+    // ⚡ TANSTACK QUERY: Abstracted Custom Hook
+    const submitOrderMutation = useSubmitGuestOrder();
 
     useEffect(() => {
         const token = localStorage.getItem('guest_token');
@@ -187,75 +184,58 @@ export default function Checkout() {
         setPhone(e.target.value.replace(/\D/g, ''));
     };
 
-    // ⚡ REFACTOR: The powerful React Query Mutation
-    const submitOrderMutation = useMutation({
-        mutationFn: async () => {
-            const orderPayload = {
-                venue_id: venueId,
-                table_number: tableNumber,
-                customer_name: customerName,
-                payment_method: paymentMethod,
-                phone_number: paymentMethod === 'M-PESA' ? phone : null,
-                amount: total, 
-                items: cartItems.map(item => ({ 
-                    item_id: item.item_id, 
-                    quantity: item.quantity, 
-                    price: item.price,
-                    name: item.name
-                }))
-            };
-            
-            const orderRes = await api.post<{ orderId: string }>('/api/orders', orderPayload);
-            const orderId = orderRes.data.orderId;
-
-            if (paymentMethod === 'CASH') {
-                return { status: 'success', method: 'CASH', orderId };
-            } else if (paymentMethod === 'M-PESA') {
-                await api.post('/api/mpesa/stkpush', { orderId, phone });
-                return { status: 'pending', method: 'M-PESA', orderId };
-            } else if (paymentMethod === 'CARD') {
-                const initRes = await api.post<PaystackInitResponse>('/api/paystack/initialize', { orderId });
-                return { status: 'pending', method: 'CARD', orderId, access_code: initRes.data.access_code };
-            }
-            throw new Error("Invalid payment method");
-        },
-        onSuccess: (data) => {
-            setPollingOrderId(data.orderId);
-
-            if (data.method === 'CASH') {
-                setPaymentStatus('success');
-                toast.success("Order sent to kitchen! Please pay your waiter.");
-                setTimeout(() => {
-                    clearCart();
-                    navigate(`/order-status/${data.orderId}`); 
-                }, 2000);
-            } else if (data.method === 'M-PESA') {
-                setPaymentStatus('pending'); 
-            } else if (data.method === 'CARD') {
-                setPaymentStatus('pending'); 
-                setIsGatewayLoading(true); // Trigger UI block
-                setPaystackAccessCode(data.access_code!); // Opens Native SDK
-            }
-        },
-        onError: (error: any) => {
-            console.error("Checkout Error:", error);
-            const axiosError = error as AxiosError<{ message: string }>;
-            toast.error(axiosError.response?.data?.message || "Checkout failed. Please try again.");
-            setPaymentStatus('idle');
-            setPaystackAccessCode('');
-            setIsGatewayLoading(false);
-        }
-    });
-
     const handleCheckoutSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!customerName.trim()) return toast.error("Please enter your name for the order.");
         if (paymentMethod === 'M-PESA' && (phone.length < 9 || phone.length > 12)) {
             return toast.error("Please enter a valid phone number.");
         }
+        if (!venueId) return toast.error("Venue session lost. Please scan QR again.");
         
-        // Trigger the mutation
-        submitOrderMutation.mutate();
+        const payload = {
+            venue_id: venueId,
+            table_number: tableNumber,
+            customer_name: customerName,
+            payment_method: paymentMethod,
+            phone_number: paymentMethod === 'M-PESA' ? phone : null,
+            amount: total, 
+            items: cartItems.map(item => ({ 
+                item_id: item.item_id, 
+                quantity: item.quantity, 
+                price: item.price,
+                name: item.name
+            }))
+        };
+
+        // ⚡ TRIGGER THE ABSTRACTED MUTATION
+        submitOrderMutation.mutate(payload, {
+            onSuccess: (data) => {
+                setPollingOrderId(data.orderId);
+
+                if (data.method === 'CASH') {
+                    setPaymentStatus('success');
+                    toast.success("Order sent to kitchen! Please pay your waiter.");
+                    setTimeout(() => {
+                        clearCart();
+                        navigate(`/order-status/${data.orderId}`); 
+                    }, 2000);
+                } else if (data.method === 'M-PESA') {
+                    setPaymentStatus('pending'); 
+                } else if (data.method === 'CARD') {
+                    setPaymentStatus('pending'); 
+                    setIsGatewayLoading(true); // Trigger UI block
+                    setPaystackAccessCode(data.access_code!); // Opens Native SDK
+                }
+            },
+            onError: (error: any) => {
+                console.error("Checkout Error:", error);
+                const axiosError = error as AxiosError<{ message: string }>;
+                toast.error(axiosError.response?.data?.message || "Checkout failed. Please try again.");
+                setPaymentStatus('idle');
+                setPaystackAccessCode('');
+                setIsGatewayLoading(false);
+            }
+        });
     };
 
     if (!venueId) {
@@ -285,7 +265,6 @@ export default function Checkout() {
             </header>
 
             <main className="px-4 py-6 space-y-6 max-w-lg mx-auto">
-                {/* ... (Order Summary UI remains exactly the same) ... */}
                 <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
                     <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
                         <Receipt size={16} /> Order Summary

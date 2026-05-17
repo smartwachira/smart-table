@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Minus, UtensilsCrossed, ShoppingBag } from 'lucide-react';
-import { MenuItemType } from './Menu';
+
+// ⚡ BUG FIX: Correctly imported from the new custom hook location!
+import { MenuItemType } from '../../hooks/useMenu'; 
+
 import { useCustomerCartStore } from '../../store/useCustomerCartStore';
 import { toast } from 'sonner';
 

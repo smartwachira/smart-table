@@ -1,31 +1,15 @@
 import React, { useEffect } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { io, Socket } from 'socket.io-client';
 import { X, Receipt, ChefHat, BellRing, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
-import api from '../../utils/axiosConfig'; 
 import { useGuestSessionStore } from '../../store/useGuestSessionStore';
 
-// 🛡️ FIXED: Aligned exactly with Sequelize's nested 'include' structure
-interface OrderItem {
-    quantity: number;
-    price_at_time: string | number; // ⚡ Matches backend column
-    MenuItem?: {                    // ⚡ Matches Sequelize nested object
-        name: string;
-        image_url?: string;
-    };
-}
-
-interface Order {
-    order_id: string;
-    status: 'PENDING' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED';
-    total_amount: string | number;
-    createdAt: string;
-    OrderItems: OrderItem[];
-}
+// ⚡ IMPORT THE NEW CUSTOM HOOK AND TYPES
+import { useGuestOrders } from '../../hooks/useGuestOrders';
 
 interface MyOrdersDrawerProps {
     isOpen: boolean;
-    onOpen: () => void; // ⚡ Added so the floating pill can re-open the drawer
+    onOpen: () => void; 
     onClose: () => void;
     venueId: string | null;
 }
@@ -43,18 +27,9 @@ export default function MyOrdersDrawer({ isOpen, onOpen, onClose, venueId }: MyO
     const guestSessionId = useGuestSessionStore((state) => state.guestSessionId);
 
     // ============================================================================
-    // ⚡ TANSTACK QUERY: Fetch Historical Session Orders
+    // ⚡ TANSTACK QUERY: Abstracted Custom Hook
     // ============================================================================
-    const { data: orders, isLoading, error } = useQuery({
-        queryKey: ['guestOrders', guestSessionId],
-        queryFn: async () => {
-            const res = await api.get<Order[]>('/api/orders/guest');
-            return res.data;
-        },
-        // ⚡ FIXED: Removed `isOpen` so it always fetches/polls in the background
-        enabled: !!guestSessionId, 
-        refetchInterval: 15000, 
-    });
+    const { data: orders, isLoading, error } = useGuestOrders(guestSessionId);
 
     // ============================================================================
     // ⚡ REAL-TIME SYNC: Listen to Kitchen Updates
@@ -184,7 +159,6 @@ export default function MyOrdersDrawer({ isOpen, onOpen, onClose, venueId }: MyO
 
                                         <div className="space-y-2 mb-4">
                                             {order.OrderItems && order.OrderItems.map((item, idx) => {
-                                                // ⚡ FIXED: Safely extract nested name and map price_at_time
                                                 const itemName = item.MenuItem?.name || 'Unknown Item';
                                                 const itemPrice = Number(item.price_at_time || 0);
                                                 const lineTotal = itemPrice * item.quantity;

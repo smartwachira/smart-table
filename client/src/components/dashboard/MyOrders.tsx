@@ -1,6 +1,5 @@
 import React, { useEffect, useCallback, useRef } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import axios, { AxiosError } from 'axios';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import io, { Socket } from 'socket.io-client';
 import { 
@@ -8,45 +7,24 @@ import {
     Banknote, MonitorSmartphone, Loader2
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { useMyOrdersStore } from '../../store/useMyOrdersStore'; // ⚡ Global State
+import { useMyOrdersStore } from '../../store/useMyOrdersStore'; 
+
+// ⚡ IMPORT THE NEW CUSTOM HOOKS AND TYPES
+import { 
+    useMyOrders, useUpdateMyOrderStatus, useCollectMyOrderCash, OrderData 
+} from '../../hooks/useMyOrders';
 
 const BEEP_URL = 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3';
-
-// 🛡️ Strict typing for the order payload
-interface OrderItem {
-    name?: string;
-    quantity: number;
-    MenuItem?: {
-        name: string;
-    };
-}
-
-interface OrderData {
-    order_id: string;
-    table_number: string;
-    customer_name: string;
-    status: 'PENDING' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED';
-    payment_status: 'PENDING' | 'PAID' | 'FAILED';
-    payment_method: 'CASH' | 'M-PESA' | string;
-    total_amount: number | string;
-    staff_id: string;
-    OrderItems: OrderItem[];
-}
 
 export default function MyOrders() {
     const { user } = useAuth();
     const queryClient = useQueryClient();
-    const token = localStorage.getItem('auth_token');
     
     // ⚡ ZUSTAND: Preserve tab state across unmounts
     const { activeTab, setActiveTab } = useMyOrdersStore();
 
     // ⚡ Refs for Audio Notifications
     const previousReadyRef = useRef<Set<string>>(new Set());
-
-    const getConfig = () => ({
-        headers: { Authorization: `Bearer ${token}` }
-    });
 
     const playSound = useCallback(() => {
         try {
@@ -58,21 +36,12 @@ export default function MyOrders() {
     }, []);
 
     // ============================================================================
-    // ⚡ TANSTACK QUERY: Server State & Polling Fallback
+    // ⚡ TANSTACK QUERY: Abstracted Custom Hooks
     // ============================================================================
-    const { data: orders = [], isLoading } = useQuery({
-        queryKey: ['myOrders', user?.userId],
-        queryFn: async ({ signal }) => {
-            const response = await axios.get<OrderData[]>('/api/orders/live', {
-                ...getConfig(),
-                signal
-            });
-            // Filter instantly to only show orders punched by this specific staff member
-            return (response.data || []).filter(o => String(o.staff_id) === String(user?.userId));
-        },
-        enabled: !!user?.userId && !!token,
-        refetchInterval: 10000 // Fallback polling
-    });
+    const { data: orders = [], isLoading } = useMyOrders(user?.userId);
+    
+    const updateStatusMutation = useUpdateMyOrderStatus(user?.userId);
+    const collectCashMutation = useCollectMyOrderCash(user?.userId);
 
     // ============================================================================
     // ⚡ NOTIFICATION EFFECT: Detect New 'READY' Orders
@@ -107,42 +76,13 @@ export default function MyOrders() {
         socket.emit('join_venue', user.venueId);
 
         // Tell TanStack to instantly refetch when the kitchen updates a ticket
-        socket.on('receive_order', () => queryClient.invalidateQueries({ queryKey: ['myOrders'] }));
-        socket.on('orderUpdated', () => queryClient.invalidateQueries({ queryKey: ['myOrders'] }));
+        socket.on('receive_order', () => queryClient.invalidateQueries({ queryKey: ['myOrders', user?.userId] }));
+        socket.on('orderUpdated', () => queryClient.invalidateQueries({ queryKey: ['myOrders', user?.userId] }));
 
         return () => {
             socket.disconnect();
         };
-    }, [user?.venueId, queryClient]);
-
-    // ============================================================================
-    // ⚡ TANSTACK MUTATIONS
-    // ============================================================================
-    const updateStatusMutation = useMutation({
-        mutationFn: async ({ orderId, status }: { orderId: string, status: OrderData['status'] }) => {
-            return axios.patch(`/api/orders/${orderId}/status`, { status }, getConfig());
-        },
-        onSuccess: (_, variables) => {
-            toast.success(`Order marked as ${variables.status}`);
-            queryClient.invalidateQueries({ queryKey: ['myOrders'] });
-        },
-        onError: (error: AxiosError<{ message: string }>) => {
-            toast.error(error.response?.data?.message || "Failed to update ticket.");
-        }
-    });
-
-    const collectCashMutation = useMutation({
-        mutationFn: async (orderId: string) => {
-            return axios.patch(`/api/orders/${orderId}/collect-cash`, {}, getConfig());
-        },
-        onSuccess: () => {
-            toast.success("Cash logged securely.");
-            queryClient.invalidateQueries({ queryKey: ['myOrders'] });
-        },
-        onError: () => {
-            toast.error("Failed to log cash.");
-        }
-    });
+    }, [user?.venueId, user?.userId, queryClient]);
 
     // ============================================================================
     // DERIVED DATA & RENDERERS

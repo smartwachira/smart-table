@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
+import { useQueryClient } from '@tanstack/react-query';
 import { io, Socket } from 'socket.io-client';
 import { jwtDecode } from 'jwt-decode'; 
 import { 
     ArrowLeft, Clock, ChefHat, 
     BellRing, CheckCircle2, Receipt
 } from 'lucide-react';
+
+// ⚡ IMPORT THE NEW CUSTOM HOOK AND TYPES
+import { useOrderStatus, SocketUpdatePayload } from '../../hooks/useOrderStatus';
 
 // 🛡️ Interfaces
 interface GuestJwtPayload {
@@ -16,19 +18,6 @@ interface GuestJwtPayload {
     tableName: string;
     orderMode: 'KIOSK' | 'TAB';
     exp: number;
-}
-
-export type OrderStatusType = 'PENDING' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED';
-
-interface OrderData {
-    order_id: string;
-    status: OrderStatusType;
-    [key: string]: any; 
-}
-
-interface SocketUpdatePayload {
-    orderId: string;
-    status: OrderStatusType;
 }
 
 export default function OrderStatus() {
@@ -59,26 +48,10 @@ export default function OrderStatus() {
     }, [navigate]);
 
     // ============================================================================
-    // ⚡ TANSTACK QUERY: Instant Load & Background Refresh
+    // ⚡ TANSTACK QUERY: Abstracted Custom Hook
     // ============================================================================
-    const { data: order, isLoading, error } = useQuery({
-        queryKey: ['orderStatus', orderId],
-        queryFn: async () => {
-            if (!orderId) throw new Error("No Order ID");
+    const { data: order, isLoading, error } = useOrderStatus(orderId, venueId);
 
-            // ⚡ FIX 1: Extract the guest token
-            const token = localStorage.getItem('guest_token');
-            if (!token) throw new Error("Unauthorized: No guest session found.");
-
-            // ⚡ FIX 2: Explicitly pass the Authorization header
-            const res = await axios.get<OrderData>(`/api/orders/${orderId}/status`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            return res.data;
-        },
-        enabled: !!orderId && !!venueId,
-        refetchInterval: 15000 // Fallback poll every 15s in case sockets disconnect on mobile
-    });
     // ============================================================================
     // ⚡ WEBSOCKET INTEGRATION
     // ============================================================================

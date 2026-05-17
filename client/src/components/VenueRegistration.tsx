@@ -1,35 +1,27 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios, { AxiosError } from 'axios';
+import { AxiosError } from 'axios';
 import { Building2, MapPin, User, Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, CheckCircle2 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 
-// 🛡️ Explicit interface for the API response
-interface RegistrationResponse {
-    token: string;
-    message?: string;
-    user?: any;
-}
+// ⚡ IMPORT THE NEW STATE AND NETWORK HOOKS
+import { useRegistrationStore } from '../store/useRegistrationStore';
+import { useRegisterVenue } from '../hooks/useVenueRegistration';
 
 export default function VenueRegistration() {
-    // 🛡️ Strictly type the form data object
-    const [formData, setFormData] = useState({
-        venueName: '', 
-        location: '', 
-        managerName: '', 
-        managerEmail: '', 
-        managerPassword: ''
-    });
-    const [showPassword, setShowPassword] = useState<boolean>(false);
-    const [isLoading, setIsLoading] = useState<boolean>(false);
     const navigate = useNavigate();
 
-    // 🛡️ Type the input change event
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setFormData({ ...formData, [e.target.name]: e.target.value });
-    };
+    // ⚡ ZUSTAND: Preserved UI State
+    const { venueName, location, managerName, managerEmail, setField } = useRegistrationStore();
 
-    // 🛡️ Type the string parameter and ensure it returns a number
+    // 🛡️ LOCAL STATE: Highly sensitive data must be destroyed on unmount
+    const [managerPassword, setManagerPassword] = useState<string>('');
+    const [showPassword, setShowPassword] = useState<boolean>(false);
+
+    // ⚡ TANSTACK QUERY: Abstracted Mutation
+    const registerVenueMutation = useRegisterVenue();
+
+    // Password Strength Helper
     const getPasswordStrength = (pass: string): number => {
         let score = 0;
         if (pass.length > 7) score++;
@@ -38,36 +30,39 @@ export default function VenueRegistration() {
         return score;
     };
     
-    const strength = getPasswordStrength(formData.managerPassword);
+    const strength = getPasswordStrength(managerPassword);
 
-    // 🛡️ Type the form submission event
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        setIsLoading(true);
         
-        try {
-            const res = await axios.post<RegistrationResponse>('/api/auth/register/venue', formData);
-            
-            localStorage.setItem('auth_token', res.data.token);
-            
-            // Premium Toast Notification
-            toast.success('Workspace Deployed', {
-                description: `Welcome to Smart Table, ${formData.managerName}.`,
-                icon: <CheckCircle2 className="text-amber-500" />
-            });
+        const payload = {
+            venueName,
+            location,
+            managerName,
+            managerEmail,
+            managerPassword
+        };
 
-            // Delay navigation slightly so the toast is seen
-            setTimeout(() => navigate('/dashboard'), 1500);
-            
-        } catch (err) {
-            // 🛡️ Safely cast the error to extract the backend message
-            const axiosError = err as AxiosError<{ message: string }>;
-            toast.error('Deployment Failed', {
-                description: axiosError.response?.data?.message || 'An unexpected error occurred.',
-            });
-        } finally {
-            setIsLoading(false);
-        }
+        registerVenueMutation.mutate(payload, {
+            onSuccess: (data) => {
+                localStorage.setItem('auth_token', data.token);
+                
+                // Premium Toast Notification
+                toast.success('Workspace Deployed', {
+                    description: `Welcome to Smart Table, ${managerName}.`,
+                    icon: <CheckCircle2 className="text-amber-500" />
+                });
+
+                // Delay navigation slightly so the toast is seen
+                setTimeout(() => navigate('/dashboard'), 1500);
+            },
+            onError: (err: any) => {
+                const axiosError = err as AxiosError<{ message: string }>;
+                toast.error('Deployment Failed', {
+                    description: axiosError.response?.data?.message || 'An unexpected error occurred.',
+                });
+            }
+        });
     };
 
     return (
@@ -122,11 +117,25 @@ export default function VenueRegistration() {
                         <div className="space-y-4">
                             <div className="relative group">
                                 <Building2 size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-amber-500 transition-colors" />
-                                <input name="venueName" placeholder="Venue Name" onChange={handleChange} required className="w-full bg-white/5 border border-white/10 rounded-xl pl-12 pr-4 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 focus:bg-white/10 transition-all duration-300" />
+                                <input 
+                                    name="venueName" 
+                                    value={venueName} 
+                                    onChange={(e) => setField('venueName', e.target.value)} 
+                                    placeholder="Venue Name" 
+                                    required 
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl pl-12 pr-4 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 focus:bg-white/10 transition-all duration-300" 
+                                />
                             </div>
                             <div className="relative group">
                                 <MapPin size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-amber-500 transition-colors" />
-                                <input name="location" placeholder="City / Locale" onChange={handleChange} required className="w-full bg-white/5 border border-white/10 rounded-xl pl-12 pr-4 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 focus:bg-white/10 transition-all duration-300" />
+                                <input 
+                                    name="location" 
+                                    value={location} 
+                                    onChange={(e) => setField('location', e.target.value)} 
+                                    placeholder="City / Locale" 
+                                    required 
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl pl-12 pr-4 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 focus:bg-white/10 transition-all duration-300" 
+                                />
                             </div>
                         </div>
 
@@ -136,25 +145,48 @@ export default function VenueRegistration() {
                         <div className="space-y-4">
                             <div className="relative group">
                                 <User size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-amber-500 transition-colors" />
-                                <input name="managerName" placeholder="Master Owner Name" onChange={handleChange} required className="w-full bg-white/5 border border-white/10 rounded-xl pl-12 pr-4 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 focus:bg-white/10 transition-all duration-300" />
+                                <input 
+                                    name="managerName" 
+                                    value={managerName} 
+                                    onChange={(e) => setField('managerName', e.target.value)} 
+                                    placeholder="Master Owner Name" 
+                                    required 
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl pl-12 pr-4 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 focus:bg-white/10 transition-all duration-300" 
+                                />
                             </div>
                             <div className="relative group">
                                 <Mail size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-amber-500 transition-colors" />
-                                <input name="managerEmail" type="email" placeholder="Business Email" onChange={handleChange} required className="w-full bg-white/5 border border-white/10 rounded-xl pl-12 pr-4 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 focus:bg-white/10 transition-all duration-300" />
+                                <input 
+                                    name="managerEmail" 
+                                    value={managerEmail} 
+                                    type="email" 
+                                    onChange={(e) => setField('managerEmail', e.target.value)} 
+                                    placeholder="Business Email" 
+                                    required 
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl pl-12 pr-4 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 focus:bg-white/10 transition-all duration-300" 
+                                />
                             </div>
                             
                             {/* Password with visibility toggle and strength indicator */}
                             <div className="space-y-3">
                                 <div className="relative group">
                                     <Lock size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-amber-500 transition-colors" />
-                                    <input name="managerPassword" type={showPassword ? "text" : "password"} placeholder="Secure Password" onChange={handleChange} required className="w-full bg-white/5 border border-white/10 rounded-xl pl-12 pr-12 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 focus:bg-white/10 transition-all duration-300" />
+                                    <input 
+                                        name="managerPassword" 
+                                        type={showPassword ? "text" : "password"} 
+                                        value={managerPassword} 
+                                        onChange={(e) => setManagerPassword(e.target.value)} 
+                                        placeholder="Secure Password" 
+                                        required 
+                                        className="w-full bg-white/5 border border-white/10 rounded-xl pl-12 pr-12 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 focus:bg-white/10 transition-all duration-300" 
+                                    />
                                     <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors">
                                         {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                                     </button>
                                 </div>
                                 
                                 {/* Password Strength Bars */}
-                                {formData.managerPassword && (
+                                {managerPassword && (
                                     <div className="flex gap-2 h-1.5 w-full px-1">
                                         <div className={`flex-1 rounded-full transition-all duration-500 ${strength >= 1 ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]' : 'bg-white/10'}`} />
                                         <div className={`flex-1 rounded-full transition-all duration-500 ${strength >= 2 ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]' : 'bg-white/10'}`} />
@@ -164,8 +196,12 @@ export default function VenueRegistration() {
                             </div>
                         </div>
 
-                        <button type="submit" disabled={isLoading} className="group relative w-full flex items-center justify-center gap-3 py-4 px-4 text-sm font-semibold rounded-xl text-black bg-amber-500 hover:bg-amber-400 focus:outline-none transition-all duration-300 shadow-[0_0_20px_rgba(245,158,11,0.2)] hover:shadow-[0_0_30px_rgba(245,158,11,0.4)] disabled:opacity-70 disabled:cursor-not-allowed">
-                            {isLoading ? (
+                        <button 
+                            type="submit" 
+                            disabled={registerVenueMutation.isPending} 
+                            className="group relative w-full flex items-center justify-center gap-3 py-4 px-4 text-sm font-semibold rounded-xl text-black bg-amber-500 hover:bg-amber-400 focus:outline-none transition-all duration-300 shadow-[0_0_20px_rgba(245,158,11,0.2)] hover:shadow-[0_0_30px_rgba(245,158,11,0.4)] disabled:opacity-70 disabled:cursor-not-allowed"
+                        >
+                            {registerVenueMutation.isPending ? (
                                 <>
                                     <Loader2 size={18} className="animate-spin" />
                                     Provisioning...

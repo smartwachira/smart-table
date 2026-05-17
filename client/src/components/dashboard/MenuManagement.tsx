@@ -1,61 +1,22 @@
 import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
 import { 
   Search, Plus, Edit2, X, Check, Image as ImageIcon, 
   UtensilsCrossed, AlertCircle, UploadCloud, Trash2, Loader2
 } from 'lucide-react';
-import axios, { AxiosError } from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { useMenuStore } from '../../store/useMenuStore';
 
-export interface MenuCategory {
-  category_id: string;
-  name: string;
-  venue_id?: string;
-}
-
-export interface MenuItem {
-  item_id: string;
-  name: string;
-  price: number | string;
-  description?: string;
-  image_url?: string;
-  is_available: boolean;
-  category_id: string;
-}
-
-interface ItemFormData {
-  name: string;
-  price: string | number;
-  category_id: string;
-  description: string;
-  is_available: boolean;
-}
-
-// ⚡ HELPER: Moved completely outside the component so ItemForm can use it too.
-// Sanitizes Windows backslashes and ensures proper Express routing.
-export const getImageUrl = (path?: string) => {
-    if (!path) return '';
-    if (path.startsWith('http')) return path; 
-    
-    // Convert Windows backslashes to web-safe forward slashes
-    const sanitizedPath = path.replace(/\\/g, '/');
-    const cleanPath = sanitizedPath.startsWith('/') ? sanitizedPath : `/${sanitizedPath}`;
-    
-    return `http://localhost:5000${cleanPath}`;
-};
+// ⚡ IMPORT THE NEW CUSTOM HOOKS AND TYPES
+import { 
+  useMenuCategories, useMenuItems, useToggleItemAvailability, 
+  useSaveMenuItem, useDeleteItem, useAddCategory, useDeleteCategory,
+  MenuCategory, MenuItem, ItemFormData, getImageUrl
+} from '../../hooks/useMenuManagement';
 
 export default function MenuManagement() {
   const { user } = useAuth();
-  const queryClient = useQueryClient();
-  const token = localStorage.getItem('auth_token');
+  const venueId = user?.venueId;
   
-  const config = { 
-      headers: { Authorization: `Bearer ${token}` },
-      venueId: user?.venueId 
-  };
-
   // ⚡ ZUSTAND ONLY: No URL parameters. This lives safely in global memory.
   const {
     activeCategoryId,
@@ -70,106 +31,17 @@ export default function MenuManagement() {
   const [newCategoryName, setNewCategoryName] = useState<string>('');
 
   // ============================================================================
-  // TANSTACK QUERY: SERVER STATE CACHING
+  // TANSTACK QUERY: Abstracted Custom Hooks
   // ============================================================================
+  const { data: categories = [], isLoading: isCategoriesLoading } = useMenuCategories(venueId);
+  const { data: items = [], isLoading: isItemsLoading } = useMenuItems(venueId);
 
-  const { data: categories = [], isLoading: isCategoriesLoading } = useQuery({
-    queryKey: ['categories', user?.venueId],
-    queryFn: async () => {
-      const res = await axios.get<MenuCategory[]>('/api/menu/categories', config);
-      return res.data;
-    },
-    enabled: !!user?.venueId
-  });
-
-  const { data: items = [], isLoading: isItemsLoading } = useQuery({
-    queryKey: ['menuItems', user?.venueId],
-    queryFn: async () => {
-      const res = await axios.get<MenuItem[]>('/api/menu/items', config);
-      return res.data;
-    },
-    enabled: !!user?.venueId
-  });
-
-  // ============================================================================
-  // TANSTACK MUTATIONS
-  // ============================================================================
-
-  const toggleAvailabilityMutation = useMutation({
-    mutationFn: async ({ itemId, is_available }: { itemId: string, is_available: boolean }) => {
-      await axios.patch(`/api/menu/items/${itemId}`, { is_available }, config);
-    },
-    onSuccess: (_, variables) => {
-      toast.success(`Item marked as ${variables.is_available ? 'Available' : 'Sold Out'}`);
-      queryClient.invalidateQueries({ queryKey: ['menuItems', user?.venueId] });
-    },
-    onError: () => toast.error('Failed to update availability.')
-  });
-
-  const saveItemMutation = useMutation({
-    mutationFn: async ({ formData, imageFile }: { formData: ItemFormData, imageFile: File | null }) => {
-      const payload = new FormData();
-      payload.append('name', formData.name);
-      payload.append('price', String(formData.price));
-      payload.append('category_id', formData.category_id);
-      payload.append('description', formData.description);
-      payload.append('is_available', String(formData.is_available));
-      if (imageFile) payload.append('image', imageFile);
-
-      const uploadConfig = { 
-          headers: { 'Content-Type': 'multipart/form-data', Authorization: `Bearer ${token}` },
-          venueId: user?.venueId
-      };
-
-      if (editingItem) {
-        return axios.patch<MenuItem>(`/api/menu/items/${editingItem.item_id}`, payload, uploadConfig);
-      } else {
-        return axios.post<MenuItem>('/api/menu/items', payload, uploadConfig);
-      }
-    },
-    onSuccess: () => {
-      toast.success(editingItem ? 'Menu item updated.' : 'New menu item added.');
-      setIsDrawerOpen(false);
-      queryClient.invalidateQueries({ queryKey: ['menuItems', user?.venueId] });
-    },
-    onError: () => toast.error('Failed to save menu item.')
-  });
-
-  const deleteItemMutation = useMutation({
-    mutationFn: async (itemId: string) => axios.delete(`/api/menu/items/${itemId}`, config),
-    onSuccess: () => {
-      toast.success('Item deleted permanently.');
-      queryClient.invalidateQueries({ queryKey: ['menuItems', user?.venueId] });
-    },
-    onError: (error: AxiosError<{ message: string }>) => {
-      toast.error(error.response?.data?.message || 'Failed to delete item.', { duration: 5000 });
-    }
-  });
-
-  const addCategoryMutation = useMutation({
-    mutationFn: async (name: string) => axios.post<MenuCategory>('/api/menu/categories', { name }, config),
-    onSuccess: () => {
-      toast.success('Category created.');
-      setNewCategoryName('');
-      setIsAddingCategory(false);
-      queryClient.invalidateQueries({ queryKey: ['categories', user?.venueId] });
-    },
-    onError: (error: AxiosError<{ message: string }>) => {
-      toast.error(error.response?.data?.message || 'Failed to create category.');
-    }
-  });
-
-  const deleteCategoryMutation = useMutation({
-    mutationFn: async (categoryId: string) => axios.delete(`/api/menu/categories/${categoryId}`, config),
-    onSuccess: (_, categoryId) => {
-      toast.success('Category deleted.');
-      if (activeCategoryId === categoryId) setActiveCategory('all');
-      queryClient.invalidateQueries({ queryKey: ['categories', user?.venueId] });
-    },
-    onError: (error: AxiosError<{ message: string }>) => {
-      toast.error(error.response?.data?.message || 'Failed to delete category.');
-    }
-  });
+  const toggleAvailabilityMutation = useToggleItemAvailability(venueId);
+  const saveItemMutation = useSaveMenuItem(venueId);
+  const deleteItemMutation = useDeleteItem(venueId);
+  
+  const addCategoryMutation = useAddCategory(venueId);
+  const deleteCategoryMutation = useDeleteCategory(venueId, () => setActiveCategory('all'));
 
   // ============================================================================
   // HANDLERS & DERIVED STATE
@@ -177,7 +49,14 @@ export default function MenuManagement() {
 
   const handleAddCategory = (e: React.FormEvent) => {
     e.preventDefault();
-    if (newCategoryName.trim()) addCategoryMutation.mutate(newCategoryName);
+    if (newCategoryName.trim()) {
+      addCategoryMutation.mutate(newCategoryName, {
+        onSuccess: () => {
+          setNewCategoryName('');
+          setIsAddingCategory(false);
+        }
+      });
+    }
   };
 
   const openDrawer = (item: MenuItem | null = null) => {
@@ -447,7 +326,13 @@ export default function MenuManagement() {
           <ItemForm 
             item={editingItem} 
             categories={categories} 
-            onSave={(data, img) => saveItemMutation.mutate({ formData: data, imageFile: img })} 
+            onSave={(data, img) => saveItemMutation.mutate({ 
+                formData: data, 
+                imageFile: img, 
+                editingItemId: editingItem?.item_id 
+            }, {
+                onSuccess: () => setIsDrawerOpen(false)
+            })} 
             onCancel={() => setIsDrawerOpen(false)} 
             isSubmitting={saveItemMutation.isPending}
           />

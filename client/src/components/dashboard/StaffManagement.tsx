@@ -1,7 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import axios, { AxiosError } from 'axios';
-import { toast } from 'sonner';
+import React, { useState, useEffect } from 'react';
 import { 
     Users, Plus, KeyRound, Shield, Clock, RefreshCw, Lock, 
     MoreVertical, UserPlus, X, Loader2, Dices, Mail, Ban, 
@@ -9,22 +6,11 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
-export interface StaffMember {
-    user_id: string;
-    username: string;
-    role: string;
-    email?: string;
-    is_active: boolean;
-    last_login?: string;
-}
-
-interface StaffFormData {
-    username: string;
-    role: string;
-    pin: string;
-    email: string;
-    password?: string;
-}
+// ⚡ IMPORT THE NEW CUSTOM HOOKS AND TYPES
+import { 
+    useStaff, useSaveStaff, useToggleStaffStatus, useResetStaffPin, useDeleteStaff,
+    StaffMember, StaffFormData 
+} from '../../hooks/useStaffManagement';
 
 interface ResetPinModalState {
     isOpen: boolean;
@@ -35,17 +21,12 @@ interface ResetPinModalState {
 
 export default function StaffManagement() {
     const { user } = useAuth();
-    const queryClient = useQueryClient();
+    const venueId = user?.venueId;
     
     const currentUserRole = user?.role || 'STAFF';
     const currentUserId = user?.userId;
 
-    const getConfig = () => ({
-        headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` },
-        venueId: user?.venueId
-    });
-
-    // Modals & UI State (Transient, local state is fine here)
+    // Modals & UI State
     const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
     const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
     const [resetPinModal, setResetPinModal] = useState<ResetPinModalState>({ isOpen: false, staffId: null, name: '', pin: '' });
@@ -53,77 +34,14 @@ export default function StaffManagement() {
     const [formData, setFormData] = useState<StaffFormData>({ username: '', role: 'WAITER', pin: '', email: '', password: '' });
 
     // ============================================================================
-    // ⚡ TANSTACK QUERY: SERVER STATE CACHING
+    // ⚡ TANSTACK QUERY: Abstracted Custom Hooks
     // ============================================================================
-    const { data: staff = [], isLoading } = useQuery({
-        queryKey: ['staff', user?.venueId],
-        queryFn: async () => {
-            const res = await axios.get<StaffMember[]>('/api/auth/staff', getConfig());
-            return res.data;
-        },
-        enabled: !!user?.venueId
-    });
-
-    // ============================================================================
-    // ⚡ TANSTACK MUTATIONS: SMART CACHE INVALIDATION
-    // ============================================================================
-    const saveStaffMutation = useMutation({
-        mutationFn: async (data: StaffFormData) => {
-            if (editingStaff) {
-                return axios.patch(`/api/auth/staff/${editingStaff.user_id}`, data, getConfig());
-            } else {
-                return axios.post('/api/auth/register/staff', data, getConfig());
-            }
-        },
-        onSuccess: () => {
-            toast.success(editingStaff ? 'Staff updated successfully.' : 'Staff provisioned successfully.');
-            setIsModalOpen(false);
-            queryClient.invalidateQueries({ queryKey: ['staff', user?.venueId] });
-        },
-        onError: (error: AxiosError<{ message: string }>) => {
-            toast.error(error.response?.data?.message || 'Failed to save staff member.');
-        }
-    });
-
-    const toggleStatusMutation = useMutation({
-        mutationFn: async ({ staffId, is_active }: { staffId: string, is_active: boolean }) => {
-            return axios.patch<{ message: string }>(`/api/auth/staff/${staffId}/status`, { is_active }, getConfig());
-        },
-        onSuccess: (res) => {
-            toast.success(res.data.message);
-            setActiveMenuData(null);
-            queryClient.invalidateQueries({ queryKey: ['staff', user?.venueId] });
-        },
-        onError: (error: AxiosError<{ message: string }>) => {
-            toast.error(error.response?.data?.message || 'Failed to change status.');
-        }
-    });
-
-    const resetPinMutation = useMutation({
-        mutationFn: async ({ staffId, pin }: { staffId: string, pin: string }) => {
-            return axios.patch(`/api/auth/staff/${staffId}/pin`, { pin }, getConfig());
-        },
-        onSuccess: (_, variables) => {
-            toast.success(`PIN for ${resetPinModal.name} reset successfully.`, { duration: 5000 });
-            setResetPinModal({ isOpen: false, staffId: null, name: '', pin: '' });
-        },
-        onError: (error: AxiosError<{ message: string }>) => {
-            toast.error(error.response?.data?.message || 'Failed to reset PIN.');
-        }
-    });
-
-    const deleteStaffMutation = useMutation({
-        mutationFn: async (staffId: string) => {
-            return axios.delete(`/api/auth/staff/${staffId}`, getConfig());
-        },
-        onSuccess: () => {
-            toast.success('Staff member deleted permanently.');
-            queryClient.invalidateQueries({ queryKey: ['staff', user?.venueId] });
-        },
-        onError: (error: AxiosError<{ message: string }>) => {
-            toast.error(error.response?.data?.message || 'Failed to delete staff member.');
-        }
-    });
+    const { data: staff = [], isLoading } = useStaff(venueId);
+    
+    const saveStaffMutation = useSaveStaff(venueId);
+    const toggleStatusMutation = useToggleStaffStatus(venueId);
+    const resetPinMutation = useResetStaffPin(venueId);
+    const deleteStaffMutation = useDeleteStaff(venueId);
 
     // ============================================================================
     // UI HANDLERS
@@ -207,7 +125,10 @@ export default function StaffManagement() {
                             <div className="h-px bg-slate-100 my-1 mx-2"></div>
                             
                             <button 
-                                onClick={() => toggleStatusMutation.mutate({ staffId: member.user_id, is_active: !member.is_active })}
+                                onClick={() => {
+                                    setActiveMenuData(null);
+                                    toggleStatusMutation.mutate({ staffId: member.user_id, is_active: !member.is_active });
+                                }}
                                 className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-xl transition-colors text-left font-bold ${member.is_active ? 'text-amber-700 hover:bg-amber-50' : 'text-emerald-700 hover:bg-emerald-50'}`}
                             >
                                 {member.is_active ? <><Ban size={16} className="shrink-0"/> Suspend</> : <><CheckCircle2 size={16} className="shrink-0"/> Restore</>} 
@@ -388,7 +309,16 @@ export default function StaffManagement() {
                         </div>
 
                         <div className="overflow-y-auto custom-scrollbar p-5 md:p-6">
-                            <form id="staff-form" onSubmit={(e) => { e.preventDefault(); saveStaffMutation.mutate(formData); }} className="space-y-5">
+                            <form 
+                                id="staff-form" 
+                                onSubmit={(e) => { 
+                                    e.preventDefault(); 
+                                    saveStaffMutation.mutate({ data: formData, staffId: editingStaff?.user_id }, {
+                                        onSuccess: () => setIsModalOpen(false)
+                                    }); 
+                                }} 
+                                className="space-y-5"
+                            >
                                 
                                 {isDemoting && (
                                     <div className="p-4 mb-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3">
@@ -476,7 +406,15 @@ export default function StaffManagement() {
                             <p className="text-sm font-medium text-slate-500 mt-1">Generate a new 4-digit terminal PIN for <span className="text-slate-800 font-bold">{resetPinModal.name}</span>.</p>
                         </div>
 
-                        <form onSubmit={(e) => { e.preventDefault(); resetPinMutation.mutate({ staffId: resetPinModal.staffId!, pin: resetPinModal.pin }); }} className="space-y-6">
+                        <form 
+                            onSubmit={(e) => { 
+                                e.preventDefault(); 
+                                resetPinMutation.mutate({ staffId: resetPinModal.staffId!, pin: resetPinModal.pin, name: resetPinModal.name }, {
+                                    onSuccess: () => setResetPinModal({ isOpen: false, staffId: null, name: '', pin: '' })
+                                }); 
+                            }} 
+                            className="space-y-6"
+                        >
                             <div className="flex gap-2">
                                 <div className="relative flex-1">
                                     <KeyRound size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />

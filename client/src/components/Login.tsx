@@ -1,102 +1,86 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios, { AxiosError } from 'axios';
+import { AxiosError } from 'axios';
 import { Mail, Lock, User, ArrowRight, Loader2, KeyRound, AlertCircle } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { useAuth } from '../context/AuthContext';
 
-// 🛡️ Strict typing for the expected backend response
-interface LoginResponse {
-    token: string;
-    user: {
-        id: string;
-        name: string;
-        role: string;
-        venue_id: string;
-        [key: string]: any;
-    };
-    message: string;
-}
+// ⚡ IMPORT THE NEW STATE AND NETWORK HOOKS
+import { useLoginStore } from '../store/useLoginStore';
+import { useLoginMutation } from '../hooks/useAuthMutations';
 
 export default function Login() {
-    // 🛡️ Enforce strict literal types on the login mode
-    const [loginType, setLoginType] = useState<'STAFF' | 'MANAGER'>('STAFF'); 
-    
-    const [email, setEmail] = useState<string>('');
-    const [password, setPassword] = useState<string>('');
-    const [username, setUsername] = useState<string>('');
-    const [pin, setPin] = useState<string>('');
-    const [isLoading, setIsLoading] = useState<boolean>(false);
-    
-    const storedVenueId = localStorage.getItem('terminal_venue_id');
-    
     const navigate = useNavigate();
     const { login } = useAuth();
+    
+    // ⚡ ZUSTAND: Preserved UI State
+    const { loginType, email, username, setLoginType, setEmail, setUsername } = useLoginStore();
 
-    // 🛡️ Explicitly type the num parameter as a string
+    // 🛡️ LOCAL STATE: Highly sensitive data must be destroyed on unmount
+    const [password, setPassword] = useState<string>('');
+    const [pin, setPin] = useState<string>('');
+    
+    const storedVenueId = localStorage.getItem('terminal_venue_id');
+
+    // ⚡ TANSTACK QUERY: Abstracted Mutation
+    const loginMutation = useLoginMutation();
+
+    // 🛡️ Handlers
     const handlePinPress = (num: string) => { 
         if (pin.length < 4) setPin(prev => prev + num); 
     };
     
     const handleBackspace = () => setPin(prev => prev.slice(0, -1));
 
-    // 🛡️ Type the form event to prevent implicit 'any' errors
-    const handleLogin = async (e?: React.FormEvent) => {
+    const handleLogin = (e?: React.FormEvent) => {
         if (e) e.preventDefault();
-        setIsLoading(true);
         
-        const endpoint = loginType === 'MANAGER' ? '/api/auth/login/manager' : '/api/auth/login/staff';
         const payload = loginType === 'MANAGER' 
-            ? { email, password } 
-            : { venue_id: localStorage.getItem('terminal_venue_id'), username, pin };
+            ? { loginType, email, password } 
+            : { loginType, venue_id: localStorage.getItem('terminal_venue_id'), username, pin };
 
-        try {
-            // 🛡️ Inject the LoginResponse interface into Axios
-            const res = await axios.post<LoginResponse>(`http://localhost:5000${endpoint}`, payload);
-            
-            // Rehydrate context and local storage safely
-            await login(res.data.token);
-            localStorage.setItem('user', JSON.stringify(res.data.user));
+        loginMutation.mutate(payload as any, {
+            onSuccess: async (data) => {
+                // Rehydrate context and local storage safely
+                await login(data.token);
+                localStorage.setItem('user', JSON.stringify(data.user));
 
-            // PROVISION THE DEVICE: If a manager logs in, bond this device to their venue
-            if (loginType === 'MANAGER' && res.data.user?.venue_id) {
-                localStorage.setItem('terminal_venue_id', res.data.user.venue_id);
+                // PROVISION THE DEVICE: If a manager logs in, bond this device to their venue
+                if (loginType === 'MANAGER' && data.user?.venue_id) {
+                    localStorage.setItem('terminal_venue_id', data.user.venue_id);
+                }
+
+                // ⚡ UNIFIED RBAC ROUTING 
+                const userRole = data.user.role;
+                let targetRoute = '/dashboard/pos'; 
+                let destinationName = 'Point of Sale';
+
+                if (['OWNER', 'MANAGER'].includes(userRole)) {
+                    targetRoute = '/dashboard';
+                    destinationName = 'Dashboard';
+                } else if (userRole === 'KITCHEN_STAFF') {
+                    targetRoute = '/dashboard/orders';
+                    destinationName = 'Kitchen Display';
+                }
+
+                toast.success('Authentication Verified', {
+                    description: `Routing to ${destinationName}...`,
+                    icon: <KeyRound className="text-amber-500" />
+                });
+
+                setTimeout(() => {
+                    navigate(targetRoute);
+                }, 1000);
+            },
+            onError: (err: any) => {
+                const axiosError = err as AxiosError<{ message: string }>;
+                toast.error('Access Denied', {
+                    description: axiosError.response?.data?.message || 'Invalid credentials provided.',
+                });
+                
+                if (loginType === 'STAFF') setPin(''); // Instantly reset PIN on failure for fast retry
             }
-
-            // ⚡ UNIFIED RBAC ROUTING 
-            // Determine the target route based on the authenticated user's exact role
-            const userRole = res.data.user.role;
-            let targetRoute = '/dashboard/pos'; // Default fallback for floor staff
-            let destinationName = 'Point of Sale';
-
-            if (['OWNER', 'MANAGER'].includes(userRole)) {
-                targetRoute = '/dashboard';
-                destinationName = 'Dashboard';
-            } else if (userRole === 'KITCHEN_STAFF') {
-                targetRoute = '/dashboard/orders';
-                destinationName = 'Kitchen Display';
-            }
-
-            toast.success('Authentication Verified', {
-                description: `Routing to ${destinationName}...`,
-                icon: <KeyRound className="text-amber-500" />
-            });
-
-            setTimeout(() => {
-                navigate(targetRoute);
-            }, 1000);
-
-        } catch (err) {
-            // 🛡️ Safely cast the error to an AxiosError to access the response payload
-            const axiosError = err as AxiosError<{ message: string }>;
-            toast.error('Access Denied', {
-                description: axiosError.response?.data?.message || 'Invalid credentials provided.',
-            });
-            
-            if (loginType === 'STAFF') setPin(''); // Instantly reset PIN on failure for fast retry
-        } finally {
-            setIsLoading(false);
-        }
+        });
     };
 
     return (
@@ -157,8 +141,8 @@ export default function Login() {
                                 <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required className="w-full bg-white/5 border border-white/10 rounded-xl pl-12 pr-4 py-4 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 focus:bg-white/10 transition-all duration-300" />
                             </div>
                             
-                            <button type="submit" disabled={isLoading} className="group w-full flex items-center justify-center gap-3 mt-8 bg-white text-black font-semibold text-sm py-4 rounded-xl transition-all duration-300 hover:bg-gray-200 active:scale-[0.98] disabled:opacity-70">
-                                {isLoading ? <Loader2 size={18} className="animate-spin" /> : <>Access Workspace <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" /></>}
+                            <button type="submit" disabled={loginMutation.isPending} className="group w-full flex items-center justify-center gap-3 mt-8 bg-white text-black font-semibold text-sm py-4 rounded-xl transition-all duration-300 hover:bg-gray-200 active:scale-[0.98] disabled:opacity-70">
+                                {loginMutation.isPending ? <Loader2 size={18} className="animate-spin" /> : <>Access Workspace <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" /></>}
                             </button>
                         </form>
                     )}
@@ -205,14 +189,14 @@ export default function Login() {
                                 <button type="button" onClick={() => handlePinPress('0')} className="aspect-[4/3] rounded-2xl bg-white/5 border border-white/5 text-2xl font-light text-white hover:bg-white/10 active:bg-white/20 active:scale-95 transition-all duration-200 backdrop-blur-md">
                                     0
                                 </button>
-                                <button type="button" onClick={() => pin.length === 4 ? handleLogin() : undefined} disabled={isLoading} className={`flex items-center justify-center aspect-[4/3] rounded-2xl text-sm font-semibold transition-all duration-300 active:scale-95 ${pin.length === 4 ? 'bg-amber-500 text-black shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:bg-amber-400' : 'bg-white/5 border border-white/5 text-gray-600 cursor-not-allowed'}`}>
-                                    {isLoading ? <Loader2 size={20} className="animate-spin text-black" /> : 'GO'}
+                                <button type="button" onClick={() => pin.length === 4 ? handleLogin() : undefined} disabled={loginMutation.isPending} className={`flex items-center justify-center aspect-[4/3] rounded-2xl text-sm font-semibold transition-all duration-300 active:scale-95 ${pin.length === 4 ? 'bg-amber-500 text-black shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:bg-amber-400' : 'bg-white/5 border border-white/5 text-gray-600 cursor-not-allowed'}`}>
+                                    {loginMutation.isPending ? <Loader2 size={20} className="animate-spin text-black" /> : 'GO'}
                                 </button>
                             </div>
                         </div>
                     )}
 
-                    {!isLoading && loginType === 'MANAGER' && (
+                    {!loginMutation.isPending && loginType === 'MANAGER' && (
                         <p className="text-center text-xs text-gray-500 mt-6 animate-in fade-in">
                             New to Smart Table? <a href="/register" className="text-amber-500 hover:text-amber-400 transition-colors">Provision a venue</a>
                         </p>

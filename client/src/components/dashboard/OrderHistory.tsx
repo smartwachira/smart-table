@@ -1,37 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-// ⚡ IMPORT TanStack Query and keepPreviousData
-import { useQuery, keepPreviousData } from '@tanstack/react-query';
-import axios from 'axios';
 import { toast } from 'sonner';
 import { 
     Search, Calendar, ChevronDown, Receipt, 
     CheckCircle2, Ban, Clock, User, Banknote 
 } from 'lucide-react';
-import { useOrderHistoryStore } from '../../store/useOrderHistoryStore'; // ⚡ Global State
+import { useOrderHistoryStore } from '../../store/useOrderHistoryStore'; 
 
-// 🛡️ Explicit Interfaces
-interface OrderItem {
-    quantity: number;
-    price_at_time: number;
-    name?: string;
-    notes?: string;
-    MenuItem?: { name: string; };
-}
-
-interface HistoryOrderData {
-    order_id: string;
-    table_number: string;
-    customer_name?: string;
-    status: 'PENDING' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED';
-    payment_status: 'PENDING' | 'PAID' | 'FAILED';
-    payment_method: 'CASH' | 'M-PESA' | string;
-    total_amount: number | string;
-    createdAt?: string;
-    notes?: string;
-    CashCollector?: { name: string };
-    OrderItems: OrderItem[];
-}
+// ⚡ IMPORT THE NEW CUSTOM HOOK AND TYPES
+import { useOrderHistory, HistoryOrderData } from '../../hooks/useOrderHistory';
 
 const formatCurrency = (val?: number | string) => new Intl.NumberFormat('en-KE', { 
     style: 'currency', currency: 'KES', minimumFractionDigits: 0 
@@ -48,7 +25,6 @@ const formatDateTime = (isoString?: string) => {
 
 export default function OrderHistory() {
     const navigate = useNavigate();
-    const token = localStorage.getItem('auth_token');
     
     // ⚡ ZUSTAND: Immune to Sidebar unmounting
     const { 
@@ -63,52 +39,10 @@ export default function OrderHistory() {
     const [localCustomEnd, setLocalCustomEnd] = useState<string>(customEnd);
     const datePickerRef = useRef<HTMLDivElement>(null);
 
-    // Date Calculation Helper
-    const getDateParams = () => {
-        const now = new Date();
-        let startDateObj = new Date();
-        let endDateObj = new Date(now);
-
-        if (preset === 'custom' && customStart && customEnd) {
-            startDateObj = new Date(customStart); startDateObj.setHours(0,0,0,0);
-            endDateObj = new Date(customEnd); endDateObj.setHours(23,59,59,999);
-        } else {
-            switch (preset) {
-                case 'yesterday':
-                    startDateObj.setDate(now.getDate() - 1); startDateObj.setHours(0,0,0,0);
-                    endDateObj = new Date(startDateObj); endDateObj.setHours(23,59,59,999);
-                    break;
-                case '7days': startDateObj.setDate(now.getDate() - 7); break;
-                case 'thisMonth': startDateObj = new Date(now.getFullYear(), now.getMonth(), 1); break;
-                case 'lastMonth':
-                    startDateObj = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                    endDateObj = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-                    break;
-                case 'ytd': startDateObj = new Date(now.getFullYear(), 0, 1); break;
-                default: startDateObj.setHours(0,0,0,0); // Today
-            }
-        }
-        return { startDateStr: startDateObj.toISOString(), endDateStr: endDateObj.toISOString() };
-    };
-
     // ============================================================================
-    // ⚡ TANSTACK QUERY: Server State Caching
+    // ⚡ TANSTACK QUERY: Abstracted Custom Hook
     // ============================================================================
-    const { data: orders = [], isLoading } = useQuery({
-        queryKey: ['orderHistory', preset, customStart, customEnd],
-        queryFn: async () => {
-            if (!token) { navigate('/login'); throw new Error("No token"); }
-            
-            const { startDateStr, endDateStr } = getDateParams();
-            const response = await axios.get<HistoryOrderData[]>('/api/orders/history', {
-                headers: { Authorization: `Bearer ${token}` },
-                params: { startDate: startDateStr, endDate: endDateStr }
-            });
-            return response.data || [];
-        },
-        enabled: !!token,
-        placeholderData: keepPreviousData // ⚡ Smooth UX: Doesn't flash loading spinner when changing dates
-    });
+    const { data: orders = [], isLoading } = useOrderHistory(preset, customStart, customEnd);
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
