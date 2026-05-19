@@ -14,7 +14,7 @@ interface UpdateSettingsBody {
 
 export const getVenueSettings = async (req: Request, res: Response): Promise<Response | void> =>{
     try {
-        const venueId = req.user!.venueId; //From JWt middleware
+        const venueId = req.user!.venueId; 
         const venue = await Venue.findByPk(venueId, {
             attributes: { exclude: ['createdAt','updatedAt']}
         });
@@ -35,7 +35,6 @@ export const updateVenueSettings = async (req: Request<{}, {}, UpdateSettingsBod
         const venue = await Venue.findByPk(venueId);
         if (!venue) return res.status(404).json({ message: "Venue not found"});
 
-        //Update fields
         venue.name = name || venue.name;
         venue.location = location || venue.location;
         venue.phone_number = phone_number !== undefined ? phone_number: venue.phone_number
@@ -47,6 +46,10 @@ export const updateVenueSettings = async (req: Request<{}, {}, UpdateSettingsBod
 
         await venue.save();
 
+        // ⚡ GLOBAL BROADCAST: Settings Updated (e.g. Venue closed, Tax changed)
+        const io = req.app.get('socketio');
+        if (io) io.to(`venue:${venueId}`).emit('settings:updated');
+
         res.status(200).json({ message: "Settings updated successfully",venue});
     } catch (error){
         console.error("Update Settings Error:",error);
@@ -54,7 +57,6 @@ export const updateVenueSettings = async (req: Request<{}, {}, UpdateSettingsBod
     }
 }
 
-// --- UPLOAD VENUE LOGO ---
 export const uploadVenueLogo = async (req: Request, res: Response): Promise<Response | void> => {
     try {
         if (!req.file) {
@@ -66,11 +68,14 @@ export const uploadVenueLogo = async (req: Request, res: Response): Promise<Resp
         
         if (!venue) return res.status(404).json({ message: "Venue not found" });
 
-        // Construct the image URL based on your static folder setup
         const imageUrl = `/uploads/${req.file.filename}`;
         
         venue.logo_url = imageUrl;
         await venue.save();
+
+        // ⚡ GLOBAL BROADCAST: Logo Updated
+        const io = req.app.get('socketio');
+        if (io) io.to(`venue:${venueId}`).emit('settings:updated');
 
         res.status(200).json({ 
             message: "Logo updated successfully", 

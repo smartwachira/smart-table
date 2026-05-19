@@ -25,22 +25,19 @@ interface CreateOrderBody {
 interface updateOrderStatusBody {
     status: OrderStatus | string;
     cancelReason?: string;
-
 }
-// 🛡️ Note: Query parameters are always strings or undefined in Express
+
 interface HistoricalOrdersQuery {
     startDate?: string;
     endDate?: string;
 }
 
 export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Response): Promise<Response | void> => {
-
     console.log("🕵️ EXTRACTED GUEST ID:", req.headers['x-guest-id']);
     const t = await sequelize.transaction(); 
 
     try {
         const { items, payment_method, customer_name, phone_number } = req.body;
-        
         const guestSessionId = req.headers['x-guest-id'] as string | undefined;
         
         let venue_id: string;
@@ -53,7 +50,7 @@ export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Re
         } else if (req.user && ['WAITER', 'MANAGER', 'OWNER', 'KITCHEN_STAFF'].includes(req.user.role)) {
             venue_id = req.user.venueId; 
             table_number = req.body.table_number as string; 
-            staffId = req.user.userId; 
+            staffId = (req.user as any).userId || (req.user as any).id || (req.user as any).user_id || null; 
         } else {
             return res.status(403).json({ message: "Unauthorized order request." });
         }
@@ -103,11 +100,11 @@ export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Re
             phone_number: phone_number || null,
             total_amount: trueTotalAmount,
             payment_method,
-            status: 'pending',
+            status: 'PENDING', 
             payment_status: 'PENDING',
             guest_session_id: guestSessionId || null,
-            gateway_fee: 0, // ⚡ Explicitly pass default
-            platform_fee: 0 // ⚡ Explicitly pass default
+            gateway_fee: 0, 
+            platform_fee: 0 
         }, { transaction: t });
 
 
@@ -121,7 +118,8 @@ export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Re
 
         const io = req.app.get('socketio');
         if (io) {
-            io.to(venue_id).emit('receive_order', {
+            // ⚡ UPDATED: Emitting to our strict venue namespace
+            io.to(`venue:${venue_id}`).emit('order:created', {
                 order: newOrder,
                 items: items
             });
@@ -163,10 +161,9 @@ export const getOrders = async (req: Request, res: Response): Promise<Response |
                             }
                         ]
                     },
-                    // ⚡ UPDATED LOGIC: Strict payment conditions
                     {
                         [Op.or]: [
-                            { payment_method: { [Op.in]: ['CARD', 'M-PESA'] }, payment_status: 'PAID' },
+                            { payment_method: { [Op.ne]: 'CASH' }, payment_status: 'PAID' }, // ⚡ Global Channel Support!
                             { payment_method: 'CASH' }
                         ]
                     }
@@ -246,10 +243,14 @@ export const updateOrderStatus = async (req: Request<{orderId: string}, {}, upda
 
         const io = req.app.get('socketio');
         if (io) {
-            io.to(venueId).emit("orderUpdated", {
-                newStatus: upperStatus,
-                orderId: order.order_id
-            });
+            // ⚡ UPDATED: Double-Tap Broadcast
+            if (upperStatus === 'CANCELLED') {
+                io.to(`venue:${venueId}`).emit("order:cancelled", { orderId: order.order_id, reason: cancelReason });
+                io.to(`order:${order.order_id}`).emit("order:cancelled", { orderId: order.order_id, reason: cancelReason });
+            } else {
+                io.to(`venue:${venueId}`).emit("order:status_updated", { newStatus: upperStatus, orderId: order.order_id });
+                io.to(`order:${order.order_id}`).emit("order:status_updated", { newStatus: upperStatus, orderId: order.order_id });
+            }
         }
 
         res.json({ message: 'Order updated', order });
@@ -279,7 +280,7 @@ export const markCashCollected = async (req: Request<{orderId: string}, {}>, res
     try {
         const { orderId } = req.params;
         const venueId = req.user!.venueId;
-        const staffId = req.user!.userId 
+        const staffId = req.user!.userId;
 
         const order = await Order.findOne({ where: { order_id: orderId, venue_id: venueId } });
 
@@ -299,7 +300,9 @@ export const markCashCollected = async (req: Request<{orderId: string}, {}>, res
 
         const io = req.app.get('socketio');
         if (io) {
-            io.to(venueId).emit("orderUpdated", { orderId: order.order_id });
+            // ⚡ UPDATED: Double-Tap Broadcast
+            io.to(`venue:${venueId}`).emit("payment:completed", { orderId: order.order_id, method: 'CASH' });
+            io.to(`order:${order.order_id}`).emit("payment:completed", { orderId: order.order_id, method: 'CASH' });
         }
 
         res.json({ message: 'Cash collected and logged successfully', order: updatedOrderData });
@@ -369,10 +372,9 @@ export const getGuestOrders = async (req: Request, res: Response): Promise<Respo
         const orders = await Order.findAll({
             where: { 
                 guest_session_id: guestSessionId,
-                status: { [Op.ne]: 'CANCELLED' }, // Hide cancelled orders
-                // ⚡ UPDATED LOGIC: Hide failed/pending digital ghost orders
+                status: { [Op.ne]: 'CANCELLED' }, 
                 [Op.or]: [
-                    { payment_method: { [Op.in]: ['CARD', 'M-PESA'] }, payment_status: 'PAID' },
+                    { payment_method: { [Op.ne]: 'CASH' }, payment_status: 'PAID' }, // ⚡ Global Channel Support!
                     { payment_method: 'CASH' }
                 ]
             },

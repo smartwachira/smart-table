@@ -15,6 +15,9 @@ export interface VenueSettingsFormData {
     wifi_password?: string;
     shift_duration_hours?: number | string;
     logo_url?: string;
+    is_financially_onboarded?: boolean;
+    settlement_bank?: string;
+    account_number_last_4?: string;
 }
 
 // ⚡ HELPER: Bulletproof Image Pathing
@@ -83,5 +86,23 @@ export const useUploadLogo = (venueId?: string) => {
             queryClient.invalidateQueries({ queryKey: ['venueSettings', venueId] });
         },
         // We leave the onError toast to the component so it can handle the UI revert
+    });
+};
+
+// 2. Add this new mutation hook at the bottom of the file
+export const useOnboardSubaccount = (venueId?: string) => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async (payload: { settlement_bank: string; account_number: string }) => {
+            const res = await axios.post('/api/paystack/onboard-subaccount', payload, getConfig());
+            return res.data;
+        },
+        onSuccess: () => {
+            toast.success("Payout account connected successfully!");
+            queryClient.invalidateQueries({ queryKey: ['venueSettings', venueId] });
+        },
+        onError: (error: AxiosError<{ message: string }>) => {
+            toast.error(error.response?.data?.message || "Failed to verify account details.");
+        }
     });
 };

@@ -41,13 +41,17 @@ export const useSubmitGuestOrder = () => {
             const orderRes = await api.post<{ orderId: string }>('/api/orders', payload);
             const orderId = orderRes.data.orderId;
 
-            // Step 2a: Trigger STK Push Sequence
+            // Step 2a: Trigger STK Push Sequence via Paystack (Global Telco Support)
             if (payload.payment_method === 'M-PESA') {
-                await api.post('/api/mpesa/stkpush', { orderId, phone: payload.phone_number });
+                await api.post('/api/paystack/charge-mobile-money', { 
+                    orderId, 
+                    phone: payload.phone_number,
+                    provider: 'mpesa' // ⚡ In the future, this can be dynamic (e.g. 'airtel')
+                });
                 return { status: 'pending', method: 'M-PESA', orderId };
             }
 
-            // Step 2b: Trigger Paystack Initialization Sequence
+            // Step 2b: Trigger Paystack Initialization Sequence (Cards/Bank)
             if (payload.payment_method === 'CARD') {
                 const initRes = await api.post<PaystackInitResponse>('/api/paystack/initialize', { orderId });
                 return { status: 'pending', method: 'CARD', orderId, access_code: initRes.data.access_code };

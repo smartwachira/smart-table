@@ -78,8 +78,8 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
             where: { 
                 venue_id: venueId, 
                 status: { [Op.notIn]: ['COMPLETED', 'CANCELLED'] }, // Condition C
-                [Op.or]: [ // Condition A & B
-                    { payment_method: { [Op.in]: ['CARD', 'M-PESA'] }, payment_status: 'PAID' },
+                [Op.or]: [
+                    { payment_method: { [Op.ne]: 'CASH' }, payment_status: 'PAID' }, // ⚡ Global Channel Support!
                     { payment_method: 'CASH' }
                 ]
             }

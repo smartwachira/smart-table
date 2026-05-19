@@ -102,17 +102,21 @@ export const useSubmitPOSOrder = () => {
 
             const orderId = orderRes.data.orderId;
 
-            // Step 2a: Trigger STK Push Sequence
+            // Step 2a: Trigger STK Push Sequence via Paystack (Global Telco Support)
             if (payload.paymentMethod === 'M-PESA') {
                 await axios.post(
-                    `${API_URL}/api/mpesa/stkpush`,
-                    { orderId, phone: payload.phoneNumber },
+                    `${API_URL}/api/paystack/charge-mobile-money`,
+                    { 
+                        orderId, 
+                        phone: payload.phoneNumber,
+                        provider: 'mpesa' // ⚡ Dynamic channel mapping
+                    },
                     { headers }
                 );
                 return { status: 'mpesa_sent', orderId }; 
             }
 
-            // Step 2b: Trigger Paystack Initialization Sequence
+            // Step 2b: Trigger Paystack Initialization Sequence (Cards/Bank)
             if (payload.paymentMethod === 'CARD') {
                 const initRes = await axios.post<{ access_code: string, reference: string }>(
                     `${API_URL}/api/paystack/initialize`,

@@ -17,13 +17,17 @@ export interface VenueAttributes {
     shift_duration_hours: number;
     wifi_ssid?: string | null;
     wifi_password?: string | null;
+    
+    // ⚡ NEW: Secure Financial Routing Columns
     gateway_subaccount_id?: string | null;
-    payment_onboarding_status: OnboardingStatus
+    settlement_bank?: string | null;
+    account_number_last_4?: string | null;
+    is_financially_onboarded: boolean;
+    payment_onboarding_status: OnboardingStatus;
 }
 
-// ⚡ FIX: Added all fields with DB defaults to the 'Optional' generic
 export interface VenueCreationAttributes extends Optional<VenueAttributes, 
-    'venue_id' | 'tax_rate' | 'is_accepting_orders' | 'allow_cash_payments' | 'shift_duration_hours' | 'payment_onboarding_status'
+    'venue_id' | 'tax_rate' | 'is_accepting_orders' | 'allow_cash_payments' | 'shift_duration_hours' | 'payment_onboarding_status' | 'is_financially_onboarded'
 > {}
 
 class Venue extends Model<VenueAttributes, VenueCreationAttributes> implements VenueAttributes {
@@ -40,11 +44,13 @@ class Venue extends Model<VenueAttributes, VenueCreationAttributes> implements V
     public shift_duration_hours!: number;
     public wifi_ssid!: string | null;
     public wifi_password!: string | null;
-    public gateway_subaccount_id!: string | null;
-    public payment_onboarding_status!: OnboardingStatus;
 
-    public readonly createdAt!: Date;
-    public readonly updatedAt!: Date;
+    // ⚡ NEW: Paystack Attributes
+    public gateway_subaccount_id!: string | null;
+    public settlement_bank!: string | null;
+    public account_number_last_4!: string | null;
+    public is_financially_onboarded!: boolean;
+    public payment_onboarding_status!: OnboardingStatus;
 }
 
 Venue.init({
@@ -92,7 +98,7 @@ Venue.init({
     },
     shift_duration_hours: {
         type: DataTypes.INTEGER,
-        defaultValue: 14 // Assuming 14 based on your dashboard logic
+        defaultValue: 14 
     },
     wifi_ssid: {
         type: DataTypes.STRING,
@@ -106,14 +112,30 @@ Venue.init({
         type: DataTypes.STRING,
         allowNull: true
     },
+    settlement_bank: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    account_number_last_4: {
+        type: DataTypes.STRING(4),
+        allowNull: true
+    },
+    is_financially_onboarded: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false
+    },
+    // ⚡ FIX: Replaced ENUM with STRING + Validation for PostgreSQL compatibility
     payment_onboarding_status: {
-        type: DataTypes.ENUM('PENDING', 'VERIFIED', 'REJECTED'),
-        defaultValue: 'PENDING'
+        type: DataTypes.STRING, 
+        defaultValue: 'PENDING',
+        validate: {
+            isIn: [['PENDING', 'VERIFIED', 'REJECTED']] // ORM-level enforcement
+        }
     }
 }, {
     sequelize,
-    timestamps: true,
-    tableName: 'Venues'
+    tableName: 'venues',
+    timestamps: true
 });
 
 export default Venue;

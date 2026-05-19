@@ -1,19 +1,22 @@
 import { Router } from 'express';
-import { initializePayment,paystackWebhookHandler } from '../controllers/paystackController.js'; // Ensure the .js extension for Node ESM
+import { protect } from '../middleware/authMiddleware.js';
+import { 
+    initializePayment, 
+    chargeMobileMoney, 
+    onboardSubaccount, 
+    paystackWebhookHandler 
+} from '../controllers/paystackController.js'; 
 
 const router = Router();
 
-/**
- * @route   POST /api/paystack/initialize
- * @desc    Initializes a Paystack transaction and returns the access_code. 
- *          Automatically handles multi-tenant sub-account routing if configured.
- * @access  Public (Guest Checkout) or Protected (Waitstaff)
- */
-router.post('/initialize', initializePayment);
-router.post('/webhook',paystackWebhookHandler)
+// ⚡ GUEST/STAFF CHECKOUT ROUTES
+router.post('/initialize', initializePayment);        // Card Payments
+router.post('/charge-mobile-money', chargeMobileMoney); // M-Pesa STK Push
 
-// ⚡ PLACEHOLDER FOR NEXT STEP: 
-// We will build the webhook controller next. It requires raw body parsing for signature verification.
-// router.post('/webhook', paystackWebhookHandler);
+// ⚡ DASHBOARD ONBOARDING ROUTES
+router.post('/onboard-subaccount', protect, onboardSubaccount); // Secure Venue Setup
+
+// ⚡ PAYSTACK WEBHOOK
+router.post('/webhook', paystackWebhookHandler);
 
 export default router;

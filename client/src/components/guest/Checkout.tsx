@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 
 import api from '../../utils/axiosConfig'; 
-import { socket } from '../../utils/socket';
+import io, { Socket } from 'socket.io-client';
 import { useCustomerCartStore } from '../../store/useCustomerCartStore';
 
 // ⚡ IMPORT THE NEW CUSTOM HOOK AND TYPES
@@ -94,6 +94,9 @@ export default function Checkout() {
 
     const [customerName, setCustomerName] = useState<string>('');
     const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CARD'); 
+    
+    // ⚡ ENTERPRISE: Dynamic Mobile Provider State
+    const [mobileProvider, setMobileProvider] = useState<'mpesa' | 'airtel' | 'mtn'>('mpesa');
     const [phone, setPhone] = useState<string>('');
     
     const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('idle'); 
@@ -134,14 +137,19 @@ export default function Checkout() {
     // ⚡ LIFECYCLE: Hybrid Socket + Polling Receptor
     useEffect(() => {
         let pollInterval: ReturnType<typeof setInterval>;
+        let socket: any;
 
         if (paymentStatus === 'pending' && pollingOrderId) {
             
+            socket = io(import.meta.env.VITE_API_URL || "http://localhost:5000", {
+                auth: { guest_token: localStorage.getItem('guest_token') }
+            });
+
             socket.emit('join_order_room', pollingOrderId);
 
             const handleSuccess = (data: { orderId: string, method: string }) => {
                 setPaymentStatus('success');
-                toast.success("Payment confirmed by Bank!");
+                toast.success("Payment confirmed by Gateway!");
                 setTimeout(() => {
                     clearCart(); 
                     navigate(`/order-status/${data.orderId}`); 
@@ -154,8 +162,8 @@ export default function Checkout() {
                 setTimeout(() => setPaymentStatus('idle'), 3000);
             };
 
-            socket.on('payment_success', handleSuccess);
-            socket.on('payment_failed', handleFailure);
+            socket.on('payment:completed', handleSuccess);
+            socket.on('payment:failed', handleFailure);
 
             pollInterval = setInterval(async () => {
                 try {
@@ -173,8 +181,7 @@ export default function Checkout() {
             }, 4000);
 
             return () => {
-                socket.off('payment_success', handleSuccess);
-                socket.off('payment_failed', handleFailure);
+                if (socket) socket.disconnect();
                 clearInterval(pollInterval);
             };
         }
@@ -187,7 +194,7 @@ export default function Checkout() {
     const handleCheckoutSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!customerName.trim()) return toast.error("Please enter your name for the order.");
-        if (paymentMethod === 'M-PESA' && (phone.length < 9 || phone.length > 12)) {
+        if (paymentMethod === 'M-PESA' && (phone.length < 9 || phone.length > 15)) {
             return toast.error("Please enter a valid phone number.");
         }
         if (!venueId) return toast.error("Venue session lost. Please scan QR again.");
@@ -198,6 +205,7 @@ export default function Checkout() {
             customer_name: customerName,
             payment_method: paymentMethod,
             phone_number: paymentMethod === 'M-PESA' ? phone : null,
+            provider: paymentMethod === 'M-PESA' ? mobileProvider : undefined, // ⚡ Pass Global Provider
             amount: total, 
             items: cartItems.map(item => ({ 
                 item_id: item.item_id, 
@@ -208,7 +216,7 @@ export default function Checkout() {
         };
 
         // ⚡ TRIGGER THE ABSTRACTED MUTATION
-        submitOrderMutation.mutate(payload, {
+        submitOrderMutation.mutate(payload as any, {
             onSuccess: (data) => {
                 setPollingOrderId(data.orderId);
 
@@ -223,8 +231,8 @@ export default function Checkout() {
                     setPaymentStatus('pending'); 
                 } else if (data.method === 'CARD') {
                     setPaymentStatus('pending'); 
-                    setIsGatewayLoading(true); // Trigger UI block
-                    setPaystackAccessCode(data.access_code!); // Opens Native SDK
+                    setIsGatewayLoading(true); 
+                    setPaystackAccessCode(data.access_code!); 
                 }
             },
             onError: (error: any) => {
@@ -309,7 +317,7 @@ export default function Checkout() {
                                 <Smartphone size={20} className="animate-pulse" />
                             </div>
                             <h3 className="text-lg font-black text-slate-900">Check your phone!</h3>
-                            <p className="text-sm text-slate-500 text-center px-6 mt-2">Enter your M-Pesa PIN on the prompt sent to <br/><span className="font-bold text-slate-800 tracking-wider">{phone}</span></p>
+                            <p className="text-sm text-slate-500 text-center px-6 mt-2">Enter your Mobile Money PIN on the prompt sent to <br/><span className="font-bold text-slate-800 tracking-wider">{phone}</span></p>
                         </div>
                     )}
 
@@ -366,7 +374,7 @@ export default function Checkout() {
                                     className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border-2 transition-all ${paymentMethod === 'M-PESA' ? 'border-[#52B44B] bg-[#52B44B]/5 text-[#52B44B] shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
                                 >
                                     <Smartphone size={24}/>
-                                    <span className="font-bold text-xs">M-Pesa</span>
+                                    <span className="font-bold text-xs text-center">Mobile Money</span>
                                 </button>
 
                                 {venueConfig?.allow_cash_payments && (
@@ -383,17 +391,28 @@ export default function Checkout() {
                         </div>
 
                         {paymentMethod === 'M-PESA' && (
-                            <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
-                                <label className="text-sm font-bold text-slate-700 ml-1">M-Pesa Number</label>
-                                <input 
-                                    type="tel" 
-                                    required
-                                    placeholder="07XX XXX XXX"
-                                    value={phone}
-                                    onChange={handlePhoneChange}
-                                    disabled={submitOrderMutation.isPending}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4 text-slate-900 font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-[#52B44B]/50 focus:bg-white transition-all disabled:opacity-50 shadow-inner text-center text-lg"
-                                />
+                            <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
+                                <div className="space-y-2">
+                                    <label className="text-sm font-bold text-slate-700 ml-1">Select Network</label>
+                                    <div className="flex gap-2">
+                                        <button type="button" onClick={() => setMobileProvider('mpesa')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${mobileProvider === 'mpesa' ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-200 text-slate-500'}`}>M-Pesa</button>
+                                        <button type="button" onClick={() => setMobileProvider('airtel')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${mobileProvider === 'airtel' ? 'border-red-500 bg-red-50 text-red-600' : 'border-slate-200 text-slate-500'}`}>Airtel</button>
+                                        <button type="button" onClick={() => setMobileProvider('mtn')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${mobileProvider === 'mtn' ? 'border-yellow-500 bg-yellow-50 text-yellow-600' : 'border-slate-200 text-slate-500'}`}>MTN MoMo</button>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-sm font-bold text-slate-700 ml-1">Mobile Number</label>
+                                    <input 
+                                        type="tel" 
+                                        required
+                                        placeholder="07XX XXX XXX"
+                                        value={phone}
+                                        onChange={handlePhoneChange}
+                                        disabled={submitOrderMutation.isPending}
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4 text-slate-900 font-bold tracking-wider focus:outline-none focus:ring-2 focus:ring-[#52B44B]/50 focus:bg-white transition-all disabled:opacity-50 shadow-inner text-center text-lg"
+                                    />
+                                </div>
                             </div>
                         )}
 
@@ -426,13 +445,13 @@ export default function Checkout() {
                 <NativePaystackLauncher 
                     accessCode={paystackAccessCode}
                     onSuccess={() => {
-                        setPaystackAccessCode(''); // Sever the access code
-                        setIsGatewayLoading(false); // Drop the overlay
+                        setPaystackAccessCode(''); 
+                        setIsGatewayLoading(false); 
                         toast.success("Authorizing payment...");
                     }}
                     onClose={() => {
-                        setPaystackAccessCode(''); // Sever the access code
-                        setIsGatewayLoading(false); // Drop the overlay
+                        setPaystackAccessCode(''); 
+                        setIsGatewayLoading(false); 
                         setPaymentStatus('idle');
                         toast.error("Payment window closed.");
                     }}

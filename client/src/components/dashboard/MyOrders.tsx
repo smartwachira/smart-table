@@ -69,15 +69,20 @@ export default function MyOrders() {
     // ============================================================================
     // ⚡ WEBSOCKET INTEGRATION
     // ============================================================================
+    // ============================================================================
+    // ⚡ WEBSOCKET INTEGRATION
+    // ============================================================================
     useEffect(() => {
         if (!user?.venueId) return;
 
-        const socket: Socket = io(import.meta.env.VITE_API_URL || "http://localhost:5000");
-        socket.emit('join_venue', user.venueId);
+        const socket: Socket = io(import.meta.env.VITE_API_URL || "http://localhost:5000", {
+            auth: { token: localStorage.getItem('auth_token') }
+        });
 
-        // Tell TanStack to instantly refetch when the kitchen updates a ticket
-        socket.on('receive_order', () => queryClient.invalidateQueries({ queryKey: ['myOrders', user?.userId] }));
-        socket.on('orderUpdated', () => queryClient.invalidateQueries({ queryKey: ['myOrders', user?.userId] }));
+        socket.on('order:created', () => queryClient.invalidateQueries({ queryKey: ['myOrders', user?.userId] }));
+        socket.on('order:status_updated', () => queryClient.invalidateQueries({ queryKey: ['myOrders', user?.userId] }));
+        socket.on('order:cancelled', () => queryClient.invalidateQueries({ queryKey: ['myOrders', user?.userId] }));
+        socket.on('payment:completed', () => queryClient.invalidateQueries({ queryKey: ['myOrders', user?.userId] }));
 
         return () => {
             socket.disconnect();

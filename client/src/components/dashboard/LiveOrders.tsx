@@ -84,17 +84,23 @@ export default function LiveOrders() {
     }, [orders, playSound, setActiveTab]);
 
     // ============================================================================
-    // ⚡ WEBSOCKET INTEGRATION: Smart Cache Invalidation
+    // ⚡ WEBSOCKET INTEGRATION: Smart Cache Invalidation (Sniper Rifle)
     // ============================================================================
     useEffect(() => {
         if (!user?.venueId) return;
         
-        const socket: Socket = io(import.meta.env.VITE_API_URL || "http://localhost:5000");
-        socket.emit('join_venue', user.venueId);
+        // ⚡ NEW: Pass the auth token in the handshake!
+        const socket: Socket = io(import.meta.env.VITE_API_URL || "http://localhost:5000", {
+            auth: { token: localStorage.getItem('auth_token') }
+        });
 
-        // When a socket event fires, tell TanStack to fetch fresh data instantly
-        socket.on('receive_order', () => queryClient.invalidateQueries({ queryKey: ['liveOrders'] }));
-        socket.on('orderUpdated', () => queryClient.invalidateQueries({ queryKey: ['liveOrders'] }));
+        // No need to emit 'join_venue', the backend auto-joins us based on the JWT!
+
+        // ⚡ NEW: The Sniper Rifle approach using our Global Event Dictionary
+        socket.on('order:created', () => queryClient.invalidateQueries({ queryKey: ['liveOrders'] }));
+        socket.on('order:status_updated', () => queryClient.invalidateQueries({ queryKey: ['liveOrders'] }));
+        socket.on('order:cancelled', () => queryClient.invalidateQueries({ queryKey: ['liveOrders'] }));
+        socket.on('payment:completed', () => queryClient.invalidateQueries({ queryKey: ['liveOrders'] }));
 
         return () => {
             socket.disconnect();

@@ -13,6 +13,9 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useDashboardStore } from '../../store/useDashboardStore'; 
 
+import { useQueryClient } from '@tanstack/react-query';
+import io, { Socket } from 'socket.io-client';
+
 // ⚡ IMPORT THE NEW CUSTOM HOOK AND TYPES
 import { useDashboardOverview, DashboardData, KPITrend } from '../../hooks/useDashboardOverview';
 
@@ -159,6 +162,34 @@ export default function DashboardOverview() {
     // ⚡ TANSTACK QUERY: Abstracted Custom Hook
     // ============================================================================
     const { data, isLoading, error } = useDashboardOverview(user?.venueId, preset, customStart, customEnd);
+    const queryClient = useQueryClient();
+
+    // ============================================================================
+    // ⚡ WEBSOCKET INTEGRATION: Smart Cache Invalidation
+    // ============================================================================
+    useEffect(() => {
+        if (!user?.venueId) return;
+
+        // ⚡ Secure Handshake using the Staff JWT
+        const socket: Socket = io(import.meta.env.VITE_API_URL || "http://localhost:5000", {
+            auth: { token: localStorage.getItem('auth_token') }
+        });
+
+        // ⚡ Sniper Rifle: Tell React Query to refetch the dashboard data in the background
+        const invalidateDashboard = () => {
+            queryClient.invalidateQueries({ queryKey: ['dashboardOverview', user.venueId] });
+        };
+
+        // Listen for all order-related transactional events
+        socket.on('order:created', invalidateDashboard);
+        socket.on('order:status_updated', invalidateDashboard);
+        socket.on('order:cancelled', invalidateDashboard);
+        socket.on('payment:completed', invalidateDashboard);
+
+        return () => {
+            socket.disconnect();
+        };
+    }, [user?.venueId, queryClient]);
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {

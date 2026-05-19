@@ -4,6 +4,8 @@ import { toast } from 'sonner';
 import { Search, ShoppingBag, UtensilsCrossed, AlertCircle, Moon, Smartphone, Receipt, Plus, Minus } from 'lucide-react';
 import { jwtDecode } from 'jwt-decode';
 import { useSwipeable } from 'react-swipeable'; 
+import { useQueryClient } from '@tanstack/react-query';
+import io, { Socket } from 'socket.io-client';
 
 // ⚡ IMPORT THE NEW CUSTOM HOOK AND TYPES
 import { usePublicMenu, MenuItemType } from '../../hooks/useMenu'; 
@@ -33,6 +35,33 @@ export default function Menu() {
   
   const [isOrdersDrawerOpen, setIsOrdersDrawerOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<MenuItemType | null>(null); 
+  const queryClient = useQueryClient();
+
+    // ============================================================================
+    // ⚡ WEBSOCKET INTEGRATION: Global Venue State Synchronization
+    // ============================================================================
+    useEffect(() => {
+        const guestToken = localStorage.getItem('guest_token');
+        if (!guestToken) return;
+
+        // ⚡ Secure Handshake using the Guest JWT
+        const socket: Socket = io(import.meta.env.VITE_API_URL || "http://localhost:5000", {
+            auth: { guest_token: guestToken }
+        });
+
+        // ⚡ Sniper Rifle: Refetch the public menu without disrupting the user's scroll
+        const invalidateMenuState = () => {
+            queryClient.invalidateQueries({ queryKey: ['publicMenu'] });
+        };
+
+        // Listen for Global Venue State changes
+        socket.on('menu:updated', invalidateMenuState);
+        socket.on('settings:updated', invalidateMenuState);
+
+        return () => {
+            socket.disconnect();
+        };
+    }, [queryClient]);
 
   useEffect(() => {
     const token = localStorage.getItem('guest_token');

@@ -8,7 +8,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useCartStore } from '../../store/useCartStore'; 
 import { useMenuStore } from '../../store/useMenuStore'; 
-import { socket } from '../../utils/socket'; 
+import io, { Socket } from 'socket.io-client';
 
 // ⚡ IMPORT THE NEW CUSTOM HOOKS AND TYPES
 import { 
@@ -77,6 +77,9 @@ export default function POS() {
     
     const [isCartOpen, setIsCartOpen] = useState(false);
     const [showPaymentModal, setShowPaymentModal] = useState(false);
+    
+    // ⚡ ENTERPRISE: Dynamic Mobile Provider State
+    const [mobileProvider, setMobileProvider] = useState<'mpesa' | 'airtel' | 'mtn'>('mpesa');
     const [phoneNumber, setPhoneNumber] = useState('');
 
     const [paystackAccessCode, setPaystackAccessCode] = useState<string>('');
@@ -106,8 +109,13 @@ export default function POS() {
     // ⚡ LIFECYCLE: Hybrid Socket + Polling Receptor for POS
     useEffect(() => {
         let pollInterval: ReturnType<typeof setInterval>;
+        let socket: any;
 
         if (pendingOrderId) {
+            socket = io(import.meta.env.VITE_API_URL || "http://localhost:5000", {
+                auth: { token: localStorage.getItem('auth_token') }
+            });
+
             socket.emit('join_order_room', pendingOrderId);
 
             const handleSuccess = () => {
@@ -120,8 +128,8 @@ export default function POS() {
                 setPendingOrderId(null); 
             };
 
-            socket.on('payment_success', handleSuccess);
-            socket.on('payment_failed', handleFailure);
+            socket.on('payment:completed', handleSuccess);
+            socket.on('payment:failed', handleFailure);
 
             pollInterval = setInterval(async () => {
                 try {
@@ -142,8 +150,7 @@ export default function POS() {
             }, 4000);
 
             return () => {
-                socket.off('payment_success', handleSuccess);
-                socket.off('payment_failed', handleFailure);
+                if (socket) socket.disconnect();
                 clearInterval(pollInterval);
             };
         }
@@ -167,16 +174,17 @@ export default function POS() {
             paymentMethod,
             customerName,
             tableNumber,
-            phoneNumber
+            phoneNumber,
+            provider: paymentMethod === 'M-PESA' ? mobileProvider : undefined // ⚡ Pass Global Provider
         };
 
-        submitOrderMutation.mutate(payload, {
+        submitOrderMutation.mutate(payload as any, {
             onSuccess: (data) => {
                 if (data.status === 'success') {
                     toast.success('Order sent to kitchen!');
                     handleReset();
                 } else if (data.status === 'mpesa_sent') {
-                    toast.success('STK Push sent! Waiting for payment...');
+                    toast.success('Push sent! Waiting for payment...');
                     setShowPaymentModal(false);
                     setPendingOrderId(data.orderId); 
                 } else if (data.status === 'card_init') {
@@ -404,7 +412,7 @@ export default function POS() {
                         <h3 className="text-2xl font-black text-center text-slate-900 mb-2">Checkout Options</h3>
                         <p className="text-center text-sm text-slate-500 mb-6">Total Amount: <span className="font-bold text-slate-800">{getCartTotal().toLocaleString()} KES</span></p>
                         
-                        <div className="space-y-3 pb-6 md:pb-0">
+                        <div className="space-y-4 pb-6 md:pb-0">
                             <button 
                                 disabled={submitOrderMutation.isPending}
                                 onClick={() => handleCheckout('CARD')}
@@ -422,26 +430,35 @@ export default function POS() {
                                 <ChevronRight size={24} className="opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
                             </button>
 
-                            <div className="relative flex py-4 items-center">
+                            <div className="relative flex py-2 items-center">
                                 <div className="flex-grow border-t border-slate-200"></div>
-                                <span className="flex-shrink-0 mx-4 text-slate-400 text-xs font-bold uppercase tracking-widest">OR M-PESA</span>
+                                <span className="flex-shrink-0 mx-4 text-slate-400 text-xs font-bold uppercase tracking-widest">OR MOBILE MONEY</span>
                                 <div className="flex-grow border-t border-slate-200"></div>
                             </div>
 
-                            <input 
-                                type="tel" 
-                                placeholder="Customer M-Pesa (07XX...)" 
-                                value={phoneNumber}
-                                onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
-                                className="w-full text-center text-xl tracking-widest font-black py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-[#52B44B] outline-none transition-all"
-                            />
+                            {/* ⚡ ENTERPRISE: Dynamic Provider Selector */}
+                            <div className="space-y-3">
+                                <div className="flex gap-2">
+                                    <button type="button" onClick={() => setMobileProvider('mpesa')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${mobileProvider === 'mpesa' ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>M-Pesa</button>
+                                    <button type="button" onClick={() => setMobileProvider('airtel')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${mobileProvider === 'airtel' ? 'border-red-500 bg-red-50 text-red-600' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>Airtel</button>
+                                    <button type="button" onClick={() => setMobileProvider('mtn')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${mobileProvider === 'mtn' ? 'border-yellow-500 bg-yellow-50 text-yellow-600' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>MTN MoMo</button>
+                                </div>
+
+                                <input 
+                                    type="tel" 
+                                    placeholder="Customer Mobile (07XX...)" 
+                                    value={phoneNumber}
+                                    onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
+                                    className="w-full text-center text-xl tracking-widest font-black py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                                />
+                            </div>
                             
                             <button 
                                 disabled={submitOrderMutation.isPending || phoneNumber.length < 9}
                                 onClick={() => handleCheckout('M-PESA')}
                                 className="w-full flex justify-center items-center gap-2 py-4 bg-[#52B44B] hover:bg-[#459a3f] text-white font-black text-lg rounded-2xl active:scale-95 disabled:opacity-50 transition-all shadow-md mt-2"
                             >
-                                {submitOrderMutation.isPending ? <Loader2 size={24} className="animate-spin" /> : <><Smartphone size={24}/> Send STK Push</>}
+                                {submitOrderMutation.isPending ? <Loader2 size={24} className="animate-spin" /> : <><Smartphone size={24}/> Send Device Push</>}
                             </button>
                         </div>
                     </div>
@@ -462,14 +479,14 @@ export default function POS() {
                 <NativePaystackLauncher 
                     accessCode={paystackAccessCode}
                     onSuccess={() => {
-                        setPaystackAccessCode(''); // Sever the access code
-                        setIsGatewayLoading(false); // Drop the overlay
+                        setPaystackAccessCode(''); 
+                        setIsGatewayLoading(false); 
                         toast.success("Authorizing payment...");
                     }}
                     onClose={() => {
-                        setPaystackAccessCode(''); // Sever the access code
-                        setIsGatewayLoading(false); // Drop the overlay
-                        setPendingOrderId(null); // Clear the pending order so POS can try again
+                        setPaystackAccessCode(''); 
+                        setIsGatewayLoading(false); 
+                        setPendingOrderId(null); 
                         toast.error("Payment window closed.");
                     }}
                 />

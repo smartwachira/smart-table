@@ -40,6 +40,10 @@ export const createCategory = async (req: Request<{}, {}, CreateCategoryBody>, r
 
         const newCategory = await MenuCategory.create({ name, venue_id: venueId });
 
+        // ⚡ GLOBAL BROADCAST: Menu Structure Changed
+        const io = req.app.get('socketio');
+        if (io) io.to(`venue:${venueId}`).emit('menu:updated');
+
         res.status(201).json(newCategory);
     } catch (error) {
         console.error("Create Category Error:", error);
@@ -52,7 +56,6 @@ export const getMenuItems = async (req: Request, res: Response): Promise<Respons
     try {
         const venueId = req.user!.venueId;
 
-        // Fetch items by joining with Categories to ensure we only get this venue's items
         const items = await MenuItem.findAll({
             include: [{
                 model: MenuCategory,
@@ -73,13 +76,11 @@ export const createMenuItem = async (req: Request<{}, {}, MenuPayloadBody>, res:
         const venueId = req.user!.venueId;
         const { name, price, description, category_id, is_available } = req.body;
 
-        // Security Check: Prevent IDOR by ensuring the category belongs to this venue
         const category = await MenuCategory.findOne({ where: { category_id, venue_id: venueId } });
         if (!category) {
             return res.status(403).json({ message: "Unauthorized category assignment." });
         }
 
-        // Handle the physical file uploaded by Multer
         let image_url = null;
         if (req.file) {
             image_url = `/uploads/${req.file.filename}`;
@@ -93,6 +94,10 @@ export const createMenuItem = async (req: Request<{}, {}, MenuPayloadBody>, res:
             is_available: is_available === 'true' || is_available === true,
             image_url
         });
+
+        // ⚡ GLOBAL BROADCAST: New Item Added
+        const io = req.app.get('socketio');
+        if (io) io.to(`venue:${venueId}`).emit('menu:updated');
 
         res.status(201).json(newItem);
     } catch (error) {
@@ -131,6 +136,11 @@ export const updatedMenuItem = async (req: Request<{ itemId: string }, {}, MenuP
         }
 
         await item.save();
+
+        // ⚡ GLOBAL BROADCAST: Item Updated (e.g. 86'd / Sold Out)
+        const io = req.app.get('socketio');
+        if (io) io.to(`venue:${venueId}`).emit('menu:updated');
+
         res.status(200).json(item);
     } catch (error) {
         console.error("Update Menu Item Error:", error);
@@ -138,7 +148,7 @@ export const updatedMenuItem = async (req: Request<{ itemId: string }, {}, MenuP
     }
 }
 
-// ⚡ ADDED: POS SPECIFIC ENDPOINTS
+// ⚡ POS SPECIFIC ENDPOINTS
 export const getPosCategories = async (req: Request, res: Response): Promise<Response | void> => {
     try {
         const { venueId } = req.params;
@@ -157,9 +167,8 @@ export const getPosItems = async (req: Request, res: Response): Promise<Response
     try {
         const { venueId } = req.params;
         
-        // Join with MenuCategory to ensure items belong to the requested venue
         const items = await MenuItem.findAll({
-            where: { is_available: true }, // POS only shows available items
+            where: { is_available: true }, 
             include: [{
                 model: MenuCategory,
                 attributes: [],
@@ -181,25 +190,21 @@ export const getPosItems = async (req: Request, res: Response): Promise<Response
 // --- PUBLIC CUSTOMER MENU ---
 export const getPublicMenu = async (req: Request, res: Response): Promise<Response | void> => {
     try {
-        // Safely fallback to req.user if a Manager is previewing the menu!
         const venueId = req.guest?.venueId || req.user?.venueId;
 
         if (!venueId) {
             return res.status(400).json({ message: "Invalid session context." });
         }
 
-        // 1. Fetch Venue Setting FIRST
         const venue = await Venue.findByPk(venueId, {
             attributes: ['name', 'is_accepting_orders', 'tax_rate', 'allow_cash_payments', 'logo_url']
         });
 
-        // 2. Fetch Categories for this venue
         const categories = await MenuCategory.findAll({
             where: { venue_id: venueId },
             order: [['createdAt', 'ASC']]
         });
 
-        // 3. Fetch ONLY Available Items for this venue
         const items = await MenuItem.findAll({
             where: { is_available: true },
             include: [{
@@ -220,7 +225,7 @@ export const getPublicMenu = async (req: Request, res: Response): Promise<Respon
     }
 }
 
-// DELETE CATEGORY (Only if empty)
+// DELETE CATEGORY
 export const deleteCategory = async (req: Request<{ categoryId: string }, {}>, res: Response): Promise<Response | void> => {
     try {
         const { categoryId } = req.params;
@@ -246,6 +251,10 @@ export const deleteCategory = async (req: Request<{ categoryId: string }, {}>, r
 
         await category.destroy();
 
+        // ⚡ GLOBAL BROADCAST: Category Deleted
+        const io = req.app.get('socketio');
+        if (io) io.to(`venue:${venueId}`).emit('menu:updated');
+
         res.status(200).json({ message: "Category deleted successfully." });
     } catch (error) {
         console.error("Delete Category Error:", error);
@@ -253,7 +262,7 @@ export const deleteCategory = async (req: Request<{ categoryId: string }, {}>, r
     }
 };
 
-// DELETE MENU ITEM (Safe Delete)
+// DELETE MENU ITEM
 export const deleteMenuItem = async (req: Request<{ itemId: string }, {}>, res: Response): Promise<Response | void> => {
     try {
         const { itemId } = req.params;
@@ -273,6 +282,11 @@ export const deleteMenuItem = async (req: Request<{ itemId: string }, {}>, res: 
 
         try {
             await item.destroy(); 
+            
+            // ⚡ GLOBAL BROADCAST: Item Deleted
+            const io = req.app.get('socketio');
+            if (io) io.to(`venue:${venueId}`).emit('menu:updated');
+
             res.status(200).json({ message: "Item deleted successfully." });
             
         } catch (dbError: any) {

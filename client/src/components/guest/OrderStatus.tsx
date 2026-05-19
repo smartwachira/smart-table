@@ -58,20 +58,18 @@ export default function OrderStatus() {
     useEffect(() => {
         if (!venueId || !orderId) return;
 
-        const socket: Socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000');
-        socket.emit('join_venue', venueId);
+        const socket: Socket = io(import.meta.env.VITE_API_URL || 'http://localhost:5000', {
+            auth: { guest_token: localStorage.getItem('guest_token') }
+        });
+        
+        // Ensure the guest receives updates specifically for this order
+        socket.emit('join_order_room', orderId);
 
-        const handleOrderUpdate = (data: SocketUpdatePayload) => {
-            if (data.orderId === orderId && data.status) {
-                // Instantly tell TanStack Query to refetch this specific order
-                queryClient.invalidateQueries({ queryKey: ['orderStatus', orderId] });
-            }
-        };
-
-        socket.on('orderUpdated', handleOrderUpdate);
+        // ⚡ Sniper rifle invalidation triggered by standardized events
+        socket.on('order:status_updated', () => queryClient.invalidateQueries({ queryKey: ['orderStatus', orderId] }));
+        socket.on('order:cancelled', () => queryClient.invalidateQueries({ queryKey: ['orderStatus', orderId] }));
 
         return () => {
-            socket.off('orderUpdated', handleOrderUpdate);
             socket.disconnect();
         };
     }, [venueId, orderId, queryClient]);

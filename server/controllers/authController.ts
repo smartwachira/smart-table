@@ -127,16 +127,16 @@ export const registerStaff = async (req: Request<{}, {}, RegisterStaffBody>, res
         const creatorRole = req.user!.role;
         const { username, pin, role, email, password } = req.body;
 
-        if (!['KITCHEN_STAFF', 'WAITER', 'MANAGER'].includes(role)) {
+        // ⚡ FIX 1: Allow CASHIER and OWNER roles through the gateway
+        if (!['KITCHEN_STAFF', 'WAITER', 'CASHIER', 'MANAGER', 'OWNER'].includes(role)) {
             return res.status(400).json({ message: 'Invalid role assignment.' });
         }
 
-        // HIERARCHY SAFEGUARD: Only Owners can hire Managers
-        if (role === 'MANAGER' && creatorRole !== 'OWNER') {
-            return res.status(403).json({ message: 'Only the Venue Owner can provision new Managers.' });
+        // ⚡ FIX 2: HIERARCHY SAFEGUARD: Only Owners can hire Managers OR Co-Owners
+        if (['MANAGER', 'OWNER'].includes(role) && creatorRole !== 'OWNER') {
+            return res.status(403).json({ message: 'Only the Venue Owner can provision Dashboard access roles.' });
         }
 
-        // 🛡️ Strictly type the payload before DB insertion
         const newUserObj: any = { 
             username, 
             role, 
@@ -144,17 +144,19 @@ export const registerStaff = async (req: Request<{}, {}, RegisterStaffBody>, res
             is_active: true
         };
 
-        if (role === 'MANAGER') {
-            if (!email || !password) return res.status(400).json({ message: 'Email and Password are required for Managers.' });
+        // ⚡ FIX 3: Group OWNER and MANAGER together as Dashboard users needing Emails/Passwords
+        if (['MANAGER', 'OWNER'].includes(role)) {
+            if (!email || !password) return res.status(400).json({ message: 'Email and Password are required for Dashboard roles.' });
 
             const existingEmail = await User.findOne({ where: { email, venue_id: managerVenueId } });
-            if (existingEmail) return res.status(400).json({ message: 'Email is already registered globally.' });
+            if (existingEmail) return res.status(400).json({ message: 'Email is already registered.' });
             
             const salt = await bcrypt.genSalt(10);
             newUserObj.email = email;
             newUserObj.password = await bcrypt.hash(password, salt);
 
         } else {
+            // Floor Staff (WAITER, CASHIER, KITCHEN_STAFF) expecting a 4-digit PIN
             const existingStaff = await User.findOne({ where: { username, venue_id: managerVenueId } });
             if (existingStaff) return res.status(400).json({ message: "Username already exists at this venue." });
             
@@ -345,7 +347,7 @@ export const updateStaff = async (req: Request<{id: string}, {}, UpdateStaffBody
 
             staffMember.pin = pin;
             staffMember.email = null;
-            staffMember.password = null; // ⚡ BUG FIX: changed from 'password_hash' to 'password'
+            staffMember.password = null; 
         }
 
         // Handle Same-Role Updates
@@ -414,7 +416,7 @@ export const resetStaffPin = async (req: Request, res: Response): Promise<Respon
         }
 
         const salt = await bcrypt.genSalt(10);
-        staffMember.pin = await bcrypt.hash(pin, salt); // ⚡ BUG FIX: Ensures the new PIN gets correctly hashed!
+        staffMember.pin = await bcrypt.hash(pin, salt); 
         
         await staffMember.save();
 
