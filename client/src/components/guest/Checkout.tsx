@@ -5,7 +5,7 @@ import { AxiosError } from 'axios';
 import { toast } from 'sonner';
 import { 
     ArrowLeft, ShieldCheck, Smartphone, 
-    Receipt, Loader2, CheckCircle2, User, Banknote, XCircle, CreditCard 
+    Receipt, Loader2, CheckCircle2, User, Banknote, XCircle, CreditCard, Lock
 } from 'lucide-react';
 
 import api from '../../utils/axiosConfig'; 
@@ -30,7 +30,6 @@ interface OrderStatusResponse {
     status: string;
 }
 
-// ⚡ V2 FIX: Aggressive Teardown & DOM Cleanup
 const NativePaystackLauncher = ({ accessCode, onSuccess, onClose }: { accessCode: string, onSuccess: Function, onClose: Function }) => {
     useEffect(() => {
         const scriptId = 'paystack-v2-script';
@@ -95,7 +94,6 @@ export default function Checkout() {
     const [customerName, setCustomerName] = useState<string>('');
     const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CARD'); 
     
-    // ⚡ ENTERPRISE: Dynamic Mobile Provider State
     const [mobileProvider, setMobileProvider] = useState<'mpesa' | 'airtel' | 'mtn'>('mpesa');
     const [phone, setPhone] = useState<string>('');
     
@@ -105,7 +103,6 @@ export default function Checkout() {
     const [paystackAccessCode, setPaystackAccessCode] = useState<string>('');
     const [isGatewayLoading, setIsGatewayLoading] = useState<boolean>(false);
 
-    // ⚡ TANSTACK QUERY: Abstracted Custom Hook
     const submitOrderMutation = useSubmitGuestOrder();
 
     useEffect(() => {
@@ -128,13 +125,30 @@ export default function Checkout() {
         }
     }, [navigate]);
 
+    // ⚡ SPRINT 20: Edge-Level Verification Logic
+    // Is this specific table permitted to bypass the payment gateway?
+    const isTabAllowed = 
+        venueConfig?.tab_operating_mode === 'ENABLED_ALL' || 
+        (venueConfig?.tab_operating_mode === 'VIP_ONLY' && 
+         Array.isArray(venueConfig?.vip_tables) && 
+         venueConfig.vip_tables.map(t => t.toLowerCase()).includes(tableNumber.toLowerCase()));
+
+    // Force payment method to TAB if permitted
+    useEffect(() => {
+        if (isTabAllowed) {
+            setPaymentMethod('TAB');
+        } else if (paymentMethod === 'TAB') {
+            setPaymentMethod('CARD'); // Safe fallback if config shifts mid-session
+        }
+    }, [isTabAllowed, paymentMethod]);
+
+
     useEffect(() => {
         if (venueId && cartItems.length === 0 && paymentStatus === 'idle') {
             navigate(`/menu`); 
         }
     }, [cartItems, navigate, venueId, paymentStatus]);
 
-    // ⚡ LIFECYCLE: Hybrid Socket + Polling Receptor
     useEffect(() => {
         let pollInterval: ReturnType<typeof setInterval>;
         let socket: any;
@@ -205,7 +219,7 @@ export default function Checkout() {
             customer_name: customerName,
             payment_method: paymentMethod,
             phone_number: paymentMethod === 'M-PESA' ? phone : null,
-            provider: paymentMethod === 'M-PESA' ? mobileProvider : undefined, // ⚡ Pass Global Provider
+            provider: paymentMethod === 'M-PESA' ? mobileProvider : undefined, 
             amount: total, 
             items: cartItems.map(item => ({ 
                 item_id: item.item_id, 
@@ -215,14 +229,13 @@ export default function Checkout() {
             }))
         };
 
-        // ⚡ TRIGGER THE ABSTRACTED MUTATION
         submitOrderMutation.mutate(payload as any, {
             onSuccess: (data) => {
                 setPollingOrderId(data.orderId);
 
-                if (data.method === 'CASH') {
+                if (data.method === 'CASH' || data.method === 'TAB') {
                     setPaymentStatus('success');
-                    toast.success("Order sent to kitchen! Please pay your waiter.");
+                    toast.success(data.method === 'TAB' ? "Added to your Open Tab!" : "Order sent to kitchen! Please pay your waiter.");
                     setTimeout(() => {
                         clearCart();
                         navigate(`/order-status/${data.orderId}`); 
@@ -267,7 +280,7 @@ export default function Checkout() {
                     <h1 className="text-lg font-black text-slate-900 tracking-tight">Checkout</h1>
                     <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">{tableNumber}</p>
                 </div>
-                <div className="w-10 h-10 flex items-center justify-center text-indigo-600">
+                <div className={`w-10 h-10 flex items-center justify-center ${isTabAllowed ? 'text-purple-600' : 'text-indigo-600'}`}>
                     <ShieldCheck size={24} />
                 </div>
             </header>
@@ -301,7 +314,7 @@ export default function Checkout() {
                         )}
                         <div className="flex justify-between items-center text-slate-900 pt-2 border-t border-slate-100 mt-2">
                             <span className="text-lg font-black">Total</span>
-                            <span className="text-2xl font-black text-indigo-600">
+                            <span className={`text-2xl font-black ${isTabAllowed ? 'text-purple-600' : 'text-indigo-600'}`}>
                                 {total.toLocaleString('en-KE',{ style: 'currency', currency: 'KES', minimumFractionDigits: 0 })}
                             </span>
                         </div>
@@ -330,9 +343,9 @@ export default function Checkout() {
                     )}
 
                     {paymentStatus === 'success' && (
-                        <div className="absolute inset-0 z-30 bg-emerald-500 flex flex-col items-center justify-center text-white animate-in slide-in-from-bottom-8 duration-500">
-                            <CheckCircle2 size={64} className="mb-4" />
-                            <h3 className="text-2xl font-black">Order Confirmed!</h3>
+                        <div className={`absolute inset-0 z-30 flex flex-col items-center justify-center text-white animate-in slide-in-from-bottom-8 duration-500 ${isTabAllowed ? 'bg-purple-600' : 'bg-emerald-500'}`}>
+                            {isTabAllowed ? <Lock size={64} className="mb-4" /> : <CheckCircle2 size={64} className="mb-4" />}
+                            <h3 className="text-2xl font-black">{isTabAllowed ? 'Added to Tab!' : 'Order Confirmed!'}</h3>
                             <p className="opacity-90 font-medium mt-1">Routing to kitchen...</p>
                         </div>
                     )}
@@ -355,42 +368,53 @@ export default function Checkout() {
                             </div>
                         </div>
 
-                        <div className="space-y-2">
-                            <label className="text-sm font-bold text-slate-700 ml-1">Payment Method</label>
-                            <div className={`grid gap-3 ${venueConfig?.allow_cash_payments ? 'grid-cols-3' : 'grid-cols-2'}`}>
-                                
-                                <button 
-                                    type="button"
-                                    onClick={() => setPaymentMethod('CARD')}
-                                    className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border-2 transition-all ${paymentMethod === 'CARD' ? 'border-indigo-600 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
-                                >
-                                    <CreditCard size={24}/>
-                                    <span className="font-bold text-xs">Bank Card</span>
-                                </button>
-
-                                <button 
-                                    type="button"
-                                    onClick={() => setPaymentMethod('M-PESA')}
-                                    className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border-2 transition-all ${paymentMethod === 'M-PESA' ? 'border-[#52B44B] bg-[#52B44B]/5 text-[#52B44B] shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
-                                >
-                                    <Smartphone size={24}/>
-                                    <span className="font-bold text-xs text-center">Mobile Money</span>
-                                </button>
-
-                                {venueConfig?.allow_cash_payments && (
+                        {/* ⚡ SPRINT 20: VIP OPEN TAB UI REPLACEMENT */}
+                        {isTabAllowed ? (
+                            <div className="bg-purple-50 border border-purple-200 rounded-2xl p-6 text-center shadow-inner animate-in fade-in zoom-in-95 duration-300">
+                                <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                                    <Lock size={32} className="text-purple-600" />
+                                </div>
+                                <h3 className="text-xl font-black text-purple-900">VIP Open Tab</h3>
+                                <p className="text-sm text-purple-700 mt-2 font-medium">Your table is verified for an open tab. Send orders to the kitchen now and pay later when you're ready.</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-2 animate-in fade-in">
+                                <label className="text-sm font-bold text-slate-700 ml-1">Payment Method</label>
+                                <div className={`grid gap-3 ${venueConfig?.allow_cash_payments ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                                    
                                     <button 
                                         type="button"
-                                        onClick={() => setPaymentMethod('CASH')}
-                                        className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border-2 transition-all ${paymentMethod === 'CASH' ? 'border-amber-500 bg-amber-50 text-amber-700 shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
+                                        onClick={() => setPaymentMethod('CARD')}
+                                        className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border-2 transition-all ${paymentMethod === 'CARD' ? 'border-indigo-600 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
                                     >
-                                        <Banknote size={24} />
-                                        <span className="font-bold text-xs">Pay Waiter</span>
+                                        <CreditCard size={24}/>
+                                        <span className="font-bold text-xs">Bank Card</span>
                                     </button>
-                                )}
-                            </div>
-                        </div>
 
-                        {paymentMethod === 'M-PESA' && (
+                                    <button 
+                                        type="button"
+                                        onClick={() => setPaymentMethod('M-PESA')}
+                                        className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border-2 transition-all ${paymentMethod === 'M-PESA' ? 'border-[#52B44B] bg-[#52B44B]/5 text-[#52B44B] shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
+                                    >
+                                        <Smartphone size={24}/>
+                                        <span className="font-bold text-xs text-center">Mobile Money</span>
+                                    </button>
+
+                                    {venueConfig?.allow_cash_payments && (
+                                        <button 
+                                            type="button"
+                                            onClick={() => setPaymentMethod('CASH')}
+                                            className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border-2 transition-all ${paymentMethod === 'CASH' ? 'border-amber-500 bg-amber-50 text-amber-700 shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
+                                        >
+                                            <Banknote size={24} />
+                                            <span className="font-bold text-xs">Pay Waiter</span>
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {paymentMethod === 'M-PESA' && !isTabAllowed && (
                             <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
                                 <div className="space-y-2">
                                     <label className="text-sm font-bold text-slate-700 ml-1">Select Network</label>
@@ -420,18 +444,20 @@ export default function Checkout() {
                             type="submit"
                             disabled={submitOrderMutation.isPending || (paymentMethod === 'M-PESA' && phone.length < 9)}
                             className={`w-full py-4 rounded-2xl font-black text-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed ${
+                                paymentMethod === 'TAB' ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-600/30' :
                                 paymentMethod === 'M-PESA' ? 'bg-[#52B44B] hover:bg-[#459e3f] shadow-[#52B44B]/30' : 
                                 paymentMethod === 'CARD' ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/30' :
                                 'bg-slate-900 hover:bg-slate-800 shadow-slate-900/30'
                             }`}
                         >
-                            {paymentMethod === 'M-PESA' || paymentMethod === 'CARD' ? `Pay ${total.toLocaleString('en-KE')}` : 'Send Order to Kitchen'}
+                            {paymentMethod === 'TAB' ? 'Put it on my Tab' : 
+                             paymentMethod === 'M-PESA' || paymentMethod === 'CARD' ? `Pay ${total.toLocaleString('en-KE')}` : 
+                             'Send Order to Kitchen'}
                         </button>
                     </form>
                 </div>
             </main>
 
-            {/* ⚡ OPTIMISTIC UI: The Blocking Gateway Overlay */}
             {isGatewayLoading && (
                 <div className="fixed inset-0 z-[9999] bg-slate-900/70 backdrop-blur-sm flex flex-col items-center justify-center text-white animate-in fade-in duration-200">
                     <Loader2 size={48} className="animate-spin mb-4 text-indigo-400" />
@@ -440,7 +466,6 @@ export default function Checkout() {
                 </div>
             )}
 
-            {/* ⚡ V2 FIX: Passes ONLY accessCode to flawlessly fetch backend transaction details */}
             {paystackAccessCode && (
                 <NativePaystackLauncher 
                     accessCode={paystackAccessCode}

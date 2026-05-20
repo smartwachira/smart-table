@@ -2,7 +2,7 @@ import { useMutation } from '@tanstack/react-query';
 import api from '../utils/axiosConfig';
 
 // 🛡️ Exported Interfaces
-export type PaymentMethod = 'M-PESA' | 'CASH' | 'CARD'; 
+export type PaymentMethod = 'M-PESA' | 'CASH' | 'CARD' | 'TAB'; 
 
 export interface GuestOrderPayload {
     venue_id: string;
@@ -27,6 +27,7 @@ export interface PaystackInitResponse {
 
 export type SubmitGuestOrderResponse = 
     | { status: 'success'; method: 'CASH'; orderId: string }
+    | { status: 'success'; method: 'TAB'; orderId: string }
     | { status: 'pending'; method: 'M-PESA'; orderId: string }
     | { status: 'pending'; method: 'CARD'; orderId: string; access_code: string };
 
@@ -56,8 +57,12 @@ export const useSubmitGuestOrder = () => {
                 const initRes = await api.post<PaystackInitResponse>('/api/paystack/initialize', { orderId });
                 return { status: 'pending', method: 'CARD', orderId, access_code: initRes.data.access_code };
             }
+            // Step 2c: Open Tab Sequence (Bypass all gateways)
+            if (payload.payment_method === 'TAB') {
+                return { status: 'success', method: 'TAB', orderId };
+            }
 
-            // Step 2c: Standard Cash Sequence
+            // Step 2d: Standard Cash Sequence
             return { status: 'success', method: 'CASH', orderId };
         }
     });

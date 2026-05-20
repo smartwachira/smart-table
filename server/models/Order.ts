@@ -79,7 +79,7 @@ Order.init({
         allowNull: false
     },
     payment_method: {
-        type: DataTypes.ENUM('CASH', 'M-PESA', 'CARD'),
+        type: DataTypes.ENUM('CASH', 'M-PESA', 'CARD','TAB'),
         allowNull: false
     },
     venue_id: {

@@ -6,7 +6,6 @@ import MenuItem from '../models/MenuItem.js';
 import MenuCategory from '../models/MenuCategory.js';
 import Venue from '../models/Venue.js';
 
-// 🛡️ Explicitly define the expected query parameters
 interface DashboardQuery {
     startDate?: string;
     endDate?: string;
@@ -58,34 +57,30 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
         const completedFilter = { status: 'COMPLETED' };
         const paidFilter = { payment_status: 'PAID' };
 
-        // KPI 1: Revenue
         const currentRevenueResult = await Order.sum('total_amount', { where: { ...currentPeriodFilter, ...completedFilter, ...paidFilter } });
         const previousRevenueResult = await Order.sum('total_amount', { where: { ...previousPeriodFilter, ...completedFilter, ...paidFilter } });
         
         const totalRevenue = Number(currentRevenueResult) || 0;
         const prevRevenue = Number(previousRevenueResult) || 0;
 
-        // KPI 2: Total Orders
         const totalOrders = Number(await Order.count({ where: { ...currentPeriodFilter, ...completedFilter } })) || 0;
         const prevTotalOrders = Number(await Order.count({ where: { ...previousPeriodFilter, ...completedFilter } })) || 0;
 
-        // KPI 3: Average Order Value (AOV)
         const aov = totalOrders > 0 ? (totalRevenue / totalOrders) : 0;
         const prevAov = prevTotalOrders > 0 ? (prevRevenue / prevTotalOrders) : 0;
 
-        // KPI 4: Live Kitchen Pulse (⚡ UPDATED LOGIC)
+        // ⚡ SPRINT 20 FIX: Allow Open Tabs to count towards Live Pulse
         const liveActiveOrders = Number(await Order.count({
             where: { 
                 venue_id: venueId, 
-                status: { [Op.notIn]: ['COMPLETED', 'CANCELLED'] }, // Condition C
+                status: { [Op.notIn]: ['COMPLETED', 'CANCELLED'] }, 
                 [Op.or]: [
-                    { payment_method: { [Op.ne]: 'CASH' }, payment_status: 'PAID' }, // ⚡ Global Channel Support!
-                    { payment_method: 'CASH' }
+                    { payment_status: 'PAID' }, 
+                    { payment_method: { [Op.in]: ['CASH', 'TAB'] } } // ⚡ Whitelist Cash and Tabs
                 ]
             }
         })) || 0;
 
-        // Postgres specific time extract mapping
         const fulfillmentData = await Order.findOne({
             where: { ...currentPeriodFilter, ...completedFilter },
             attributes: [[literal(`AVG(EXTRACT(EPOCH FROM ("updatedAt" - "createdAt")) / 60)`), 'avg_minutes']],
@@ -93,7 +88,6 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
         }) as any;
         const avgFulfillment = fulfillmentData?.avg_minutes ? parseFloat(fulfillmentData.avg_minutes).toFixed(1) : '0.0';
 
-        // Chart 2: Top Selling Items
         const topItems = await OrderItem.findAll({
             attributes: [
                 'item_id', 
@@ -112,7 +106,6 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
             raw: true
         });
 
-        // Chart 3: Category Breakdown
         const categoryBreakdown = await OrderItem.findAll({
             attributes: [
                 [col('MenuItem.MenuCategory.name'), 'category'],
@@ -128,7 +121,6 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
             raw: true
         });
 
-        // Chart 4: Payment Methods
         const paymentBreakdown = await Order.findAll({
             where: { ...currentPeriodFilter, ...completedFilter, ...paidFilter },
             attributes: [
@@ -139,7 +131,6 @@ export const getDashboardOverview = async (req: Request<{}, {}, {}, DashboardQue
             raw: true 
         });
 
-        // Live Trends Construction
         let timeFormatString = "YYYY-MM-DD HH:00:00"; 
         if (granularity === 'day') timeFormatString = "YYYY-MM-DD";
         if (granularity === 'month') timeFormatString = "YYYY-MM";

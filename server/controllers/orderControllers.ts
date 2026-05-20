@@ -1,6 +1,6 @@
-import { Request, Response} from 'express';
+import { Request, Response } from 'express';
 import { Server } from 'socket.io';
-import Order, { OrderStatus} from '../models/Order.js';
+import Order, { OrderStatus } from '../models/Order.js';
 import OrderItem from '../models/OrderItem.js';
 import MenuItem from '../models/MenuItem.js';
 import sequelize from '../config/db.js';
@@ -8,7 +8,6 @@ import { Op } from 'sequelize';
 import Venue from '../models/Venue.js';
 import User from '../models/User.js';
 
-// 🛡️ Strict Payload Definitions
 interface OrderItemPayload {
     item_id: string;
     quantity: number;
@@ -107,7 +106,6 @@ export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Re
             platform_fee: 0 
         }, { transaction: t });
 
-
         const orderItemsData = validatedItems.map(item => ({
             ...item,
             order_id: newOrder.order_id || newOrder.getDataValue('order_id')
@@ -118,7 +116,6 @@ export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Re
 
         const io = req.app.get('socketio');
         if (io) {
-            // ⚡ UPDATED: Emitting to our strict venue namespace
             io.to(`venue:${venue_id}`).emit('order:created', {
                 order: newOrder,
                 items: items
@@ -138,7 +135,7 @@ export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Re
     }
 };
 
-export const getOrders = async (req: Request, res: Response): Promise<Response | void> =>{
+export const getOrders = async (req: Request, res: Response): Promise<Response | void> => {
     try {
         const venueId = req.user!.venueId; 
         
@@ -162,9 +159,10 @@ export const getOrders = async (req: Request, res: Response): Promise<Response |
                         ]
                     },
                     {
+                        // ⚡ SPRINT 20 FIX: Whitelist Cash and Tabs immediately, else wait for PAID
                         [Op.or]: [
-                            { payment_method: { [Op.ne]: 'CASH' }, payment_status: 'PAID' }, // ⚡ Global Channel Support!
-                            { payment_method: 'CASH' }
+                            { payment_status: 'PAID' }, 
+                            { payment_method: { [Op.in]: ['CASH', 'TAB'] } }
                         ]
                     }
                 ]
@@ -222,7 +220,8 @@ export const updateOrderStatus = async (req: Request<{orderId: string}, {}, upda
             return res.status(404).json({ message: 'Order not found' });
         }
 
-        if (upperStatus === 'COMPLETED' && order.payment_status !== 'PAID') {
+        // ⚡ SPRINT 20 FIX: Allow Open Tabs to be marked COMPLETED by the kitchen!
+        if (upperStatus === 'COMPLETED' && order.payment_status !== 'PAID' && order.payment_method !== 'TAB') {
             return res.status(403).json({ 
                 message: "Order cannot be completed until payment is received (Mark as Cash Collected or await M-Pesa)." 
             });
@@ -243,7 +242,6 @@ export const updateOrderStatus = async (req: Request<{orderId: string}, {}, upda
 
         const io = req.app.get('socketio');
         if (io) {
-            // ⚡ UPDATED: Double-Tap Broadcast
             if (upperStatus === 'CANCELLED') {
                 io.to(`venue:${venueId}`).emit("order:cancelled", { orderId: order.order_id, reason: cancelReason });
                 io.to(`order:${order.order_id}`).emit("order:cancelled", { orderId: order.order_id, reason: cancelReason });
@@ -300,7 +298,6 @@ export const markCashCollected = async (req: Request<{orderId: string}, {}>, res
 
         const io = req.app.get('socketio');
         if (io) {
-            // ⚡ UPDATED: Double-Tap Broadcast
             io.to(`venue:${venueId}`).emit("payment:completed", { orderId: order.order_id, method: 'CASH' });
             io.to(`order:${order.order_id}`).emit("payment:completed", { orderId: order.order_id, method: 'CASH' });
         }
@@ -373,9 +370,10 @@ export const getGuestOrders = async (req: Request, res: Response): Promise<Respo
             where: { 
                 guest_session_id: guestSessionId,
                 status: { [Op.ne]: 'CANCELLED' }, 
+                // ⚡ SPRINT 20 FIX: Whitelist Cash and Tabs immediately
                 [Op.or]: [
-                    { payment_method: { [Op.ne]: 'CASH' }, payment_status: 'PAID' }, // ⚡ Global Channel Support!
-                    { payment_method: 'CASH' }
+                    { payment_status: 'PAID' }, 
+                    { payment_method: { [Op.in]: ['CASH', 'TAB'] } }
                 ]
             },
             include: [

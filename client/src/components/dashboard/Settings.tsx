@@ -10,7 +10,6 @@ import {
     VenueSettingsFormData, getImageUrl 
 } from '../../hooks/useSettings';
 
-// 🛡️ 1. ENTERPRISE FIX: Official Paystack Kenyan Bank Codes
 const KENYAN_BANKS = [
     { name: "KCB", code: "011" },
     { name: "Equity Bank", code: "068" },
@@ -28,18 +27,16 @@ export default function Settings() {
     const { user } = useAuth();
     const venueId = user?.venueId;
     
-    // ⚡ ZUSTAND: Preserve tab state across route unmounts
     const { activeTab, setActiveTab } = useSettingsStore();
 
-    // Local Form State
     const [logoPreview, setLogoPreview] = useState<string | null>(null);
-    const [formData, setFormData] = useState<VenueSettingsFormData>({
+    const [formData, setFormData] = useState<VenueSettingsFormData & { tab_operating_mode: string; vip_tables: string[] }>({
         name: '', location: '', contact_email: '', phone_number: '',
         tax_rate: 0, is_accepting_orders: true, allow_cash_payments: true,
-        wifi_ssid: '', wifi_password: '', shift_duration_hours: 14
+        wifi_ssid: '', wifi_password: '', shift_duration_hours: 14,
+        tab_operating_mode: 'DISABLED', vip_tables: []
     });
 
-    // ⚡ 2. ENTERPRISE FIX: Default to actual bank codes
     const [payoutChannel, setPayoutChannel] = useState<'MPESA' | 'BANK'>('MPESA');
     const [mpesaType, setMpesaType] = useState<'TILL' | 'PAYBILL'>('TILL');
     const [payoutForm, setPayoutForm] = useState({ 
@@ -48,9 +45,6 @@ export default function Settings() {
         paybill_account: '' 
     });
 
-    // ============================================================================
-    // ⚡ TANSTACK QUERY: Abstracted Custom Hooks
-    // ============================================================================
     const { data: venueSettings, isLoading } = useFetchSettings(venueId);
     
     const saveSettingsMutation = useUpdateSettings(venueId);
@@ -62,7 +56,9 @@ export default function Settings() {
             setFormData({
                 ...venueSettings,
                 wifi_ssid: venueSettings.wifi_ssid || '',
-                wifi_password: venueSettings.wifi_password || ''
+                wifi_password: venueSettings.wifi_password || '',
+                tab_operating_mode: (venueSettings as any).tab_operating_mode || 'DISABLED',
+                vip_tables: Array.isArray((venueSettings as any).vip_tables) ? (venueSettings as any).vip_tables : []
             });
             setLogoPreview(venueSettings.logo_url ? getImageUrl(venueSettings.logo_url) : null);
         }
@@ -88,7 +84,6 @@ export default function Settings() {
         });
     };
 
-    // ⚡ 3. ENTERPRISE FIX: The Precise Subaccount Router
     const handleSubaccountOnboard = (e: React.FormEvent) => {
         e.preventDefault();
         
@@ -96,16 +91,13 @@ export default function Settings() {
         let finalAccountNumber = payoutForm.account_number;
 
         if (payoutChannel === 'MPESA') {
-            // Paystack requires exact strict codes for Mobile Money Payouts
             finalSettlementBank = mpesaType === 'TILL' ? 'MPTILL' : 'MPPAYBILL'; 
-            
             if (payoutForm.account_number.length < 5) return toast.error("Business number must be at least 5 digits.");
             
             if (mpesaType === 'PAYBILL' && payoutForm.paybill_account) {
                 finalAccountNumber = `${payoutForm.account_number}-${payoutForm.paybill_account}`;
             }
         } else {
-            // We pass the numerical code (e.g. "068"), NOT the string ("Equity Bank")
             finalSettlementBank = payoutForm.bank_code;
             if (payoutForm.account_number.length < 8) return toast.error("Please enter a valid bank account number.");
         }
@@ -138,38 +130,22 @@ export default function Settings() {
 
             <div className="flex flex-col md:flex-row gap-6 md:gap-8">
                 
-                {/* Left Sidebar Navigation */}
                 <aside className="w-full md:w-64 shrink-0 flex overflow-x-auto md:flex-col gap-2 custom-scrollbar pb-2 md:pb-0">
-                    <button
-                        onClick={() => setActiveTab('profile')}
-                        className={`shrink-0 md:w-full flex items-center gap-3 px-4 py-3 rounded-2xl font-bold transition-all ${activeTab === 'profile' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}
-                    >
+                    <button onClick={() => setActiveTab('profile')} className={`shrink-0 md:w-full flex items-center gap-3 px-4 py-3 rounded-2xl font-bold transition-all ${activeTab === 'profile' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
                         <Store size={20} /> Venue Profile
                     </button>
-
-                    <button
-                        onClick={() => setActiveTab('operations')}
-                        className={`shrink-0 md:w-full flex items-center gap-3 px-4 py-3 rounded-2xl font-bold transition-all ${activeTab === 'operations' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}
-                    >
+                    <button onClick={() => setActiveTab('operations')} className={`shrink-0 md:w-full flex items-center gap-3 px-4 py-3 rounded-2xl font-bold transition-all ${activeTab === 'operations' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
                         <Sliders size={20} /> Operations
                     </button>
-                    
-                    <button
-                        onClick={() => setActiveTab('billing')}
-                        className={`shrink-0 md:w-full flex items-center gap-3 px-4 py-3 rounded-2xl font-bold transition-all ${activeTab === 'billing' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}
-                    >
+                    <button onClick={() => setActiveTab('billing')} className={`shrink-0 md:w-full flex items-center gap-3 px-4 py-3 rounded-2xl font-bold transition-all ${activeTab === 'billing' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
                         <CreditCard size={20} /> Billing & Payouts
                     </button>
                 </aside>
 
-                {/* Right Content Area */}
                 <main className="flex-1">
-                    
-                    {/* TAB 1 & 2: Wrapped in standard Form */}
                     {(activeTab === 'profile' || activeTab === 'operations') && (
-                        <form onSubmit={(e) => { e.preventDefault(); saveSettingsMutation.mutate(formData); }} className="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-5 md:p-8">
+                        <form onSubmit={(e) => { e.preventDefault(); saveSettingsMutation.mutate(formData as any); }} className="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-5 md:p-8">
 
-                            {/* TAB 1: VENUE PROFILE */}
                             {activeTab === 'profile' && (
                                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
                                     <h2 className="text-xl font-black text-slate-900 border-b border-slate-100 pb-4">Basic Information</h2>
@@ -213,7 +189,6 @@ export default function Settings() {
                                 </div>
                             )}
 
-                            {/* TAB 2: OPERATIONS */}
                             {activeTab === 'operations' && (
                                 <div className="space-y-10 animate-in fade-in slide-in-from-right-4 duration-300">
                                     <div>
@@ -241,7 +216,7 @@ export default function Settings() {
                                                 </div>
                                                 <div>
                                                     <h4 className="font-bold text-slate-900">Accepting Digital Orders</h4>
-                                                    <p className="text-sm text-slate-500 mt-0.5">Toggle off to temporarily disable QR menus (e.g., closing time).</p>
+                                                    <p className="text-sm text-slate-500 mt-0.5">Toggle off to temporarily disable QR menus.</p>
                                                 </div>
                                             </div>
                                             <div className="relative inline-flex items-center cursor-pointer self-end sm:self-auto shrink-0">
@@ -272,6 +247,50 @@ export default function Settings() {
                                             </div>
                                         </div>
                                     </div>
+
+                                    {/* ⚡ NEW: OPEN TAB ARCHITECTURE CONFIGURATION */}
+                                    <div className="space-y-6 pt-6 border-t border-slate-100">
+                                        <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
+                                            <ShieldCheck size={20} className="text-purple-600" /> Open Tab Strategy
+                                        </h2>
+                                        <p className="text-sm text-slate-500">
+                                            Control how guests pay. You can require upfront payment, allow everyone to pay at the end, or restrict tabs to specific VIP areas.
+                                        </p>
+                                        
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                            {[
+                                                { id: 'DISABLED', label: 'Upfront Only', desc: 'Guests must pay before kitchen sees order.', color: 'border-slate-200' },
+                                                { id: 'ENABLED_ALL', label: 'Open Tabs', desc: 'All tables can order now and settle later.', color: 'border-purple-200' },
+                                                { id: 'VIP_ONLY', label: 'Hybrid / VIP', desc: 'Only specific tables can use Open Tabs.', color: 'border-amber-200' }
+                                            ].map((mode) => (
+                                                <button
+                                                    key={mode.id}
+                                                    type="button"
+                                                    onClick={() => setFormData({ ...formData, tab_operating_mode: mode.id as any })}
+                                                    className={`text-left p-4 rounded-2xl border-2 transition-all ${formData.tab_operating_mode === mode.id ? 'border-indigo-600 bg-indigo-50/50' : 'border-slate-100 hover:border-slate-200 bg-slate-50/30'}`}
+                                                >
+                                                    <span className="block font-black text-sm text-slate-900">{mode.label}</span>
+                                                    <span className="block text-xs text-slate-500 mt-1">{mode.desc}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        {formData.tab_operating_mode === 'VIP_ONLY' && (
+                                            <div className="p-5 bg-amber-50/50 border border-amber-100 rounded-2xl animate-in slide-in-from-top-2">
+                                                <label className="text-sm font-bold text-amber-900 block mb-2">Designated VIP Tables</label>
+                                                <input 
+                                                    type="text" 
+                                                    placeholder="e.g. VIP1, VIP2, CABANA-A (Separated by commas)"
+                                                    value={Array.isArray(formData.vip_tables) ? formData.vip_tables.join(', ') : ''}
+                                                    onChange={(e) => setFormData({ ...formData, vip_tables: e.target.value.split(',').map(t => t.trim()) })}
+                                                    className="w-full bg-white border border-amber-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-amber-500 outline-none"
+                                                />
+                                                <p className="text-[11px] text-amber-700 mt-2 font-medium italic">
+                                                    Only these specific table names will bypass the upfront payment gateway.
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             )}
 
@@ -284,7 +303,6 @@ export default function Settings() {
                         </form>
                     )}
 
-                    {/* TAB 3: BILLING & PAYOUTS (Enterprise Financial Routing) */}
                     {activeTab === 'billing' && (
                         <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-5 md:p-8 animate-in fade-in slide-in-from-right-4 duration-300">
                             <h2 className="text-xl font-black text-slate-900 border-b border-slate-100 pb-4 mb-6">Financial Payouts</h2>
@@ -301,7 +319,7 @@ export default function Settings() {
                                     
                                     <div className="w-full max-w-xs bg-white border border-emerald-100 rounded-xl p-4 mt-4 flex justify-between items-center shadow-sm">
                                         <div className="flex flex-col text-left">
-                                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Settlement Code</span>
+                                            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Settlement Route</span>
                                             <span className="font-black text-slate-800">{venueSettings.settlement_bank}</span>
                                         </div>
                                         <div className="text-right">
@@ -317,7 +335,7 @@ export default function Settings() {
                                         <div>
                                             <h4 className="font-bold text-indigo-900">Activate Digital Payments</h4>
                                             <p className="text-sm text-indigo-700 mt-1 leading-relaxed">
-                                                Provide your business settlement details below to enable M-Pesa and Card processing.
+                                                Provide your business settlement details below to enable M-Pesa and Card processing. Your funds are settled directly to this account minus the standard SmartTable platform fee.
                                             </p>
                                         </div>
                                     </div>
@@ -344,7 +362,6 @@ export default function Settings() {
                                         </div>
 
                                         <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-5 animate-in fade-in">
-                                            
                                             {payoutChannel === 'BANK' && (
                                                 <>
                                                     <div className="space-y-2">
@@ -420,11 +437,12 @@ export default function Settings() {
                                         <button 
                                             type="submit"
                                             disabled={onboardSubaccountMutation.isPending || !payoutForm.account_number}
-                                            className="w-full py-4 bg-slate-900 hover:bg-slate-800 disabled:opacity-70 text-white rounded-2xl font-black transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                                            className="w-full py-4 bg-slate-900 hover:bg-slate-800 disabled:opacity-70 text-white rounded-2xl font-black transition-all active:scale-[0.98] flex items-center justify-center gap-2 mt-4"
                                         >
                                             {onboardSubaccountMutation.isPending ? <Loader2 size={20} className="animate-spin" /> : <ShieldCheck size={20} />}
                                             Securely Connect Payout Account
                                         </button>
+                                        <p className="text-center text-xs text-slate-400 font-medium">Secured & compliant via Paystack PCI-DSS & ODPC infrastructure.</p>
                                     </form>
                                 </div>
                             )}

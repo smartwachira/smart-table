@@ -197,7 +197,8 @@ export const getPublicMenu = async (req: Request, res: Response): Promise<Respon
         }
 
         const venue = await Venue.findByPk(venueId, {
-            attributes: ['name', 'is_accepting_orders', 'tax_rate', 'allow_cash_payments', 'logo_url']
+            // ⚡ SPRINT 20 FIX: Exposed Open Tab architectural constraints to the public payload
+            attributes: ['name', 'is_accepting_orders', 'tax_rate', 'allow_cash_payments', 'logo_url', 'tab_operating_mode', 'vip_tables']
         });
 
         const categories = await MenuCategory.findAll({
