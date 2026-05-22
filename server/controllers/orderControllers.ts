@@ -4,7 +4,7 @@ import Order, { OrderStatus } from '../models/Order.js';
 import OrderItem from '../models/OrderItem.js';
 import MenuItem from '../models/MenuItem.js';
 import sequelize from '../config/db.js';
-import { Op } from 'sequelize';
+import { Op, literal } from 'sequelize';
 import Venue from '../models/Venue.js';
 import User from '../models/User.js';
 
@@ -29,6 +29,11 @@ interface updateOrderStatusBody {
 interface HistoricalOrdersQuery {
     startDate?: string;
     endDate?: string;
+}
+
+interface SettleTabBody {
+    table_number: string;
+    settlement_method: 'CASH' | 'CARD' | 'M-PESA';
 }
 
 export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Response): Promise<Response | void> => {
@@ -159,7 +164,6 @@ export const getOrders = async (req: Request, res: Response): Promise<Response |
                         ]
                     },
                     {
-                        // ⚡ SPRINT 20 FIX: Whitelist Cash and Tabs immediately, else wait for PAID
                         [Op.or]: [
                             { payment_status: 'PAID' }, 
                             { payment_method: { [Op.in]: ['CASH', 'TAB'] } }
@@ -220,7 +224,6 @@ export const updateOrderStatus = async (req: Request<{orderId: string}, {}, upda
             return res.status(404).json({ message: 'Order not found' });
         }
 
-        // ⚡ SPRINT 20 FIX: Allow Open Tabs to be marked COMPLETED by the kitchen!
         if (upperStatus === 'COMPLETED' && order.payment_status !== 'PAID' && order.payment_method !== 'TAB') {
             return res.status(403).json({ 
                 message: "Order cannot be completed until payment is received (Mark as Cash Collected or await M-Pesa)." 
@@ -370,7 +373,6 @@ export const getGuestOrders = async (req: Request, res: Response): Promise<Respo
             where: { 
                 guest_session_id: guestSessionId,
                 status: { [Op.ne]: 'CANCELLED' }, 
-                // ⚡ SPRINT 20 FIX: Whitelist Cash and Tabs immediately
                 [Op.or]: [
                     { payment_status: 'PAID' }, 
                     { payment_method: { [Op.in]: ['CASH', 'TAB'] } }
@@ -390,5 +392,63 @@ export const getGuestOrders = async (req: Request, res: Response): Promise<Respo
     } catch (error: any) {
         console.error("❌ Error fetching guest orders:", error);
         return res.status(500).json({ message: "Internal server error", error: error.message });
+    }
+};
+
+// ============================================================================
+// ⚡ SPRINT 20: OPEN TAB SETTLEMENT ENGINE
+// ============================================================================
+export const settleOpenTab = async (req: Request<{}, {}, SettleTabBody>, res: Response): Promise<Response | void> => {
+    try {
+        const venueId = req.user!.venueId;
+        const staffId = req.user!.userId;
+        const { table_number, settlement_method } = req.body;
+
+        if (!table_number || !settlement_method) {
+            return res.status(400).json({ message: "Missing required fields." });
+        }
+
+        // 1. Find all unpaid TAB orders for this specific table
+        const openOrders = await Order.findAll({
+            where: {
+                venue_id: venueId,
+                table_number: table_number,
+                payment_method: 'TAB',
+                payment_status: 'PENDING',
+                status: { [Op.notIn]: ['CANCELLED'] } // Ignore cancelled ones
+            }
+        });
+
+        if (openOrders.length === 0) {
+            return res.status(404).json({ message: "No active tabs found for this table." });
+        }
+
+        const orderIds = openOrders.map(o => o.order_id);
+
+        // 2. Bulk Update the Database
+        await Order.update({
+            payment_status: 'PAID',
+            cash_collected_by: settlement_method === 'CASH' ? staffId : null,
+            notes: literal(`CONCAT(COALESCE(notes, ''), ' | Settled via ${settlement_method}')`)
+        }, {
+            where: { order_id: { [Op.in]: orderIds } }
+        });
+
+        // 3. Broadcast the bulk success via Sockets
+        const io = req.app.get('socketio');
+        if (io) {
+            // Signal the POS/KDS to refresh
+            io.to(`venue:${venueId}`).emit("payment:completed", { table_number, method: settlement_method, bulk: true });
+            
+            // Signal the specific Guest Phones that their tab is closed
+            orderIds.forEach(id => {
+                io.to(`order:${id}`).emit("payment:completed", { orderId: id, method: settlement_method });
+            });
+        }
+
+        res.status(200).json({ message: `Tab settled for table ${table_number}`, updatedCount: openOrders.length });
+    } catch (error) {
+        console.error("Settle Tab Error:", error);
+        res.status(500).json({ message: "Failed to settle open tab." });
     }
 };

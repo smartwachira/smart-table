@@ -19,7 +19,7 @@ export interface OrderData {
     customer_name: string;
     status: 'PENDING' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED';
     payment_status: 'PENDING' | 'PAID' | 'FAILED';
-    payment_method: 'CASH' | 'M-PESA' | string;
+    payment_method: 'CASH' | 'M-PESA' | 'TAB' | string;
     total_amount: number | string;
     createdAt?: string;
     created_at?: string;
@@ -28,7 +28,6 @@ export interface OrderData {
     OrderItems: OrderItem[];
 }
 
-// Helper to grab fresh token
 const getConfig = () => ({
     headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
@@ -44,7 +43,7 @@ export const useLiveOrders = (venueId?: string) => {
             return response.data || [];
         },
         enabled: !!venueId,
-        refetchInterval: 10000 // Fallback polling in case WebSockets drop
+        refetchInterval: 10000 
     });
 };
 
@@ -57,7 +56,7 @@ export const useUpdateOrderStatus = () => {
         },
         onSuccess: (_, variables) => {
             toast.success(`Ticket advanced to ${variables.status}`);
-            queryClient.invalidateQueries({ queryKey: ['liveOrders'] }); // Auto-refresh data
+            queryClient.invalidateQueries({ queryKey: ['liveOrders'] }); 
         },
         onError: (error: AxiosError<{ message: string }>) => {
             toast.error(error.response?.data?.message || "Failed to advance ticket.");
@@ -95,5 +94,22 @@ export const useCollectCash = () => {
             queryClient.invalidateQueries({ queryKey: ['liveOrders'] });
         },
         onError: () => toast.error("Failed to log cash collection.")
+    });
+};
+
+// ⚡ 5. SPRINT 20: BULK TAB SETTLEMENT HOOK (PATCH)
+export const useSettleTab = () => {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async ({ table_number, settlement_method }: { table_number: string, settlement_method: string }) => {
+            return axios.patch(`/api/orders/tabs/settle`, { table_number, settlement_method }, getConfig());
+        },
+        onSuccess: () => {
+            toast.success("Tab settled successfully!");
+            queryClient.invalidateQueries({ queryKey: ['liveOrders'] });
+        },
+        onError: (error: AxiosError<{ message: string }>) => {
+            toast.error(error.response?.data?.message || "Failed to settle tab.");
+        }
     });
 };

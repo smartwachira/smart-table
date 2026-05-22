@@ -21,6 +21,8 @@ router.get("/live", protect as any, authorize('OWNER', 'MANAGER', 'KITCHEN_STAFF
 // Standard internal route for analytics and reporting
 router.get('/history', protect as any, authorize('OWNER', 'MANAGER') as any, orderController.getHistoricalOrders as any);
 
+router.patch('/tabs/settle', protect as any, authorize('OWNER', 'MANAGER', 'WAITER') as any, orderController.settleOpenTab as any);
+
 
 // ============================================================================
 // ⚡ DYNAMIC ROUTES (Must be defined last)
