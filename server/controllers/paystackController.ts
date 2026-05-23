@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
+import { Op } from 'sequelize'; // ⚡ Required for bulk bulk updates
 import Order from '../models/Order.js';
 import Venue from '../models/Venue.js';
 import crypto from 'crypto';
@@ -9,7 +10,7 @@ const determinePaymentMethod = (paystackChannel: string): string => {
     if (!paystackChannel) return 'UNKNOWN';
     
     const channelMap: Record<string, string> = {
-        'mobile_money': 'MOBILE_MONEY', // Replaces hardcoded M-PESA
+        'mobile_money': 'MOBILE_MONEY', 
         'card': 'CARD',
         'bank': 'BANK_TRANSFER',
         'eft': 'EFT',
@@ -21,9 +22,6 @@ const determinePaymentMethod = (paystackChannel: string): string => {
     return channelMap[paystackChannel.toLowerCase()] || paystackChannel.toUpperCase();
 };
 
-// ============================================================================
-// 1. CARDS & HOSTED CHECKOUT: Initialize Payment Redirect
-// ============================================================================
 export const initializePayment = async (req: Request, res: Response): Promise<Response | void> => {
     try {
         const { orderId } = req.body;
@@ -70,12 +68,8 @@ export const initializePayment = async (req: Request, res: Response): Promise<Re
     }
 };
 
-// ============================================================================
-// 2. MOBILE MONEY: Native Push via Charge API (Global Telco Support)
-// ============================================================================
 export const chargeMobileMoney = async (req: Request, res: Response): Promise<Response | void> => {
     try {
-        // ⚡ NEW: We now accept `provider` (e.g., 'mpesa', 'airtel', 'mtn') from the frontend
         const { orderId, phone, provider } = req.body;
         const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
         
@@ -93,7 +87,6 @@ export const chargeMobileMoney = async (req: Request, res: Response): Promise<Re
             return res.status(400).json({ message: "Venue is not authorized to receive payments." });
         }
 
-        // Format to standard international format (e.g., 2547XXXXXXXX)
         let formattedPhone = phone.replace(/\D/g, '');
         if (formattedPhone.startsWith('0')) formattedPhone = '254' + formattedPhone.slice(1);
 
@@ -104,7 +97,7 @@ export const chargeMobileMoney = async (req: Request, res: Response): Promise<Re
             subaccount: venue.gateway_subaccount_id, 
             mobile_money: {
                 phone: formattedPhone,
-                provider: provider || "mpesa" // ⚡ DYNAMIC: Defaults to mpesa but accepts any supported telco!
+                provider: provider || "mpesa" 
             },
             metadata: {
                 custom_fields: [
@@ -128,9 +121,6 @@ export const chargeMobileMoney = async (req: Request, res: Response): Promise<Re
     }
 };
 
-// ============================================================================
-// 3. VENUE ONBOARDING: Create Subaccount
-// ============================================================================
 export const onboardSubaccount = async (req: Request, res: Response): Promise<Response | void> => {
     try {
         const venueId = req.user!.venueId;
@@ -146,7 +136,7 @@ export const onboardSubaccount = async (req: Request, res: Response): Promise<Re
             business_name: venue.name,
             settlement_bank: settlement_bank, 
             account_number: account_number,
-            percentage_charge: 2.0, // Skim 2% Platform Fee automatically
+            percentage_charge: 2.0, 
             description: `SmartTable SaaS Subaccount for ${venue.name}`
         };
 
@@ -156,7 +146,6 @@ export const onboardSubaccount = async (req: Request, res: Response): Promise<Re
 
         const subaccountCode = response.data.data.subaccount_code;
 
-        // Securely store ONLY non-sensitive compliance data
         venue.gateway_subaccount_id = subaccountCode;
         venue.settlement_bank = settlement_bank;
         venue.account_number_last_4 = account_number.slice(-4);
@@ -179,7 +168,7 @@ export const onboardSubaccount = async (req: Request, res: Response): Promise<Re
 };
 
 // ============================================================================
-// 4. WEBHOOK HANDLER: Catch Global Responses
+// ⚡ SPRINT 21: THE OMNI-WEBHOOK UPGRADE
 // ============================================================================
 export const paystackWebhookHandler = async (req: Request, res: Response) => {
     try {
@@ -193,32 +182,63 @@ export const paystackWebhookHandler = async (req: Request, res: Response) => {
         const event = req.body;
         const io = req.app.get('socketio');
 
+        // 1. Context Extraction
         let metadataOrderId = null;
-        if (event.data.metadata && event.data.metadata.custom_fields) {
-            const orderField = event.data.metadata.custom_fields.find((f: any) => f.variable_name === 'order_id');
-            if (orderField) metadataOrderId = orderField.value;
+        let isTabSettlement = false;
+        let bulkOrderIds: string[] = [];
+
+        if (event.data.metadata) {
+            // Check for our new Multi-Order Array Payload
+            if (event.data.metadata.isTabSettlement) {
+                isTabSettlement = true;
+                bulkOrderIds = event.data.metadata.orderIds || [];
+            }
+            // Check for Legacy Single Order Payload
+            if (event.data.metadata.custom_fields) {
+                const orderField = event.data.metadata.custom_fields.find((f: any) => f.variable_name === 'order_id');
+                if (orderField) metadataOrderId = orderField.value;
+            }
         }
 
-        // ⚡ MAP THE GLOBAL CHANNEL DYNAMICALLY
         const paymentMethod = determinePaymentMethod(event.data.channel);
 
         // --- SUCCESSFUL PAYMENTS ---
         if (event.event === 'charge.success') {
             const reference = event.data.reference;
-            
-            let order = await Order.findOne({ where: { gateway_reference: reference } });
-            if (!order && metadataOrderId) order = await Order.findByPk(metadataOrderId);
+            const isTabSettlement = event.data.metadata?.isTabSettlement;
+            const bulkOrderIds = event.data.metadata?.orderIds || [];
 
-            if (order && order.payment_status !== 'PAID') {
-                await order.update({ 
+            if (isTabSettlement && bulkOrderIds.length > 0) {
+                // Bulk mark everything as PAID
+                await Order.update({ 
                     payment_status: 'PAID',
-                    payment_method: paymentMethod, // Save dynamic channel to DB
-                    gateway_reference: reference 
+                    payment_method: paymentMethod, 
+                    gateway_reference: event.data.reference 
+                }, { 
+                    where: { order_id: { [Op.in]: bulkOrderIds } } 
                 });
 
+                // Broadcast to specific orders and the venue
                 if (io) {
-                    io.to(`order:${order.order_id}`).emit('payment:completed', { orderId: order.order_id, method: paymentMethod });
-                    io.to(`venue:${order.venue_id}`).emit('payment:completed', { orderId: order.order_id, method: paymentMethod });
+                    bulkOrderIds.forEach((id: string) => io.to(`order:${id}`).emit('payment:completed', { orderId: id, method: paymentMethod }));
+                }
+            }
+            // SCENARIO B: SINGLE ORDER SETTLEMENT
+            else {
+                let order = await Order.findOne({ where: { gateway_reference: reference } });
+                if (!order && metadataOrderId) order = await Order.findByPk(metadataOrderId);
+
+                if (order && order.payment_status !== 'PAID') {
+                    await order.update({ 
+                        payment_status: 'PAID',
+                        payment_method: paymentMethod, 
+                        gateway_reference: reference 
+                    });
+
+                    if (io) {
+                        io.to(`order:${order.order_id}`).emit('payment:completed', { orderId: order.order_id, method: paymentMethod });
+                        io.to(`venue:${order.venue_id}`).emit('payment:completed', { orderId: order.order_id, method: paymentMethod });
+                    }
                 }
             }
         }
@@ -226,23 +246,31 @@ export const paystackWebhookHandler = async (req: Request, res: Response) => {
         // --- FAILED PAYMENTS ---
         if (event.event === 'charge.failed') {
             const reference = event.data.reference;
-            
-            let order = await Order.findOne({ where: { gateway_reference: reference } });
-            if (!order && metadataOrderId) order = await Order.findByPk(metadataOrderId);
+            const failureReason = event.data.gateway_response || "Transaction declined";
 
-            if (order) {
-                const failureReason = event.data.gateway_response || "Transaction declined";
-                
-                await order.update({ 
-                    payment_status: 'FAILED',
-                    status: 'CANCELLED',
-                    payment_method: paymentMethod, // Save dynamic channel to DB
-                    notes: `Paystack: ${failureReason}`
-                });
-
+            if (isTabSettlement && bulkOrderIds.length > 0) {
+                // If a bulk tab payment fails, we just notify the guest. We DO NOT cancel the orders, because the food is already eaten/cooked!
                 if (io) {
-                    io.to(`order:${order.order_id}`).emit('payment:failed', { orderId: order.order_id, method: paymentMethod, reason: failureReason });
-                    io.to(`venue:${order.venue_id}`).emit('payment:failed', { orderId: order.order_id, method: paymentMethod, reason: failureReason });
+                    bulkOrderIds.forEach(id => {
+                        io.to(`order:${id}`).emit('payment:failed', { orderId: id, method: paymentMethod, reason: failureReason });
+                    });
+                }
+            } else {
+                let order = await Order.findOne({ where: { gateway_reference: reference } });
+                if (!order && metadataOrderId) order = await Order.findByPk(metadataOrderId);
+
+                if (order) {
+                    await order.update({ 
+                        payment_status: 'FAILED',
+                        status: 'CANCELLED',
+                        payment_method: paymentMethod, 
+                        notes: `Paystack: ${failureReason}`
+                    });
+
+                    if (io) {
+                        io.to(`order:${order.order_id}`).emit('payment:failed', { orderId: order.order_id, method: paymentMethod, reason: failureReason });
+                        io.to(`venue:${order.venue_id}`).emit('payment:failed', { orderId: order.order_id, method: paymentMethod, reason: failureReason });
+                    }
                 }
             }
         }

@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
+import { useMutation } from '@tanstack/react-query'; // ⚡ NEW: Imported useMutation to handle network requests properly
 import { 
     Search, ShoppingCart, Plus, Minus, Trash2,Loader2, 
     Smartphone, Banknote, ChefHat, User, Hash, X, MonitorSmartphone, ChevronRight, CreditCard, ArrowLeft, Lock, CheckCircle2
@@ -10,9 +11,10 @@ import { useCartStore } from '../../store/useCartStore';
 import { useMenuStore } from '../../store/useMenuStore'; 
 import io, { Socket } from 'socket.io-client';
 
-// ⚡ IMPORT THE CUSTOM HOOKS
+// ⚡ IMPORT CUSTOM HOOKS
 import { usePOSCategories, usePOSItems, useSubmitPOSOrder, POSCategory, POSItem, getImageUrl } from '../../hooks/usePOS';
-import { useLiveOrders, useSettleTab } from '../../hooks/useLiveOrders'; // ⚡ NEW: Importing LiveOrders to compute active tabs
+import { useLiveOrders, useSettleTab } from '../../hooks/useLiveOrders'; 
+import { useFetchSettings } from '../../hooks/useSettings'; 
 
 interface OrderStatusResponse {
     payment_status: string;
@@ -74,8 +76,6 @@ export default function POS() {
     
     const [isCartOpen, setIsCartOpen] = useState(false);
     const [showPaymentModal, setShowPaymentModal] = useState(false);
-    
-    // ⚡ SPRINT 20: Cashier Tab Modal State
     const [isTabsModalOpen, setIsTabsModalOpen] = useState(false);
 
     const [mobileProvider, setMobileProvider] = useState<'mpesa' | 'airtel' | 'mtn'>('mpesa');
@@ -98,22 +98,36 @@ export default function POS() {
     };
 
     // ============================================================================
-    // ⚡ TANSTACK QUERY: Abstracted Custom Hooks
+    // ⚡ DATA FETCHING & MUTATIONS
     // ============================================================================
     const { data: categories = [], isLoading: categoriesLoading } = usePOSCategories(venueId as string);
     const { data: items = [], isLoading: itemsLoading } = usePOSItems(venueId as string);
+    const { data: liveOrders = [] } = useLiveOrders(venueId as string);
+    const { data: venueSettings } = useFetchSettings(venueId as string); 
     
     const submitOrderMutation = useSubmitPOSOrder();
-
-    // ⚡ Fetch Live Orders to dynamically compute the Active Tabs for the Cashier
-    const { data: liveOrders = [] } = useLiveOrders(venueId as string);
     const settleTabMutation = useSettleTab();
 
-    // ⚡ Compute Active Tabs securely on the fly
+    // ⚡ SPRINT 21: New hook for initiating the Paystack Master Gateway session
+    const initTabPaymentMutation = useMutation({
+        mutationFn: async (payload: { table_number: string, settlement_method: 'CARD' | 'M-PESA' }) => {
+            const res = await axios.patch('/api/orders/tabs/init-payment', payload, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            return res.data;
+        }
+    });
+
+    // ⚡ SPRINT 21: Staff Parity Verification Logic
+    const isTabAllowed = 
+        (venueSettings as any)?.tab_operating_mode === 'ENABLED_ALL' || 
+        ((venueSettings as any)?.tab_operating_mode === 'VIP_ONLY' && 
+         Array.isArray((venueSettings as any)?.vip_tables) && 
+         (venueSettings as any).vip_tables.map((t: string) => t.toLowerCase()).includes(tableNumber.toLowerCase().trim()));
+
     const activeTabs = useMemo(() => {
         const tabs: Record<string, { table_number: string, total: number, order_count: number }> = {};
         liveOrders.forEach(order => {
-            // Find all orders that are TAB, unpaid, and not cancelled
             if (order.payment_method === 'TAB' && order.payment_status === 'PENDING' && order.status !== 'CANCELLED') {
                 if (!tabs[order.table_number]) {
                     tabs[order.table_number] = { table_number: order.table_number, total: 0, order_count: 0 };
@@ -122,7 +136,7 @@ export default function POS() {
                 tabs[order.table_number].order_count += 1;
             }
         });
-        return Object.values(tabs).sort((a, b) => b.total - a.total); // Sort highest tabs first
+        return Object.values(tabs).sort((a, b) => b.total - a.total); 
     }, [liveOrders]);
 
 
@@ -184,7 +198,7 @@ export default function POS() {
         });
     }, [items, activeCategoryId, searchQuery]);
 
-    const handleCheckout = (paymentMethod: 'CASH' | 'M-PESA' | 'CARD') => {
+    const handleCheckout = (paymentMethod: 'CASH' | 'M-PESA' | 'CARD' | 'TAB') => {
         const payload = {
             cartItems: Object.values(cart).map(item => ({
                 item_id: item.item_id,
@@ -200,7 +214,7 @@ export default function POS() {
         submitOrderMutation.mutate(payload as any, {
             onSuccess: (data) => {
                 if (data.status === 'success') {
-                    toast.success('Order sent to kitchen!');
+                    toast.success(paymentMethod === 'TAB' ? 'Added to Open Tab!' : 'Order sent to kitchen!');
                     handleReset();
                 } else if (data.status === 'mpesa_sent') {
                     toast.success('Push sent! Waiting for payment...');
@@ -240,7 +254,6 @@ export default function POS() {
                         />
                     </div>
 
-                    {/* ⚡ SPRINT 20: Active Tabs Cashier Button */}
                     <button 
                         onClick={() => setIsTabsModalOpen(true)}
                         className="flex items-center gap-2 px-4 py-2.5 bg-purple-50 hover:bg-purple-100 text-purple-700 font-black rounded-xl transition-all shadow-sm border border-purple-100 active:scale-95"
@@ -336,7 +349,7 @@ export default function POS() {
                 </main>
             </div>
 
-            <div className={`w-full md:w-96 bg-white md:border-l border-slate-200 flex flex-col shadow-2xl md:shadow-none z-50 transition-transform duration-300 absolute md:relative right-0 h-full ${isCartOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'}`}>
+            <div className={`w-full md:w-[400px] bg-white md:border-l border-slate-200 flex flex-col shadow-2xl md:shadow-none z-50 transition-transform duration-300 absolute md:relative right-0 h-full ${isCartOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'}`}>
                 
                 <header className="px-4 md:px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/50 shrink-0">
                     <div className="flex items-center gap-3">
@@ -366,6 +379,22 @@ export default function POS() {
                             className={`w-full pl-9 pr-4 py-3 bg-slate-50 border rounded-xl text-base font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all ${!tableNumber && !isCartEmpty ? 'border-amber-400 ring-4 ring-amber-400/10' : 'border-slate-200'}`}
                         />
                     </div>
+                    
+                    {/* ⚡ SPRINT 21: VIP Table Quick-Select Pills */}
+                    {(venueSettings as any)?.tab_operating_mode === 'VIP_ONLY' && Array.isArray((venueSettings as any)?.vip_tables) && (venueSettings as any).vip_tables.length > 0 && (
+                        <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-1">
+                            {(venueSettings as any).vip_tables.map((vt: string) => (
+                                <button
+                                    key={vt}
+                                    onClick={() => setTableNumber(vt)}
+                                    className={`shrink-0 px-3 py-1.5 text-xs font-black rounded-lg transition-colors ${tableNumber.toLowerCase() === vt.toLowerCase() ? 'bg-purple-600 text-white shadow-md' : 'bg-purple-50 text-purple-600 hover:bg-purple-100 border border-purple-100'}`}
+                                >
+                                    {vt}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
                     <div className="relative">
                         <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                         <input 
@@ -409,14 +438,27 @@ export default function POS() {
                         <span className="font-black text-3xl text-slate-900">{getCartTotal().toLocaleString('en-KE')}</span>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    {/* ⚡ SPRINT 21: The Hybrid UI Matrix for Waiters */}
+                    <div className={`grid ${isTabAllowed ? 'grid-cols-3' : 'grid-cols-2'} gap-3`}>
+                        
+                        {isTabAllowed && (
+                            <button 
+                                disabled={!canCheckout || submitOrderMutation.isPending}
+                                onClick={() => handleCheckout('TAB')}
+                                className="flex flex-col items-center justify-center gap-1 py-4 bg-purple-600 hover:bg-purple-700 text-white rounded-2xl font-bold active:scale-95 disabled:opacity-50 transition-all shadow-md shadow-purple-600/20"
+                            >
+                                <Lock size={22} />
+                                <span className="text-xs">Add Tab</span>
+                            </button>
+                        )}
+
                         <button 
                             disabled={!canCheckout || submitOrderMutation.isPending}
                             onClick={() => handleCheckout('CASH')}
                             className="flex flex-col items-center justify-center gap-1 py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-bold active:scale-95 disabled:opacity-50 transition-all shadow-md"
                         >
-                            <Banknote size={24} />
-                            <span className="text-sm">Cash</span>
+                            <Banknote size={22} />
+                            <span className="text-xs">Cash</span>
                         </button>
                         
                         <button 
@@ -424,14 +466,14 @@ export default function POS() {
                             onClick={() => setShowPaymentModal(true)}
                             className="flex flex-col items-center justify-center gap-1 py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold active:scale-95 disabled:opacity-50 transition-all shadow-md shadow-indigo-600/20"
                         >
-                            <MonitorSmartphone size={24} />
-                            <span className="text-sm">Digital Pay</span>
+                            <MonitorSmartphone size={22} />
+                            <span className="text-xs">Digital Pay</span>
                         </button>
                     </div>
                 </div>
             </div>
 
-            {/* ⚡ SPRINT 20: CASHIER ACTIVE TABS MODAL */}
+            {/* CASHIER ACTIVE TABS MODAL */}
             {isTabsModalOpen && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 md:p-6">
                     <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm animate-in fade-in" onClick={() => setIsTabsModalOpen(false)}></div>
@@ -477,21 +519,33 @@ export default function POS() {
                                                         settleTabMutation.mutate({ table_number: tab.table_number, settlement_method: 'CASH' });
                                                     }
                                                 }}
-                                                disabled={settleTabMutation.isPending}
+                                                disabled={settleTabMutation.isPending || initTabPaymentMutation.isPending}
                                                 className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 py-3 rounded-xl text-sm font-black uppercase tracking-wider transition-colors active:scale-95 disabled:opacity-50"
                                             >
-                                                <Banknote size={16} /> Cash
+                                                {settleTabMutation.isPending && settleTabMutation.variables?.table_number === tab.table_number && settleTabMutation.variables?.settlement_method === 'CASH' ? <Loader2 size={16} className="animate-spin" /> : <><Banknote size={16} /> Cash</>}
                                             </button>
                                             <button 
                                                 onClick={() => {
                                                     if(window.confirm(`Settle ${tab.table_number}'s tab via CARD TERMINAL?`)) {
-                                                        settleTabMutation.mutate({ table_number: tab.table_number, settlement_method: 'CARD' });
+                                                        initTabPaymentMutation.mutate(
+                                                            { table_number: tab.table_number, settlement_method: 'CARD' },
+                                                            {
+                                                                onSuccess: (data) => {
+                                                                    setPaystackAccessCode(data.access_code);
+                                                                    setIsGatewayLoading(true);
+                                                                    setIsTabsModalOpen(false);
+                                                                },
+                                                                onError: (error: any) => {
+                                                                    toast.error(error.response?.data?.message || "Failed to initialize payment gateway.");
+                                                                }
+                                                            }
+                                                        );
                                                     }
                                                 }}
-                                                disabled={settleTabMutation.isPending}
+                                                disabled={settleTabMutation.isPending || initTabPaymentMutation.isPending}
                                                 className="flex-1 flex items-center justify-center gap-1.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-800 py-3 rounded-xl text-sm font-black uppercase tracking-wider transition-colors active:scale-95 disabled:opacity-50"
                                             >
-                                                <CreditCard size={16} /> Terminal
+                                                {initTabPaymentMutation.isPending && initTabPaymentMutation.variables?.table_number === tab.table_number ? <Loader2 size={16} className="animate-spin" /> : <><CreditCard size={16} /> Terminal</>}
                                             </button>
                                         </div>
 
@@ -515,7 +569,7 @@ export default function POS() {
                             <MonitorSmartphone size={32} />
                         </div>
                         
-                        <h3 className="text-2xl font-black text-center text-slate-900 mb-2">Checkout Options</h3>
+                        <h3 className="text-2xl font-black text-center text-slate-900 mb-2">Digital Checkout</h3>
                         <p className="text-center text-sm text-slate-500 mb-6">Total Amount: <span className="font-bold text-slate-800">{getCartTotal().toLocaleString()} KES</span></p>
                         
                         <div className="space-y-4 pb-6 md:pb-0">
@@ -525,7 +579,7 @@ export default function POS() {
                                 className="w-full flex items-center justify-between p-4 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 text-indigo-700 rounded-2xl active:scale-95 disabled:opacity-50 transition-all group"
                             >
                                 <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm">
+                                    <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm border border-indigo-100">
                                         <CreditCard size={24} className="text-indigo-600"/>
                                     </div>
                                     <div className="text-left">

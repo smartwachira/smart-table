@@ -125,20 +125,17 @@ export default function Checkout() {
         }
     }, [navigate]);
 
-    // ⚡ SPRINT 20: Edge-Level Verification Logic
-    // Is this specific table permitted to bypass the payment gateway?
+    // ⚡ SPRINT 21: The Hybrid Choice Logic
     const isTabAllowed = 
         venueConfig?.tab_operating_mode === 'ENABLED_ALL' || 
         (venueConfig?.tab_operating_mode === 'VIP_ONLY' && 
          Array.isArray(venueConfig?.vip_tables) && 
          venueConfig.vip_tables.map(t => t.toLowerCase()).includes(tableNumber.toLowerCase()));
 
-    // Force payment method to TAB if permitted
+    // Ensure state defaults to CARD if tab somehow becomes disallowed mid-session
     useEffect(() => {
-        if (isTabAllowed) {
-            setPaymentMethod('TAB');
-        } else if (paymentMethod === 'TAB') {
-            setPaymentMethod('CARD'); // Safe fallback if config shifts mid-session
+        if (!isTabAllowed && paymentMethod === 'TAB') {
+            setPaymentMethod('CARD'); 
         }
     }, [isTabAllowed, paymentMethod]);
 
@@ -280,7 +277,7 @@ export default function Checkout() {
                     <h1 className="text-lg font-black text-slate-900 tracking-tight">Checkout</h1>
                     <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">{tableNumber}</p>
                 </div>
-                <div className={`w-10 h-10 flex items-center justify-center ${isTabAllowed ? 'text-purple-600' : 'text-indigo-600'}`}>
+                <div className={`w-10 h-10 flex items-center justify-center ${paymentMethod === 'TAB' ? 'text-purple-600' : 'text-indigo-600'}`}>
                     <ShieldCheck size={24} />
                 </div>
             </header>
@@ -314,7 +311,7 @@ export default function Checkout() {
                         )}
                         <div className="flex justify-between items-center text-slate-900 pt-2 border-t border-slate-100 mt-2">
                             <span className="text-lg font-black">Total</span>
-                            <span className={`text-2xl font-black ${isTabAllowed ? 'text-purple-600' : 'text-indigo-600'}`}>
+                            <span className={`text-2xl font-black ${paymentMethod === 'TAB' ? 'text-purple-600' : 'text-indigo-600'}`}>
                                 {total.toLocaleString('en-KE',{ style: 'currency', currency: 'KES', minimumFractionDigits: 0 })}
                             </span>
                         </div>
@@ -343,9 +340,9 @@ export default function Checkout() {
                     )}
 
                     {paymentStatus === 'success' && (
-                        <div className={`absolute inset-0 z-30 flex flex-col items-center justify-center text-white animate-in slide-in-from-bottom-8 duration-500 ${isTabAllowed ? 'bg-purple-600' : 'bg-emerald-500'}`}>
-                            {isTabAllowed ? <Lock size={64} className="mb-4" /> : <CheckCircle2 size={64} className="mb-4" />}
-                            <h3 className="text-2xl font-black">{isTabAllowed ? 'Added to Tab!' : 'Order Confirmed!'}</h3>
+                        <div className={`absolute inset-0 z-30 flex flex-col items-center justify-center text-white animate-in slide-in-from-bottom-8 duration-500 ${paymentMethod === 'TAB' ? 'bg-purple-600' : 'bg-emerald-500'}`}>
+                            {paymentMethod === 'TAB' ? <Lock size={64} className="mb-4" /> : <CheckCircle2 size={64} className="mb-4" />}
+                            <h3 className="text-2xl font-black">{paymentMethod === 'TAB' ? 'Added to Tab!' : 'Order Confirmed!'}</h3>
                             <p className="opacity-90 font-medium mt-1">Routing to kitchen...</p>
                         </div>
                     )}
@@ -368,53 +365,59 @@ export default function Checkout() {
                             </div>
                         </div>
 
-                        {/* ⚡ SPRINT 20: VIP OPEN TAB UI REPLACEMENT */}
-                        {isTabAllowed ? (
-                            <div className="bg-purple-50 border border-purple-200 rounded-2xl p-6 text-center shadow-inner animate-in fade-in zoom-in-95 duration-300">
-                                <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                                    <Lock size={32} className="text-purple-600" />
-                                </div>
-                                <h3 className="text-xl font-black text-purple-900">VIP Open Tab</h3>
-                                <p className="text-sm text-purple-700 mt-2 font-medium">Your table is verified for an open tab. Send orders to the kitchen now and pay later when you're ready.</p>
-                            </div>
-                        ) : (
-                            <div className="space-y-2 animate-in fade-in">
-                                <label className="text-sm font-bold text-slate-700 ml-1">Payment Method</label>
-                                <div className={`grid gap-3 ${venueConfig?.allow_cash_payments ? 'grid-cols-3' : 'grid-cols-2'}`}>
-                                    
+                        {/* ⚡ SPRINT 21: THE HYBRID MATRIX */}
+                        <div className="space-y-2 animate-in fade-in">
+                            <label className="text-sm font-bold text-slate-700 ml-1 flex items-center justify-between">
+                                Payment Method
+                                {isTabAllowed && <span className="text-[10px] text-purple-600 font-black uppercase tracking-wider bg-purple-50 px-2 py-0.5 rounded border border-purple-100">VIP Active</span>}
+                            </label>
+                            
+                            <div className={`grid gap-3 grid-cols-2 md:grid-cols-2`}>
+                                
+                                <button 
+                                    type="button"
+                                    onClick={() => setPaymentMethod('CARD')}
+                                    className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border-2 transition-all ${paymentMethod === 'CARD' ? 'border-indigo-600 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
+                                >
+                                    <CreditCard size={24}/>
+                                    <span className="font-bold text-xs">Bank Card</span>
+                                </button>
+
+                                <button 
+                                    type="button"
+                                    onClick={() => setPaymentMethod('M-PESA')}
+                                    className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border-2 transition-all ${paymentMethod === 'M-PESA' ? 'border-[#52B44B] bg-[#52B44B]/5 text-[#52B44B] shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
+                                >
+                                    <Smartphone size={24}/>
+                                    <span className="font-bold text-xs text-center">Mobile Money</span>
+                                </button>
+
+                                {venueConfig?.allow_cash_payments && (
                                     <button 
                                         type="button"
-                                        onClick={() => setPaymentMethod('CARD')}
-                                        className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border-2 transition-all ${paymentMethod === 'CARD' ? 'border-indigo-600 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
+                                        onClick={() => setPaymentMethod('CASH')}
+                                        className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border-2 transition-all ${paymentMethod === 'CASH' ? 'border-amber-500 bg-amber-50 text-amber-700 shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
                                     >
-                                        <CreditCard size={24}/>
-                                        <span className="font-bold text-xs">Bank Card</span>
+                                        <Banknote size={24} />
+                                        <span className="font-bold text-xs">Pay Waiter</span>
                                     </button>
+                                )}
 
+                                {/* Option C: Bypasses immediate checkout completely */}
+                                {isTabAllowed && (
                                     <button 
                                         type="button"
-                                        onClick={() => setPaymentMethod('M-PESA')}
-                                        className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border-2 transition-all ${paymentMethod === 'M-PESA' ? 'border-[#52B44B] bg-[#52B44B]/5 text-[#52B44B] shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
+                                        onClick={() => setPaymentMethod('TAB')}
+                                        className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border-2 transition-all ${paymentMethod === 'TAB' ? 'border-purple-600 bg-purple-50 text-purple-700 shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
                                     >
-                                        <Smartphone size={24}/>
-                                        <span className="font-bold text-xs text-center">Mobile Money</span>
+                                        <Lock size={24} />
+                                        <span className="font-bold text-xs">Open Tab</span>
                                     </button>
-
-                                    {venueConfig?.allow_cash_payments && (
-                                        <button 
-                                            type="button"
-                                            onClick={() => setPaymentMethod('CASH')}
-                                            className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border-2 transition-all ${paymentMethod === 'CASH' ? 'border-amber-500 bg-amber-50 text-amber-700 shadow-sm' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'}`}
-                                        >
-                                            <Banknote size={24} />
-                                            <span className="font-bold text-xs">Pay Waiter</span>
-                                        </button>
-                                    )}
-                                </div>
+                                )}
                             </div>
-                        )}
+                        </div>
 
-                        {paymentMethod === 'M-PESA' && !isTabAllowed && (
+                        {paymentMethod === 'M-PESA' && (
                             <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
                                 <div className="space-y-2">
                                     <label className="text-sm font-bold text-slate-700 ml-1">Select Network</label>

@@ -1,10 +1,10 @@
 import { DataTypes, Model, Optional } from "sequelize";
 import sequelize from '../config/db.js';
 
-export type PaymentStatus = 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED' | 'PARTIALLY_REFUNDED';
-export type PaymentMethod = 'CASH' | 'M-PESA' | 'CARD';
-export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'completed' | 'cancelled';
-
+// ⚡ SPRINT 21 FIX: Added 'UNPAID_TAB' to PaymentStatus and 'TAB' to PaymentMethod
+export type PaymentStatus = 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED' | 'PARTIALLY_REFUNDED' | 'UNPAID_TAB';
+export type PaymentMethod = 'CASH' | 'M-PESA' | 'CARD' | 'TAB';
+export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'delivered' | 'completed' | 'cancelled' | 'PENDING' | 'PREPARING' | 'READY' | 'DELIVERED' | 'COMPLETED' | 'CANCELLED';
 export interface OrderAttributes {
     order_id: string;
     customer_name: string;
@@ -14,7 +14,7 @@ export interface OrderAttributes {
     payment_method: PaymentMethod | string;
     venue_id: string;
     phone_number?: string | null;
-    payment_status: PaymentStatus;
+    payment_status: PaymentStatus | string;
     checkout_request_id?: string | null;
     mpesa_receipt?: string | null;
     notes?: string | null;
@@ -24,23 +24,25 @@ export interface OrderAttributes {
     gateway_reference?: string | null;
     gateway_fee: number;
     platform_fee: number;
+
+    
 }
 
-// ⚡ FIX: Added gateway_fee and platform_fee to the Optional array
 export interface OrderCreationAttributes extends Optional<OrderAttributes, 
     'order_id' | 'status' | 'payment_status' | 'gateway_fee' | 'platform_fee'
 > {}
 
+// ⚡ SPRINT 21 FIX: Explicitly declaring ALL properties so TypeScript stops throwing errors in the controllers
 class Order extends Model<OrderAttributes, OrderCreationAttributes> implements OrderAttributes {
     public order_id!: string;
     public customer_name!: string;
     public table_number!: string;
     public status!: OrderStatus | string;
     public total_amount!: number;
-    public payment_method!: string;
+    public payment_method!: PaymentMethod | string; // Type-safe property
     public venue_id!: string;
     public phone_number!: string | null;
-    public payment_status!: PaymentStatus;
+    public payment_status!: PaymentStatus | string; // Type-safe property
     public checkout_request_id!: string | null;
     public mpesa_receipt!: string | null;
     public gateway_reference!: string | null;
@@ -71,7 +73,7 @@ Order.init({
     },
     status: {
         type: DataTypes.STRING,
-        defaultValue: 'pending', 
+        defaultValue: 'PENDING', 
         allowNull: false
     },
     total_amount: {
@@ -79,7 +81,8 @@ Order.init({
         allowNull: false
     },
     payment_method: {
-        type: DataTypes.ENUM('CASH', 'M-PESA', 'CARD','TAB'),
+        // ⚡ Added 'TAB' to the DB ENUM as well
+        type: DataTypes.ENUM('CASH', 'M-PESA', 'CARD', 'TAB'),
         allowNull: false
     },
     venue_id: {
@@ -91,7 +94,8 @@ Order.init({
         allowNull: true
     },
     payment_status: {
-        type: DataTypes.ENUM('PENDING', 'PAID', 'FAILED', 'REFUNDED', 'PARTIALLY_REFUNDED'),
+        // ⚡ Added 'UNPAID_TAB' to the DB ENUM 
+        type: DataTypes.ENUM('PENDING', 'PAID', 'FAILED', 'REFUNDED', 'PARTIALLY_REFUNDED', 'UNPAID_TAB'),
         defaultValue: 'PENDING'
     },
     checkout_request_id: {

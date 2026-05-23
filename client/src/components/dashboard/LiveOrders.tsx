@@ -35,9 +35,6 @@ export default function LiveOrders() {
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const [previousOrderCount, setPreviousOrderCount] = useState<number>(0);
 
-    // ============================================================================
-    // ⚡ TANSTACK QUERY: Abstracted Custom Hooks
-    // ============================================================================
     const { data: orders = [], isLoading, isError } = useLiveOrders(user?.venueId);
     
     const updateOrderStatusMutation = useUpdateOrderStatus();
@@ -77,16 +74,20 @@ export default function LiveOrders() {
         };
     }, [user?.venueId, queryClient]);
 
-    // ⚡ ENTERPRISE FIX: Restored Recall filtering logic
+    // ============================================================================
+    // ⚡ ENTERPRISE FIX: Decoupling Fulfillment from Settlement
+    // ============================================================================
     const filteredOrders = orders.filter((order) => {
-        const isCompletedOrCancelled = order.status === 'COMPLETED' || order.status === 'CANCELLED';
+        const isFullyResolved = (order.status === 'COMPLETED' && order.payment_status === 'PAID') || order.status === 'CANCELLED';
+        const isAwaitingSettlement = order.status === 'COMPLETED' && order.payment_status === 'PENDING';
         
-        // "all" tab should only show active queue. "COMPLETED" tab handles the history.
         let matchesTab = false;
         if (activeTab === 'all') {
-            matchesTab = !isCompletedOrCancelled;
+            matchesTab = !isFullyResolved; // "All" shows everything not fully history
         } else if (activeTab === 'COMPLETED') {
-            matchesTab = isCompletedOrCancelled;
+            matchesTab = isFullyResolved;  // History tab only shows fully paid/cancelled
+        } else if (activeTab === 'UNPAID') {
+            matchesTab = isAwaitingSettlement; // The new Settlement tab
         } else {
             matchesTab = order.status === activeTab;
         }
@@ -120,21 +121,25 @@ export default function LiveOrders() {
         return diff < 1 ? 'Just now' : `${diff}m ago`;
     };
 
-    // ⚡ ENTERPRISE FIX: Restored SLA Time Shading
-    const getSlaClasses = (createdAt: string, status: string, isTab: boolean) => {
-        if (status === 'COMPLETED' || status === 'CANCELLED') {
-            return 'border-slate-200 bg-slate-50 opacity-70'; // Dimmed for recall
+    // ⚡ Shading correctly bypasses served orders waiting for payment
+    const getSlaClasses = (order: any, isTab: boolean) => {
+        const isFullyResolved = (order.status === 'COMPLETED' && order.payment_status === 'PAID') || order.status === 'CANCELLED';
+        const isAwaitingSettlement = order.status === 'COMPLETED' && order.payment_status === 'PENDING';
+
+        if (isFullyResolved) {
+            return 'border-slate-200 bg-slate-50 opacity-70'; 
+        }
+        if (isAwaitingSettlement) {
+            return isTab ? 'border-purple-300 bg-purple-50 shadow-sm shadow-purple-100' : 'border-amber-300 bg-amber-50 shadow-sm shadow-amber-100';
         }
         
-        const minutes = getElapsedTimeMinutes(createdAt);
-        
+        const minutes = getElapsedTimeMinutes(order.createdAt as string);
         if (minutes >= 20) {
-            return 'border-red-400 bg-red-50/30 shadow-md shadow-red-100'; // Critical
+            return 'border-red-400 bg-red-50/30 shadow-md shadow-red-100'; 
         } else if (minutes >= 10) {
-            return 'border-amber-400 bg-amber-50/30 shadow-sm shadow-amber-100'; // Warning
+            return 'border-amber-400 bg-amber-50/30 shadow-sm shadow-amber-100'; 
         }
         
-        // Normal state - Use Tab or Standard styling
         return isTab ? 'border-purple-200 shadow-purple-100 bg-white' : 'border-slate-100 shadow-sm bg-white';
     };
 
@@ -193,17 +198,20 @@ export default function LiveOrders() {
                     { id: 'PENDING', label: 'New Orders', icon: BellRing },
                     { id: 'PREPARING', label: 'Cooking', icon: ChefHat },
                     { id: 'READY', label: 'Ready for Pickup', icon: UtensilsCrossed },
-                    // ⚡ ENTERPRISE FIX: Restored the Recall tab
-                    { id: 'COMPLETED', label: 'Recall / History', icon: History } 
+                    // ⚡ SPRINT 21: The Financial Gate Tab
+                    { id: 'UNPAID', label: 'Awaiting Settlement', icon: Banknote }, 
+                    { id: 'COMPLETED', label: 'History', icon: History } 
                 ].map((tab) => {
                     const Icon = tab.icon;
                     const isActive = activeTab === tab.id;
                     
                     let count = 0;
                     if (tab.id === 'all') {
-                        count = orders.filter(o => o.status !== 'COMPLETED' && o.status !== 'CANCELLED').length;
+                        count = orders.filter(o => (o.status !== 'COMPLETED' && o.status !== 'CANCELLED') || (o.status === 'COMPLETED' && o.payment_status === 'PENDING')).length;
                     } else if (tab.id === 'COMPLETED') {
-                        count = orders.filter(o => o.status === 'COMPLETED' || o.status === 'CANCELLED').length;
+                        count = orders.filter(o => (o.status === 'COMPLETED' && o.payment_status === 'PAID') || o.status === 'CANCELLED').length;
+                    } else if (tab.id === 'UNPAID') {
+                        count = orders.filter(o => o.status === 'COMPLETED' && o.payment_status === 'PENDING').length;
                     } else {
                         count = orders.filter(o => o.status === tab.id).length;
                     }
@@ -234,10 +242,10 @@ export default function LiveOrders() {
             {filteredOrders.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-20 px-4 text-center bg-white rounded-[2rem] border border-slate-200 shadow-sm">
                     <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-4">
-                        {activeTab === 'COMPLETED' ? <History size={40} className="text-slate-300" /> : <CheckCircle2 size={40} className="text-slate-300" />}
+                        {activeTab === 'COMPLETED' ? <History size={40} className="text-slate-300" /> : activeTab === 'UNPAID' ? <Banknote size={40} className="text-slate-300" /> : <CheckCircle2 size={40} className="text-slate-300" />}
                     </div>
                     <h3 className="text-xl font-black text-slate-900">
-                        {activeTab === 'COMPLETED' ? 'No recent history' : 'All caught up!'}
+                        {activeTab === 'COMPLETED' ? 'No recent history' : activeTab === 'UNPAID' ? 'No pending settlements' : 'All caught up!'}
                     </h3>
                     <p className="text-slate-500 mt-2 max-w-sm">
                         {activeTab === 'COMPLETED' ? 'No orders have been completed yet during this shift.' : 'There are no active orders matching your current filter. Enjoy the breather.'}
@@ -246,16 +254,16 @@ export default function LiveOrders() {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">
                     {filteredOrders.map((order) => {
-                        // ⚡ SPRINT 20: OPEN TAB LOGIC 
                         const isTabOrder = order.payment_method === 'TAB' || (order.payment_status === 'PENDING' && order.payment_method !== 'CASH');
+                        const isFullyResolved = (order.status === 'COMPLETED' && order.payment_status === 'PAID') || order.status === 'CANCELLED';
+                        const isAwaitingSettlement = order.status === 'COMPLETED' && order.payment_status === 'PENDING';
                         
-                        // ⚡ ENTERPRISE FIX: Matrix styling (SLA Time + Payment Status)
-                        const slaClasses = getSlaClasses(order.createdAt as string, order.status, isTabOrder);
+                        const slaClasses = getSlaClasses(order, isTabOrder);
                         const isDelayed = getElapsedTimeMinutes(order.createdAt as string) >= 10 && order.status !== 'COMPLETED' && order.status !== 'CANCELLED';
 
                         return (
                             <div key={order.order_id} className={`flex flex-col h-full rounded-[1.5rem] md:rounded-[2rem] border-2 transition-all overflow-hidden ${slaClasses}`}>
-                                {/* CARD HEADER (Money) */}
+                                {/* CARD HEADER */}
                                 <div className={`px-4 py-3 md:px-5 md:py-4 flex justify-between items-center ${
                                     isTabOrder ? 'bg-purple-600 text-white' : 'bg-slate-900 text-white'
                                 }`}>
@@ -301,37 +309,44 @@ export default function LiveOrders() {
                                         {order.status}
                                     </div>
 
-                                    {/* ACTION BUTTONS */}
-                                    {order.status !== 'COMPLETED' && order.status !== 'CANCELLED' && (
+                                    {/* ⚡ THE FINANCIAL GATE (Action Buttons) */}
+                                    {!isFullyResolved && (
                                         <div className="flex flex-col gap-2 mt-auto">
-                                            {order.status === 'PENDING' && (
-                                                <button 
-                                                    onClick={() => updateOrderStatusMutation.mutate({ orderId: order.order_id, status: 'PREPARING' })}
-                                                    disabled={updateOrderStatusMutation.isPending}
-                                                    className="w-full py-3 md:py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm md:text-base rounded-xl transition-transform active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-indigo-200"
-                                                >
-                                                    Start Cooking <ArrowRight size={18} />
-                                                </button>
-                                            )}
-                                            {order.status === 'PREPARING' && (
-                                                <button 
-                                                    onClick={() => updateOrderStatusMutation.mutate({ orderId: order.order_id, status: 'READY' })}
-                                                    disabled={updateOrderStatusMutation.isPending}
-                                                    className="w-full py-3 md:py-4 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-sm md:text-base rounded-xl transition-transform active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-emerald-200"
-                                                >
-                                                    Mark Ready for Pickup <CheckCircle2 size={18} />
-                                                </button>
-                                            )}
-                                            {order.status === 'READY' && (
-                                                <button 
-                                                    onClick={() => updateOrderStatusMutation.mutate({ orderId: order.order_id, status: 'COMPLETED' })}
-                                                    disabled={updateOrderStatusMutation.isPending}
-                                                    className="w-full py-3 md:py-4 bg-slate-900 hover:bg-slate-800 text-white font-black text-sm md:text-base rounded-xl transition-transform active:scale-95 flex items-center justify-center gap-2 shadow-md"
-                                                >
-                                                    Complete Order <CheckCircle2 size={18} />
-                                                </button>
+                                            
+                                            {/* Kitchen Flow */}
+                                            {order.status !== 'COMPLETED' && (
+                                                <>
+                                                    {order.status === 'PENDING' && (
+                                                        <button 
+                                                            onClick={() => updateOrderStatusMutation.mutate({ orderId: order.order_id, status: 'PREPARING' })}
+                                                            disabled={updateOrderStatusMutation.isPending}
+                                                            className="w-full py-3 md:py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm md:text-base rounded-xl transition-transform active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-indigo-200"
+                                                        >
+                                                            Start Cooking <ArrowRight size={18} />
+                                                        </button>
+                                                    )}
+                                                    {order.status === 'PREPARING' && (
+                                                        <button 
+                                                            onClick={() => updateOrderStatusMutation.mutate({ orderId: order.order_id, status: 'READY' })}
+                                                            disabled={updateOrderStatusMutation.isPending}
+                                                            className="w-full py-3 md:py-4 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-sm md:text-base rounded-xl transition-transform active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-emerald-200"
+                                                        >
+                                                            Mark Ready for Pickup <CheckCircle2 size={18} />
+                                                        </button>
+                                                    )}
+                                                    {order.status === 'READY' && (
+                                                        <button 
+                                                            onClick={() => updateOrderStatusMutation.mutate({ orderId: order.order_id, status: 'COMPLETED' })}
+                                                            disabled={updateOrderStatusMutation.isPending}
+                                                            className="w-full py-3 md:py-4 bg-slate-900 hover:bg-slate-800 text-white font-black text-sm md:text-base rounded-xl transition-transform active:scale-95 flex items-center justify-center gap-2 shadow-md"
+                                                        >
+                                                            Mark Served <CheckCircle2 size={18} />
+                                                        </button>
+                                                    )}
+                                                </>
                                             )}
 
+                                            {/* Settlement Flow */}
                                             {order.payment_method === 'CASH' && order.payment_status === 'PENDING' && (
                                                 <button 
                                                     onClick={() => collectCashMutation.mutate(order.order_id)}
@@ -342,7 +357,14 @@ export default function LiveOrders() {
                                                 </button>
                                             )}
 
-                                            {['MANAGER', 'OWNER'].includes(user?.role || '') && (
+                                            {/* Tab Reminder for Floor Managers */}
+                                            {isAwaitingSettlement && order.payment_method === 'TAB' && (
+                                                <div className="w-full py-2.5 md:py-3 bg-purple-100 text-purple-800 border border-purple-200 font-bold text-xs md:text-sm rounded-xl flex items-center justify-center gap-2">
+                                                    <Lock size={16} /> Added to Open Tab
+                                                </div>
+                                            )}
+
+                                            {['MANAGER', 'OWNER'].includes(user?.role || '') && order.status !== 'COMPLETED' && (
                                                 <button 
                                                     onClick={() => setCancelModal({ isOpen: true, orderId: order.order_id })}
                                                     className="w-full py-2.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold text-xs md:text-sm rounded-xl transition-colors mt-2"
@@ -353,7 +375,6 @@ export default function LiveOrders() {
                                         </div>
                                     )}
 
-                                    {/* RECALL INFO */}
                                     {order.status === 'CANCELLED' && (
                                         <div className="mt-auto p-3 bg-red-50 border border-red-100 rounded-xl text-xs text-red-700 font-medium">
                                             <span className="font-bold block mb-1">Cancellation Reason:</span>
@@ -362,7 +383,6 @@ export default function LiveOrders() {
                                     )}
                                 </div>
                                 
-                                {/* EXPLICIT FOOTER BADGE */}
                                 <div className="px-4 py-3 bg-white/80 border-t border-slate-200/60 flex justify-between items-center backdrop-blur-sm">
                                     {isTabOrder ? (
                                         <span className="flex items-center gap-1.5 px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-[10px] font-black uppercase">
@@ -370,7 +390,7 @@ export default function LiveOrders() {
                                         </span>
                                     ) : (
                                         <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-[10px] font-black uppercase">
-                                            <CheckCircle2 size={12} /> {order.payment_method === 'CASH' && order.payment_status === 'PENDING' ? 'Cash Pending' : 'Confirmed'}
+                                            <CheckCircle2 size={12} /> {order.payment_method === 'CASH' && order.payment_status === 'PENDING' ? 'Cash Pending' : 'Paid'}
                                         </span>
                                     )}
                                     <span className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest">#{order.order_id.slice(-6)}</span>
