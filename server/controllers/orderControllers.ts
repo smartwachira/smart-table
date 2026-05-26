@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { Server } from 'socket.io';
+import axios from 'axios';
 import Order, { OrderStatus } from '../models/Order.js';
 import OrderItem from '../models/OrderItem.js';
 import MenuItem from '../models/MenuItem.js';
@@ -7,7 +8,6 @@ import sequelize from '../config/db.js';
 import { Op, literal } from 'sequelize';
 import Venue from '../models/Venue.js';
 import User from '../models/User.js';
-import axios from 'axios';
 
 interface OrderItemPayload {
     item_id: string;
@@ -33,15 +33,14 @@ interface HistoricalOrdersQuery {
 }
 
 interface SettleTabBody {
-    table_number: string;
+    table_number?: string;
     settlement_method: 'CASH' | 'CARD' | 'M-PESA';
-    orderIds: string[]; // ⚡ Fixed interface
-    phone?: string;     // ⚡ Fixed interface
-    provider?: string;  // ⚡ Fixed interface
+    orderIds?: string[];
+    phone?: string;
+    provider?: string;
 }
 
 export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Response): Promise<Response | void> => {
-    console.log("🕵️ EXTRACTED GUEST ID:", req.headers['x-guest-id']);
     const t = await sequelize.transaction(); 
 
     try {
@@ -83,7 +82,7 @@ export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Re
             const isTabAllowed = venue.tab_operating_mode === 'ENABLED_ALL' || 
                 (venue.tab_operating_mode === 'VIP_ONLY' && 
                  Array.isArray(venue.vip_tables) && 
-                 venue.vip_tables.map(t => t.toLowerCase()).includes(table_number.toLowerCase()));
+                 venue.vip_tables.map(t => t.toLowerCase()).includes(table_number.toLowerCase().trim()));
             
             if (!isTabAllowed) {
                 return res.status(403).json({ message: 'Open tabs are strictly not permitted for this table designation.' });
@@ -222,7 +221,7 @@ export const updateOrderStatus = async (req: Request<{orderId: string}, {}, upda
         const { status, cancelReason } = req.body;
         const venueId = req.user!.venueId;
 
-        const validStates = ['PENDING', 'PREPARING', 'READY', 'DELIVERED', 'COMPLETED', 'CANCELLED'];
+        const validStates = ['PENDING', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED'];
         
         if (!status) return res.status(400).json({ message: "Status is required." });
 
@@ -240,9 +239,12 @@ export const updateOrderStatus = async (req: Request<{orderId: string}, {}, upda
             return res.status(404).json({ message: 'Order not found' });
         }
 
-        if (upperStatus === 'COMPLETED' && order.payment_status !== 'PAID') {
+        // ⚡ SPRINT 21 FIX: Decoupling Fulfillment from Settlement
+        // Allow the kitchen/waiters to mark food as 'COMPLETED' (Served) if it is a TAB or CASH order.
+        // It will safely route to the "Awaiting Settlement" tab on the frontend.
+        if (upperStatus === 'COMPLETED' && order.payment_status !== 'PAID' && !['TAB', 'CASH'].includes(order.payment_method as string)) {
             return res.status(403).json({ 
-                message: "Order cannot be completed until payment is received (Mark as Cash Collected or Settle Tab via POS)." 
+                message: "Order cannot be marked served until the digital payment is successfully verified." 
             });
         }
 
@@ -306,7 +308,6 @@ export const markCashCollected = async (req: Request<{orderId: string}, {}>, res
         if (order.payment_status === 'PAID') return res.status(400).json({ message: 'Cash already collected' });
 
         order.payment_status = 'PAID';
-        order.status = 'COMPLETED';
         order.cash_collected_by = staffId; 
 
         const staffMember = await User.findByPk(staffId);
@@ -389,9 +390,7 @@ export const getGuestOrders = async (req: Request, res: Response): Promise<Respo
             return res.status(400).json({ message: "Missing x-guest-id header" });
         }
 
-        // Construct dynamic OR conditions to bridge the Device Context Gap
         const orConditions: any[] = [
-            // Condition 1: Orders originated purely from THIS specific phone
             { 
                 guest_session_id: guestSessionId,
                 [Op.or]: [
@@ -401,7 +400,6 @@ export const getGuestOrders = async (req: Request, res: Response): Promise<Respo
             }
         ];
 
-        // Condition 2: Waiter-originated "Add to Tab" orders targeting this guest's table
         if (req.guest?.venueId && req.guest?.tableName) {
             orConditions.push({
                 venue_id: req.guest.venueId,
@@ -433,6 +431,9 @@ export const getGuestOrders = async (req: Request, res: Response): Promise<Respo
     }
 };
 
+// ============================================================================
+// ⚡ SPRINT 21: POS CASH TAB SETTLEMENT
+// ============================================================================
 export const settleOpenTab = async (req: Request<{}, {}, SettleTabBody>, res: Response): Promise<Response | void> => {
     try {
         const venueId = req.user!.venueId;
@@ -462,6 +463,7 @@ export const settleOpenTab = async (req: Request<{}, {}, SettleTabBody>, res: Re
         await Order.update({
             payment_status: 'PAID',
             cash_collected_by: settlement_method === 'CASH' ? staffId : null,
+            payment_method: settlement_method, // Convert to actual payment method used
             notes: literal(`CONCAT(COALESCE(notes, ''), ' | Settled via ${settlement_method}')`)
         }, {
             where: { order_id: { [Op.in]: orderIds } }
@@ -483,97 +485,8 @@ export const settleOpenTab = async (req: Request<{}, {}, SettleTabBody>, res: Re
 };
 
 // ============================================================================
-// ⚡ SPRINT 21: GUEST DIGITAL TAB SETTLEMENT ENGINE
+// ⚡ SPRINT 21: POS DIGITAL TAB PAYMENT INITIALIZATION
 // ============================================================================
-export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res: Response): Promise<Response | void> => {
-    try {
-        const guestSessionId = req.headers['x-guest-id'] as string;
-        const { orderIds, settlement_method, phone, provider } = req.body;
-        
-        if (!guestSessionId || !orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
-            return res.status(400).json({ message: "Invalid payload or missing session context." });
-        }
-
-        // 1. Fetch all unpaid TAB orders for this guest
-        const orders = await Order.findAll({
-            where: {
-                order_id: { [Op.in]: orderIds },
-                guest_session_id: guestSessionId,
-                payment_status: 'PENDING',
-                payment_method: 'TAB',
-                status: { [Op.notIn]: ['CANCELLED'] }
-            },
-            include: [{ model: Venue, attributes: ['venue_id', 'gateway_subaccount_id', 'is_financially_onboarded', 'name'] }]
-        });
-
-        if (orders.length !== orderIds.length) {
-            return res.status(400).json({ message: "Some orders are already paid or invalid." });
-        }
-
-        const venue = (orders[0] as any).Venue;
-
-        // 2. SCENARIO A: Cash Settlement (Turn orders into CASH type)
-        if (settlement_method === 'CASH') {
-            await Order.update({ payment_method: 'CASH' }, { where: { order_id: { [Op.in]: orderIds } } });
-            
-            const io = req.app.get('socketio');
-            if (io) {
-                io.to(`venue:${venue.venue_id}`).emit('order:status_updated', { bulk: true });
-            }
-            return res.status(200).json({ message: "Cash collection requested.", method: 'CASH' });
-        }
-
-        // 3. SCENARIO B: Digital Settlement (Bundle and dispatch to Paystack)
-        const totalAmount = orders.reduce((sum, o) => sum + Number(o.total_amount), 0);
-        const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
-        
-        if (!paystackSecret || !venue.is_financially_onboarded) {
-            return res.status(500).json({ message: "Digital payments currently offline." });
-        }
-        
-        // 3a. Initialize Bank Card Iframe
-        if (settlement_method === 'CARD') {
-            const payload = {
-                email: "guest@smarttable.app",
-                amount: Math.round(totalAmount * 100),
-                currency: "KES",
-                subaccount: venue.gateway_subaccount_id,
-                metadata: { isTabSettlement: true, orderIds } // ⚡ BUNDLED METADATA
-            };
-            const response = await axios.post('https://api.paystack.co/transaction/initialize', payload, {
-                headers: { Authorization: `Bearer ${paystackSecret}`, 'Content-Type': 'application/json' }
-            });
-            return res.status(200).json({ method: 'CARD', access_code: response.data.data.access_code });
-        }
-
-        // 3b. Dispatch M-Pesa Push
-        if (settlement_method === 'M-PESA') {
-            let formattedPhone = phone!.replace(/\D/g, '');
-            if (formattedPhone.startsWith('0')) formattedPhone = '254' + formattedPhone.slice(1);
-            
-            const payload = {
-                email: "guest@smarttable.app",
-                amount: Math.round(totalAmount * 100),
-                currency: "KES",
-                subaccount: venue.gateway_subaccount_id,
-                mobile_money: { phone: formattedPhone, provider: provider || 'mpesa' },
-                metadata: { isTabSettlement: true, orderIds } // ⚡ BUNDLED METADATA
-            };
-            const response = await axios.post('https://api.paystack.co/charge', payload, {
-                headers: { Authorization: `Bearer ${paystackSecret}`, 'Content-Type': 'application/json' }
-            });
-            return res.status(200).json({ method: 'M-PESA', message: "Prompt dispatched." });
-        }
-
-        return res.status(400).json({ message: "Invalid payment method." });
-
-    } catch (error: any) {
-        console.error("Guest Tab Checkout Error:", error?.response?.data || error.message);
-        return res.status(500).json({ message: "Failed to process tab checkout." });
-    }
-};
-
-// ⚡ SPRINT 21: Staff POS Tab Settlement Initialization
 export const initTabPayment = async (req: Request<{}, {}, SettleTabBody>, res: Response): Promise<Response | void> => {
     try {
         const venueId = req.user!.venueId;
@@ -600,14 +513,102 @@ export const initTabPayment = async (req: Request<{}, {}, SettleTabBody>, res: R
                 metadata: { isTabSettlement: true, orderIds } 
             };
             const response = await axios.post('https://api.paystack.co/transaction/initialize', payload, {
-                headers: { Authorization: `Bearer ${paystackSecret}` }
+                headers: { Authorization: `Bearer ${paystackSecret}`, 'Content-Type': 'application/json' }
             });
             return res.status(200).json({ access_code: response.data.data.access_code });
         }
         
-        // ... (Optional: Handle M-PESA logic here)
     } catch (error: any) {
         console.error("Init Tab Payment Error:", error);
         res.status(500).json({ message: "Failed to initialize tab payment" });
+    }
+};
+
+// ============================================================================
+// ⚡ SPRINT 21: GUEST DIGITAL TAB SETTLEMENT ENGINE
+// ============================================================================
+export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res: Response): Promise<Response | void> => {
+    try {
+        const guestSessionId = req.headers['x-guest-id'] as string;
+        const { orderIds, settlement_method, phone, provider } = req.body;
+        
+        if (!guestSessionId || !orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+            return res.status(400).json({ message: "Invalid payload or missing session context." });
+        }
+
+        const orders = await Order.findAll({
+            where: {
+                order_id: { [Op.in]: orderIds },
+                guest_session_id: guestSessionId,
+                payment_status: 'PENDING',
+                payment_method: 'TAB',
+                status: { [Op.notIn]: ['CANCELLED'] }
+            },
+            include: [{ model: Venue, attributes: ['venue_id', 'gateway_subaccount_id', 'is_financially_onboarded', 'name'] }]
+        });
+
+        if (orders.length !== orderIds.length) {
+            return res.status(400).json({ message: "Some orders are already paid or invalid." });
+        }
+
+        const venue = (orders[0] as any).Venue;
+
+        // SCENARIO A: Cash Settlement (Turn orders into CASH type)
+        if (settlement_method === 'CASH') {
+            await Order.update({ payment_method: 'CASH' }, { where: { order_id: { [Op.in]: orderIds } } });
+            
+            const io = req.app.get('socketio');
+            if (io) {
+                io.to(`venue:${venue.venue_id}`).emit('order:status_updated', { bulk: true });
+                orderIds.forEach(id => io.to(`order:${id}`).emit('order:status_updated', {}));
+            }
+            return res.status(200).json({ message: "Cash collection requested.", method: 'CASH' });
+        }
+
+        // SCENARIO B: Digital Settlement (Bundle and dispatch to Paystack)
+        const totalAmount = orders.reduce((sum, o) => sum + Number(o.total_amount), 0);
+        const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
+        
+        if (!paystackSecret || !venue.is_financially_onboarded) {
+            return res.status(500).json({ message: "Digital payments currently offline." });
+        }
+        
+        if (settlement_method === 'CARD') {
+            const payload = {
+                email: "guest@smarttable.app",
+                amount: Math.round(totalAmount * 100),
+                currency: "KES",
+                subaccount: venue.gateway_subaccount_id,
+                metadata: { isTabSettlement: true, orderIds } 
+            };
+            const response = await axios.post('https://api.paystack.co/transaction/initialize', payload, {
+                headers: { Authorization: `Bearer ${paystackSecret}`, 'Content-Type': 'application/json' }
+            });
+            return res.status(200).json({ method: 'CARD', access_code: response.data.data.access_code });
+        }
+
+        if (settlement_method === 'M-PESA') {
+            let formattedPhone = phone!.replace(/\D/g, '');
+            if (formattedPhone.startsWith('0')) formattedPhone = '254' + formattedPhone.slice(1);
+            
+            const payload = {
+                email: "guest@smarttable.app",
+                amount: Math.round(totalAmount * 100),
+                currency: "KES",
+                subaccount: venue.gateway_subaccount_id,
+                mobile_money: { phone: formattedPhone, provider: provider || 'mpesa' },
+                metadata: { isTabSettlement: true, orderIds } 
+            };
+            const response = await axios.post('https://api.paystack.co/charge', payload, {
+                headers: { Authorization: `Bearer ${paystackSecret}`, 'Content-Type': 'application/json' }
+            });
+            return res.status(200).json({ method: 'M-PESA', message: "Prompt dispatched." });
+        }
+
+        return res.status(400).json({ message: "Invalid payment method." });
+
+    } catch (error: any) {
+        console.error("Guest Tab Checkout Error:", error?.response?.data || error.message);
+        return res.status(500).json({ message: "Failed to process tab checkout." });
     }
 };
