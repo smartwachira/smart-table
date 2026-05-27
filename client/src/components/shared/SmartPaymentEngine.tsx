@@ -54,13 +54,13 @@ interface SmartPaymentEngineProps {
     onSuccessCallback: () => void;
 }
 
-type PaymentTrack = 'CARD' | 'M-PESA' | null;
+type PaymentTrack = 'CARD' | 'MOBILE_MONEY' | null;
 
 export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, venueId, onSuccessCallback }: SmartPaymentEngineProps) {
     // UI Bifurcation State
     const [activeTrack, setActiveTrack] = useState<PaymentTrack>(null);
     const [phone, setPhone] = useState('');
-    // ⚡ Localized to Kenya
+    // ⚡ KENYA MARKET: Strictly M-Pesa and Airtel
     const [mobileProvider, setMobileProvider] = useState<'mpesa' | 'airtel'>('mpesa');
     
     // Encapsulated Gateway State
@@ -107,8 +107,8 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
     // ============================================================================
     // ⚡ UNIFIED API EXECUTOR
     // ============================================================================
-    const handleInitiatePayment = async (method: 'CARD' | 'M-PESA') => {
-        if (method === 'M-PESA' && phone.length < 9) return toast.error("Valid phone number required.");
+    const handleInitiatePayment = async (method: 'CARD' | 'MOBILE_MONEY') => {
+        if (method === 'MOBILE_MONEY' && phone.length < 9) return toast.error("Valid Kenyan phone number required.");
         
         setIsProcessing(true);
         try {
@@ -117,21 +117,26 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
             const headers = isGuest ? { 'x-guest-id': token } : { Authorization: `Bearer ${token}` };
             
             const endpoint = isGuest ? '/api/orders/tabs/guest-checkout' : '/api/orders/tabs/init-payment';
-            
+
+            // ⚡ THE FIX: Explicitly route the provider while maintaining backend compatibility
             const payload = {
                 orderIds,
-                settlement_method: method,
-                phone: method === 'M-PESA' ? phone : undefined,
-                provider: method === 'M-PESA' ? mobileProvider : undefined
+                // Backend currently expects 'M-PESA' as the master string for the Mobile Money block
+                settlement_method: method === 'MOBILE_MONEY' ? 'M-PESA' : 'CARD',
+                phone: method === 'MOBILE_MONEY' ? phone : undefined,
+                // Paystack uses this provider field to determine if it sends an M-Pesa STK or Airtel USSD Push
+                provider: method === 'MOBILE_MONEY' ? mobileProvider : undefined 
             };
 
             const { data } = await axios.post(endpoint, payload, { headers });
 
             if (method === 'CARD') {
                 setPaystackAccessCode(data.access_code);
-            } else if (method === 'M-PESA') {
+            } else if (method === 'MOBILE_MONEY') {
                 setActiveTransactionPhase('AWAITING_PROMPT');
-                toast.success("Mobile Money prompt dispatched!");
+                // Dynamically announce the correct Telco network
+                const networkName = mobileProvider === 'airtel' ? 'Airtel Money' : 'M-Pesa';
+                toast.success(`${networkName} prompt dispatched!`);
             }
         } catch (error: any) {
             console.error("Payment Engine Error:", error);
@@ -139,7 +144,6 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
             setIsProcessing(false);
         }
     };
-
     const handleClose = () => {
         setActiveTrack(null);
         setPhone('');
@@ -171,6 +175,9 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
                     </p>
                 </div>
 
+                {/* ============================================================================ */}
+                {/* ⚡ UI BIFURCATION: PROGRESSIVE DISCLOSURE */}
+                {/* ============================================================================ */}
                 <div className="space-y-4 relative">
                     
                     {/* OVERLAYS */}
@@ -189,7 +196,7 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
                                 <Smartphone size={20} className="text-emerald-600 animate-pulse" />
                             </div>
                             <h3 className="text-xl font-black text-slate-900">Check your phone</h3>
-                            <p className="text-slate-500 text-sm text-center mt-2 px-6 font-medium">Enter your Mobile Money PIN on the prompt sent to your device.</p>
+                            <p className="text-slate-500 text-sm text-center mt-2 px-6 font-medium">Enter your PIN on the prompt sent to your device.</p>
                         </div>
                     )}
 
@@ -216,35 +223,35 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
                         </button>
                     )}
 
-                    {/* TRACK B: MOBILE MONEY */}
-                    {(activeTrack === null || activeTrack === 'M-PESA') && (
-                        <div className={`overflow-hidden transition-all duration-500 border ${activeTrack === 'M-PESA' ? 'border-emerald-200 bg-emerald-50/50 rounded-3xl p-5' : 'border-slate-200 hover:border-emerald-200 bg-white hover:bg-emerald-50/30 rounded-2xl p-4 cursor-pointer group'}`}
-                             onClick={() => !activeTrack && setActiveTrack('M-PESA')}
+                    {/* TRACK B: MOBILE MONEY (KENYA FOCUS) */}
+                    {(activeTrack === null || activeTrack === 'MOBILE_MONEY') && (
+                        <div className={`overflow-hidden transition-all duration-500 border ${activeTrack === 'MOBILE_MONEY' ? 'border-emerald-200 bg-emerald-50/50 rounded-3xl p-5' : 'border-slate-200 hover:border-emerald-200 bg-white hover:bg-emerald-50/30 rounded-2xl p-4 cursor-pointer group'}`}
+                             onClick={() => !activeTrack && setActiveTrack('MOBILE_MONEY')}
                         >
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-4">
-                                    <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-sm transition-colors ${activeTrack === 'M-PESA' ? 'bg-emerald-500 text-white' : 'bg-emerald-50 text-emerald-600'}`}>
+                                    <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-sm transition-colors ${activeTrack === 'MOBILE_MONEY' ? 'bg-emerald-500 text-white' : 'bg-emerald-50 text-emerald-600'}`}>
                                         <Smartphone size={24} />
                                     </div>
                                     <div className="text-left">
                                         <span className="block font-black text-lg leading-tight text-slate-900">Mobile Money</span>
-                                        <span className="text-xs text-emerald-600/70 font-bold uppercase tracking-wider">M-Pesa • Airtel Money</span>
+                                        <span className="text-xs text-emerald-600/70 font-bold uppercase tracking-wider">M-Pesa • Airtel</span>
                                     </div>
                                 </div>
                                 {!activeTrack && <ChevronRight size={24} className="text-slate-400 group-hover:text-emerald-500 group-hover:translate-x-1 transition-all"/>}
                             </div>
 
                             {/* Expanded Progressive Disclosure Form */}
-                            {activeTrack === 'M-PESA' && (
+                            {activeTrack === 'MOBILE_MONEY' && (
                                 <div className="mt-6 space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
                                     <div className="flex gap-2">
-                                        <button onClick={() => setMobileProvider('mpesa')} className={`flex-1 py-3 rounded-xl text-xs font-black tracking-wider uppercase border-2 transition-all ${mobileProvider === 'mpesa' ? 'border-emerald-500 bg-emerald-500 text-white shadow-md shadow-emerald-500/20' : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200'}`}>M-Pesa</button>
-                                        <button onClick={() => setMobileProvider('airtel')} className={`flex-1 py-3 rounded-xl text-xs font-black tracking-wider uppercase border-2 transition-all ${mobileProvider === 'airtel' ? 'border-red-500 bg-red-500 text-white shadow-md shadow-red-500/20' : 'border-slate-200 bg-white text-slate-500 hover:border-red-200'}`}>Airtel</button>
+                                        <button onClick={() => setMobileProvider('mpesa')} className={`flex-1 py-2.5 rounded-xl text-xs font-black tracking-wider uppercase border-2 transition-all ${mobileProvider === 'mpesa' ? 'border-emerald-500 bg-emerald-500 text-white shadow-md shadow-emerald-500/20' : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200'}`}>M-Pesa</button>
+                                        <button onClick={() => setMobileProvider('airtel')} className={`flex-1 py-2.5 rounded-xl text-xs font-black tracking-wider uppercase border-2 transition-all ${mobileProvider === 'airtel' ? 'border-red-500 bg-red-500 text-white shadow-md shadow-red-500/20' : 'border-slate-200 bg-white text-slate-500 hover:border-red-200'}`}>Airtel Money</button>
                                     </div>
 
                                     <input 
                                         type="tel" 
-                                        placeholder="Mobile Number (07XX...)" 
+                                        placeholder="Mobile (07XX... / 01XX...)" 
                                         value={phone}
                                         onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
                                         disabled={isProcessing}
@@ -252,7 +259,7 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
                                     />
                                     
                                     <button 
-                                        onClick={() => handleInitiatePayment('M-PESA')}
+                                        onClick={() => handleInitiatePayment('MOBILE_MONEY')}
                                         disabled={isProcessing || phone.length < 9}
                                         className="w-full py-4 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-lg rounded-2xl active:scale-[0.98] transition-all disabled:opacity-50 shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
                                     >
