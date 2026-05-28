@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { io, Socket } from 'socket.io-client';
@@ -43,6 +43,14 @@ const NativePaystackLauncher = ({ accessCode, onSuccess, onClose }: { accessCode
 };
 
 // ============================================================================
+// ⚡ UTILITIES & VALIDATION
+// ============================================================================
+const validateKenyanPhone = (phoneNumber: string) => {
+    const regex = /^(?:254|\+254|0)?([17]\d{8})$/;
+    return regex.test(phoneNumber.trim());
+};
+
+// ============================================================================
 // ⚡ STRICT PROPS SIGNATURE
 // ============================================================================
 interface SmartPaymentEngineProps {
@@ -60,13 +68,15 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
     // UI Bifurcation State
     const [activeTrack, setActiveTrack] = useState<PaymentTrack>(null);
     const [phone, setPhone] = useState('');
-    // ⚡ KENYA MARKET: Strictly M-Pesa and Airtel
     const [mobileProvider, setMobileProvider] = useState<'mpesa' | 'airtel'>('mpesa');
     
     // Encapsulated Gateway State
     const [isProcessing, setIsProcessing] = useState(false);
     const [paystackAccessCode, setPaystackAccessCode] = useState<string>('');
     const [activeTransactionPhase, setActiveTransactionPhase] = useState<'IDLE' | 'AWAITING_PROMPT' | 'SUCCESS'>('IDLE');
+
+    // 🛡️ FIX: Changed from NodeJS.Timeout to standard dynamic return type evaluation
+    const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // ============================================================================
     // ⚡ ENCAPSULATED SOCKET LISTENER
@@ -79,12 +89,13 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
             auth: token ? { token } : {}
         });
 
-        orderIds.forEach(id => socket.emit('join_order_room', id));
+        socket.emit('join_order_rooms', { orderIds });
 
         socket.on('payment:completed', (data) => {
             if (data.bulk || orderIds.includes(data.orderId)) {
                 setActiveTransactionPhase('SUCCESS');
-                setTimeout(() => {
+                
+                successTimeoutRef.current = setTimeout(() => {
                     onSuccessCallback();
                     handleClose();
                 }, 2000);
@@ -100,6 +111,7 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
         });
 
         return () => {
+            if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
             socket.disconnect();
         };
     }, [isOpen, venueId, orderIds]);
@@ -108,7 +120,9 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
     // ⚡ UNIFIED API EXECUTOR
     // ============================================================================
     const handleInitiatePayment = async (method: 'CARD' | 'MOBILE_MONEY') => {
-        if (method === 'MOBILE_MONEY' && phone.length < 9) return toast.error("Valid Kenyan phone number required.");
+        if (method === 'MOBILE_MONEY' && !validateKenyanPhone(phone)) {
+            return toast.error("Please enter a valid Kenyan phone number (e.g., 07XX... or 01XX...)");
+        }
         
         setIsProcessing(true);
         try {
@@ -118,13 +132,10 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
             
             const endpoint = isGuest ? '/api/orders/tabs/guest-checkout' : '/api/orders/tabs/init-payment';
 
-            // ⚡ THE FIX: Explicitly route the provider while maintaining backend compatibility
             const payload = {
                 orderIds,
-                // Backend currently expects 'M-PESA' as the master string for the Mobile Money block
                 settlement_method: method === 'MOBILE_MONEY' ? 'M-PESA' : 'CARD',
                 phone: method === 'MOBILE_MONEY' ? phone : undefined,
-                // Paystack uses this provider field to determine if it sends an M-Pesa STK or Airtel USSD Push
                 provider: method === 'MOBILE_MONEY' ? mobileProvider : undefined 
             };
 
@@ -134,7 +145,6 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
                 setPaystackAccessCode(data.access_code);
             } else if (method === 'MOBILE_MONEY') {
                 setActiveTransactionPhase('AWAITING_PROMPT');
-                // Dynamically announce the correct Telco network
                 const networkName = mobileProvider === 'airtel' ? 'Airtel Money' : 'M-Pesa';
                 toast.success(`${networkName} prompt dispatched!`);
             }
@@ -144,6 +154,7 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
             setIsProcessing(false);
         }
     };
+
     const handleClose = () => {
         setActiveTrack(null);
         setPhone('');
@@ -161,7 +172,6 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
             
             <div className="relative w-full md:max-w-md bg-white rounded-t-[2rem] md:rounded-[2rem] p-6 shadow-2xl animate-in slide-in-from-bottom-10 md:zoom-in-95 duration-300 overflow-hidden">
                 
-                {/* Header */}
                 {!isProcessing && (
                     <button onClick={handleClose} className="absolute top-4 right-4 w-10 h-10 bg-slate-100 flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-200 transition-colors">
                         <X size={20}/>
@@ -175,12 +185,7 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
                     </p>
                 </div>
 
-                {/* ============================================================================ */}
-                {/* ⚡ UI BIFURCATION: PROGRESSIVE DISCLOSURE */}
-                {/* ============================================================================ */}
                 <div className="space-y-4 relative">
-                    
-                    {/* OVERLAYS */}
                     {activeTransactionPhase === 'SUCCESS' && (
                         <div className="absolute inset-0 z-20 bg-white flex flex-col items-center justify-center animate-in fade-in zoom-in-95">
                             <CheckCircle2 size={64} className="text-emerald-500 mb-4" />
@@ -200,7 +205,6 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
                         </div>
                     )}
 
-                    {/* TRACK A: BANK CARD */}
                     {(activeTrack === null || activeTrack === 'CARD') && (
                         <button 
                             onClick={() => {
@@ -223,7 +227,6 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
                         </button>
                     )}
 
-                    {/* TRACK B: MOBILE MONEY (KENYA FOCUS) */}
                     {(activeTrack === null || activeTrack === 'MOBILE_MONEY') && (
                         <div className={`overflow-hidden transition-all duration-500 border ${activeTrack === 'MOBILE_MONEY' ? 'border-emerald-200 bg-emerald-50/50 rounded-3xl p-5' : 'border-slate-200 hover:border-emerald-200 bg-white hover:bg-emerald-50/30 rounded-2xl p-4 cursor-pointer group'}`}
                              onClick={() => !activeTrack && setActiveTrack('MOBILE_MONEY')}
@@ -241,7 +244,6 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
                                 {!activeTrack && <ChevronRight size={24} className="text-slate-400 group-hover:text-emerald-500 group-hover:translate-x-1 transition-all"/>}
                             </div>
 
-                            {/* Expanded Progressive Disclosure Form */}
                             {activeTrack === 'MOBILE_MONEY' && (
                                 <div className="mt-6 space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
                                     <div className="flex gap-2">
@@ -260,7 +262,7 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
                                     
                                     <button 
                                         onClick={() => handleInitiatePayment('MOBILE_MONEY')}
-                                        disabled={isProcessing || phone.length < 9}
+                                        disabled={isProcessing || !validateKenyanPhone(phone)}
                                         className="w-full py-4 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-lg rounded-2xl active:scale-[0.98] transition-all disabled:opacity-50 shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
                                     >
                                         {isProcessing ? <Loader2 size={24} className="animate-spin" /> : 'Send Prompt to Phone'}
@@ -278,7 +280,6 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
                 </div>
             </div>
 
-            {/* ⚡ PAYSTACK NATIVE LAUNCHER */}
             {paystackAccessCode && (
                 <NativePaystackLauncher 
                     accessCode={paystackAccessCode}

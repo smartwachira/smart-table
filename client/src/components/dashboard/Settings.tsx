@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { toast } from 'sonner';
-import { Store, CreditCard, Sliders, Save, Loader2, Power, ImagePlus, Wifi, Building, ShieldCheck, Smartphone, Landmark } from 'lucide-react';
+import { 
+    Store, CreditCard, Sliders, Save, Loader2, Power, 
+    ImagePlus, Wifi, Building, ShieldCheck, Smartphone, Landmark, Edit3, X, ShieldAlert
+} from 'lucide-react'; // ⚡ FIX: Replaced non-existent AlertShield with ShieldAlert
 import { useAuth } from '../../context/AuthContext';
 import { useSettingsStore } from '../../store/useSettingsStore'; 
 
-// ⚡ IMPORT THE CUSTOM HOOKS AND TYPES
+// ⚡ IMPORT CUSTOM HOOKS
 import { 
     useFetchSettings, useUpdateSettings, useUploadLogo, useOnboardSubaccount,
     VenueSettingsFormData, getImageUrl 
@@ -37,6 +40,9 @@ export default function Settings() {
         tab_operating_mode: 'DISABLED', vip_tables: []
     });
 
+    const [vipTablesInput, setVipTablesInput] = useState<string>('');
+
+    // Payout State
     const [payoutChannel, setPayoutChannel] = useState<'MPESA' | 'BANK'>('MPESA');
     const [mpesaType, setMpesaType] = useState<'TILL' | 'PAYBILL'>('TILL');
     const [payoutForm, setPayoutForm] = useState({ 
@@ -45,8 +51,9 @@ export default function Settings() {
         paybill_account: '' 
     });
 
+    const [isEditingPayout, setIsEditingPayout] = useState(false);
+
     const { data: venueSettings, isLoading } = useFetchSettings(venueId);
-    
     const saveSettingsMutation = useUpdateSettings(venueId);
     const uploadLogoMutation = useUploadLogo(venueId);
     const onboardSubaccountMutation = useOnboardSubaccount(venueId);
@@ -60,6 +67,7 @@ export default function Settings() {
                 tab_operating_mode: (venueSettings as any).tab_operating_mode || 'DISABLED',
                 vip_tables: Array.isArray((venueSettings as any).vip_tables) ? (venueSettings as any).vip_tables : []
             });
+            setVipTablesInput(Array.isArray((venueSettings as any).vip_tables) ? (venueSettings as any).vip_tables.join(', ') : '');
             setLogoPreview(venueSettings.logo_url ? getImageUrl(venueSettings.logo_url) : null);
         }
     }, [venueSettings]);
@@ -84,22 +92,51 @@ export default function Settings() {
         });
     };
 
+    const handleSaveSettings = (e: React.FormEvent) => {
+        e.preventDefault();
+        
+        const cleanVipTables = vipTablesInput
+            .split(',')
+            .map(t => t.trim())
+            .filter(t => t.length > 0); 
+
+        saveSettingsMutation.mutate({
+            ...formData,
+            vip_tables: cleanVipTables
+        } as any, {
+            onSuccess: () => toast.success("Venue settings updated!")
+        });
+    };
+
+    const handleEditPayoutClick = () => {
+        setIsEditingPayout(true);
+        
+        if (venueSettings?.settlement_bank === 'MPTILL' || venueSettings?.settlement_bank === 'MPPAYBILL') {
+            setPayoutChannel('MPESA');
+            setMpesaType(venueSettings.settlement_bank === 'MPTILL' ? 'TILL' : 'PAYBILL');
+        } else if (venueSettings?.settlement_bank) {
+            setPayoutChannel('BANK');
+            const bank = KENYAN_BANKS.find(b => b.code === venueSettings.settlement_bank);
+            if (bank) setPayoutForm(prev => ({ ...prev, bank_code: bank.code }));
+        }
+    };
+
     const handleSubaccountOnboard = (e: React.FormEvent) => {
         e.preventDefault();
         
         let finalSettlementBank = '';
-        let finalAccountNumber = payoutForm.account_number;
+        let finalAccountNumber = payoutForm.account_number.trim();
 
         if (payoutChannel === 'MPESA') {
             finalSettlementBank = mpesaType === 'TILL' ? 'MPTILL' : 'MPPAYBILL'; 
-            if (payoutForm.account_number.length < 5) return toast.error("Business number must be at least 5 digits.");
+            if (finalAccountNumber.length < 5) return toast.error("Business number must be at least 5 digits.");
             
-            if (mpesaType === 'PAYBILL' && payoutForm.paybill_account) {
-                finalAccountNumber = `${payoutForm.account_number}-${payoutForm.paybill_account}`;
+            if (mpesaType === 'PAYBILL' && payoutForm.paybill_account.trim()) {
+                finalAccountNumber = `${finalAccountNumber}-${payoutForm.paybill_account.trim()}`;
             }
         } else {
             finalSettlementBank = payoutForm.bank_code;
-            if (payoutForm.account_number.length < 8) return toast.error("Please enter a valid bank account number.");
+            if (finalAccountNumber.length < 8) return toast.error("Please enter a valid bank account number.");
         }
         
         onboardSubaccountMutation.mutate({
@@ -108,6 +145,8 @@ export default function Settings() {
         }, {
             onSuccess: () => {
                 setPayoutForm({ bank_code: KENYAN_BANKS[0].code, account_number: '', paybill_account: '' });
+                setIsEditingPayout(false); 
+                toast.success("Account successfully linked!");
             }
         });
     };
@@ -131,21 +170,21 @@ export default function Settings() {
             <div className="flex flex-col md:flex-row gap-6 md:gap-8">
                 
                 <aside className="w-full md:w-64 shrink-0 flex overflow-x-auto md:flex-col gap-2 custom-scrollbar pb-2 md:pb-0">
-                    <button onClick={() => setActiveTab('profile')} className={`shrink-0 md:w-full flex items-center gap-3 px-4 py-3 rounded-2xl font-bold transition-all ${activeTab === 'profile' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
+                    <button type="button" onClick={() => setActiveTab('profile')} className={`shrink-0 md:w-full flex items-center gap-3 px-4 py-3 rounded-2xl font-bold transition-all ${activeTab === 'profile' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
                         <Store size={20} /> Venue Profile
                     </button>
-                    <button onClick={() => setActiveTab('operations')} className={`shrink-0 md:w-full flex items-center gap-3 px-4 py-3 rounded-2xl font-bold transition-all ${activeTab === 'operations' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
+                    <button type="button" onClick={() => setActiveTab('operations')} className={`shrink-0 md:w-full flex items-center gap-3 px-4 py-3 rounded-2xl font-bold transition-all ${activeTab === 'operations' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
                         <Sliders size={20} /> Operations
                     </button>
-                    <button onClick={() => setActiveTab('billing')} className={`shrink-0 md:w-full flex items-center gap-3 px-4 py-3 rounded-2xl font-bold transition-all ${activeTab === 'billing' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
+                    <button type="button" onClick={() => setActiveTab('billing')} className={`shrink-0 md:w-full flex items-center gap-3 px-4 py-3 rounded-2xl font-bold transition-all ${activeTab === 'billing' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}>
                         <CreditCard size={20} /> Billing & Payouts
                     </button>
                 </aside>
 
                 <main className="flex-1">
                     {(activeTab === 'profile' || activeTab === 'operations') && (
-                        <form onSubmit={(e) => { e.preventDefault(); saveSettingsMutation.mutate(formData as any); }} className="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-5 md:p-8">
-
+                        <form onSubmit={handleSaveSettings} className="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-5 md:p-8">
+                            
                             {activeTab === 'profile' && (
                                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
                                     <h2 className="text-xl font-black text-slate-900 border-b border-slate-100 pb-4">Basic Information</h2>
@@ -248,7 +287,6 @@ export default function Settings() {
                                         </div>
                                     </div>
 
-                                    {/* ⚡ NEW: OPEN TAB ARCHITECTURE CONFIGURATION */}
                                     <div className="space-y-6 pt-6 border-t border-slate-100">
                                         <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
                                             <ShieldCheck size={20} className="text-purple-600" /> Open Tab Strategy
@@ -281,8 +319,8 @@ export default function Settings() {
                                                 <input 
                                                     type="text" 
                                                     placeholder="e.g. VIP1, VIP2, CABANA-A (Separated by commas)"
-                                                    value={Array.isArray(formData.vip_tables) ? formData.vip_tables.join(', ') : ''}
-                                                    onChange={(e) => setFormData({ ...formData, vip_tables: e.target.value.split(',').map(t => t.trim()) })}
+                                                    value={vipTablesInput}
+                                                    onChange={(e) => setVipTablesInput(e.target.value)}
                                                     className="w-full bg-white border border-amber-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-amber-500 outline-none"
                                                 />
                                                 <p className="text-[11px] text-amber-700 mt-2 font-medium italic">
@@ -307,7 +345,7 @@ export default function Settings() {
                         <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-5 md:p-8 animate-in fade-in slide-in-from-right-4 duration-300">
                             <h2 className="text-xl font-black text-slate-900 border-b border-slate-100 pb-4 mb-6">Financial Payouts</h2>
                             
-                            {venueSettings?.is_financially_onboarded ? (
+                            {venueSettings?.is_financially_onboarded && !isEditingPayout ? (
                                 <div className="bg-emerald-50 border border-emerald-200 p-6 md:p-8 rounded-2xl flex flex-col items-center justify-center text-center space-y-4 shadow-inner">
                                     <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-2 shadow-sm">
                                         <ShieldCheck size={32} />
@@ -320,25 +358,53 @@ export default function Settings() {
                                     <div className="w-full max-w-xs bg-white border border-emerald-100 rounded-xl p-4 mt-4 flex justify-between items-center shadow-sm">
                                         <div className="flex flex-col text-left">
                                             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Settlement Route</span>
-                                            <span className="font-black text-slate-800">{venueSettings.settlement_bank}</span>
+                                            <span className="font-black text-slate-800">{venueSettings.settlement_bank === 'MPTILL' || venueSettings.settlement_bank === 'MPPAYBILL' ? 'M-PESA' : venueSettings.settlement_bank}</span>
                                         </div>
                                         <div className="text-right">
                                             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Masked Account</span>
                                             <span className="font-mono font-bold text-slate-600 block pt-0.5">**** {venueSettings.account_number_last_4}</span>
                                         </div>
                                     </div>
+
+                                    <button 
+                                        type="button" 
+                                        onClick={handleEditPayoutClick} 
+                                        className="mt-4 px-6 py-2.5 bg-white border border-emerald-200 text-emerald-700 rounded-xl font-bold hover:bg-emerald-100 transition-all flex items-center gap-2 active:scale-95 shadow-sm"
+                                    >
+                                        <Edit3 size={16} /> Update Payout Details
+                                    </button>
                                 </div>
                             ) : (
                                 <div className="space-y-6">
                                     <div className="bg-indigo-50 border border-indigo-100 p-5 rounded-2xl flex items-start gap-4">
                                         <Building className="text-indigo-600 shrink-0 mt-1" size={24} />
-                                        <div>
-                                            <h4 className="font-bold text-indigo-900">Activate Digital Payments</h4>
+                                        <div className="flex-1">
+                                            <div className="flex justify-between items-start">
+                                                <h4 className="font-bold text-indigo-900">
+                                                    {venueSettings?.is_financially_onboarded ? 'Update Payout Details' : 'Activate Digital Payments'}
+                                                </h4>
+                                                
+                                                {venueSettings?.is_financially_onboarded && (
+                                                    <button type="button" onClick={() => setIsEditingPayout(false)} className="text-indigo-400 hover:text-indigo-700 bg-white rounded-full p-1 shadow-sm transition-colors">
+                                                        <X size={16} />
+                                                    </button>
+                                                )}
+                                            </div>
                                             <p className="text-sm text-indigo-700 mt-1 leading-relaxed">
                                                 Provide your business settlement details below to enable M-Pesa and Card processing. Your funds are settled directly to this account minus the standard SmartTable platform fee.
                                             </p>
                                         </div>
                                     </div>
+
+                                    {isEditingPayout && (
+                                        <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-start gap-3">
+                                            <ShieldAlert className="text-amber-600 shrink-0" size={20} />
+                                            <div>
+                                                <p className="text-sm font-bold text-amber-800">Security Verification</p>
+                                                <p className="text-xs text-amber-700 mt-0.5">For your security, full account numbers are hidden. To update your payout destination, please re-enter your complete details.</p>
+                                            </div>
+                                        </div>
+                                    )}
 
                                     <form onSubmit={handleSubaccountOnboard} className="space-y-6">
                                         <div className="space-y-3">
@@ -440,7 +506,7 @@ export default function Settings() {
                                             className="w-full py-4 bg-slate-900 hover:bg-slate-800 disabled:opacity-70 text-white rounded-2xl font-black transition-all active:scale-[0.98] flex items-center justify-center gap-2 mt-4"
                                         >
                                             {onboardSubaccountMutation.isPending ? <Loader2 size={20} className="animate-spin" /> : <ShieldCheck size={20} />}
-                                            Securely Connect Payout Account
+                                            {venueSettings?.is_financially_onboarded ? 'Securely Update Payout Account' : 'Securely Connect Payout Account'}
                                         </button>
                                         <p className="text-center text-xs text-slate-400 font-medium">Secured & compliant via Paystack PCI-DSS & ODPC infrastructure.</p>
                                     </form>

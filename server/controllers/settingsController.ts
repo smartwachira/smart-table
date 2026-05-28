@@ -10,7 +10,6 @@ interface UpdateSettingsBody {
     allow_cash_payments?: boolean;
     wifi_ssid?: string;
     wifi_password?: string;
-    // ⚡ SPRINT 20: Open Tab Configuration
     tab_operating_mode?: 'DISABLED' | 'ENABLED_ALL' | 'VIP_ONLY' | string;
     vip_tables?: string[];
 }
@@ -18,6 +17,7 @@ interface UpdateSettingsBody {
 export const getVenueSettings = async (req: Request, res: Response): Promise<Response | void> => {
     try {
         const venueId = req.user!.venueId; 
+        // ⚡ FIX: Removed the global exclusion, so gateway_subaccount_id, settlement_bank, etc., are safely exposed to the owner dashboard.
         const venue = await Venue.findByPk(venueId, {
             attributes: { exclude: ['createdAt','updatedAt'] }
         });
@@ -36,7 +36,7 @@ export const updateVenueSettings = async (req: Request<{}, {}, UpdateSettingsBod
         const { 
             name, location, phone_number, tax_rate, is_accepting_orders, 
             allow_cash_payments, wifi_ssid, wifi_password,
-            tab_operating_mode, vip_tables // ⚡ Extracted from payload
+            tab_operating_mode, vip_tables
         } = req.body;
 
         const venue = await Venue.findByPk(venueId);
@@ -52,13 +52,16 @@ export const updateVenueSettings = async (req: Request<{}, {}, UpdateSettingsBod
         venue.wifi_ssid = wifi_ssid !== undefined ? wifi_ssid : venue.wifi_ssid;
         venue.wifi_password = wifi_password !== undefined ? wifi_password : venue.wifi_password;
 
-        // ⚡ SPRINT 20: Open Tab Updates
+        // Open Tab Updates
         venue.tab_operating_mode = tab_operating_mode !== undefined ? tab_operating_mode : venue.tab_operating_mode;
-        venue.vip_tables = vip_tables !== undefined ? vip_tables : venue.vip_tables;
+        
+        // ⚡ FIX: Ensure we only save a strictly parsed array to PostgreSQL
+        if (Array.isArray(vip_tables)) {
+             venue.vip_tables = vip_tables.map(t => String(t).trim()).filter(t => t.length > 0);
+        }
 
         await venue.save();
 
-        // ⚡ GLOBAL BROADCAST: Settings Updated (e.g. Venue closed, Tax changed, Tab limits changed)
         const io = req.app.get('socketio');
         if (io) io.to(`venue:${venueId}`).emit('settings:updated');
 
@@ -85,7 +88,6 @@ export const uploadVenueLogo = async (req: Request, res: Response): Promise<Resp
         venue.logo_url = imageUrl;
         await venue.save();
 
-        // ⚡ GLOBAL BROADCAST: Logo Updated
         const io = req.app.get('socketio');
         if (io) io.to(`venue:${venueId}`).emit('settings:updated');
 

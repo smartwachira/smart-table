@@ -1,25 +1,24 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
-import { Op } from 'sequelize'; // ⚡ Required for bulk bulk updates
+import { Op } from 'sequelize'; 
 import Order from '../models/Order.js';
 import Venue from '../models/Venue.js';
 import crypto from 'crypto';
 
-// ⚡ HELPER: Standardize Paystack's channels into our global database taxonomy
+// ⚡ SPRINT 22 FIX: DB ENUM Safety Mapper
 const determinePaymentMethod = (paystackChannel: string): string => {
-    if (!paystackChannel) return 'UNKNOWN';
+    if (!paystackChannel) return 'CARD';
     
+    // 🛡️ Map Paystack responses STRICTLY to our Order.ts ENUM ('CASH' | 'M-PESA' | 'CARD' | 'TAB')
     const channelMap: Record<string, string> = {
-        'mobile_money': 'MOBILE_MONEY', 
+        'mobile_money': 'M-PESA', // Safely maps Safaricom/Airtel back to M-PESA umbrella in DB
         'card': 'CARD',
-        'bank': 'BANK_TRANSFER',
-        'eft': 'EFT',
-        'apple_pay': 'APPLE_PAY',
-        'qr': 'QR_CODE',
-        'ussd': 'USSD'
+        'bank': 'CARD',
+        'eft': 'CARD',
+        'apple_pay': 'CARD'
     };
     
-    return channelMap[paystackChannel.toLowerCase()] || paystackChannel.toUpperCase();
+    return channelMap[paystackChannel.toLowerCase()] || 'CARD';
 };
 
 export const initializePayment = async (req: Request, res: Response): Promise<Response | void> => {
@@ -167,9 +166,6 @@ export const onboardSubaccount = async (req: Request, res: Response): Promise<Re
     }
 };
 
-// ============================================================================
-// ⚡ SPRINT 21: THE OMNI-WEBHOOK UPGRADE
-// ============================================================================
 export const paystackWebhookHandler = async (req: Request, res: Response) => {
     try {
         const secret = process.env.PAYSTACK_SECRET_KEY;
@@ -182,48 +178,47 @@ export const paystackWebhookHandler = async (req: Request, res: Response) => {
         const event = req.body;
         const io = req.app.get('socketio');
 
-        // 1. Context Extraction
         let metadataOrderId = null;
         let isTabSettlement = false;
         let bulkOrderIds: string[] = [];
 
         if (event.data.metadata) {
-            // Check for our new Multi-Order Array Payload
             if (event.data.metadata.isTabSettlement) {
                 isTabSettlement = true;
                 bulkOrderIds = event.data.metadata.orderIds || [];
             }
-            // Check for Legacy Single Order Payload
             if (event.data.metadata.custom_fields) {
                 const orderField = event.data.metadata.custom_fields.find((f: any) => f.variable_name === 'order_id');
                 if (orderField) metadataOrderId = orderField.value;
             }
         }
 
+        // ⚡ Secure Mapper applied here
         const paymentMethod = determinePaymentMethod(event.data.channel);
 
         // --- SUCCESSFUL PAYMENTS ---
         if (event.event === 'charge.success') {
             const reference = event.data.reference;
-            const isTabSettlement = event.data.metadata?.isTabSettlement;
-            const bulkOrderIds = event.data.metadata?.orderIds || [];
 
             if (isTabSettlement && bulkOrderIds.length > 0) {
-                // Bulk mark everything as PAID
                 await Order.update({ 
                     payment_status: 'PAID',
-                    payment_method: paymentMethod, 
-                    gateway_reference: event.data.reference 
+                    payment_method: paymentMethod,
+                    gateway_reference: reference 
                 }, { 
                     where: { order_id: { [Op.in]: bulkOrderIds } } 
                 });
 
-                // Broadcast to specific orders and the venue
                 if (io) {
-                    bulkOrderIds.forEach((id: string) => io.to(`order:${id}`).emit('payment:completed', { orderId: id, method: paymentMethod }));
+                    const sampleOrder = await Order.findByPk(bulkOrderIds[0]);
+                    if (sampleOrder) {
+                        io.to(`venue:${sampleOrder.venue_id}`).emit('payment:completed', { table_number: sampleOrder.table_number, method: paymentMethod, bulk: true });
+                    }
+                    bulkOrderIds.forEach(id => {
+                        io.to(`order:${id}`).emit('payment:completed', { orderId: id, method: paymentMethod });
+                    });
                 }
-            }
-            // SCENARIO B: SINGLE ORDER SETTLEMENT
+            } 
             else {
                 let order = await Order.findOne({ where: { gateway_reference: reference } });
                 if (!order && metadataOrderId) order = await Order.findByPk(metadataOrderId);
@@ -249,7 +244,6 @@ export const paystackWebhookHandler = async (req: Request, res: Response) => {
             const failureReason = event.data.gateway_response || "Transaction declined";
 
             if (isTabSettlement && bulkOrderIds.length > 0) {
-                // If a bulk tab payment fails, we just notify the guest. We DO NOT cancel the orders, because the food is already eaten/cooked!
                 if (io) {
                     bulkOrderIds.forEach(id => {
                         io.to(`order:${id}`).emit('payment:failed', { orderId: id, method: paymentMethod, reason: failureReason });

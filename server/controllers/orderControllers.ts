@@ -77,7 +77,6 @@ export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Re
             return res.status(400).json({ message: 'Cash payments are disabled for this venue.' });
         }
 
-        // ⚡ SPRINT 21: Backend Enforcement of VIP Routing
         if (payment_method === 'TAB') {
             const isTabAllowed = venue.tab_operating_mode === 'ENABLED_ALL' || 
                 (venue.tab_operating_mode === 'VIP_ONLY' && 
@@ -228,24 +227,15 @@ export const updateOrderStatus = async (req: Request<{orderId: string}, {}, upda
         const upperStatus = status.toUpperCase();
 
         if (!validStates.includes(upperStatus)) {
-            return res.status(400).json({ 
-                message: `Invalid status transition. Allowed status: ${validStates.join(', ')}` 
-            });
+            return res.status(400).json({ message: `Invalid status transition. Allowed status: ${validStates.join(', ')}` });
         }
 
         const order = await Order.findOne({ where: { order_id: orderId, venue_id: venueId } });
 
-        if (!order) {
-            return res.status(404).json({ message: 'Order not found' });
-        }
+        if (!order) return res.status(404).json({ message: 'Order not found' });
 
-        // ⚡ SPRINT 21 FIX: Decoupling Fulfillment from Settlement
-        // Allow the kitchen/waiters to mark food as 'COMPLETED' (Served) if it is a TAB or CASH order.
-        // It will safely route to the "Awaiting Settlement" tab on the frontend.
         if (upperStatus === 'COMPLETED' && order.payment_status !== 'PAID' && !['TAB', 'CASH'].includes(order.payment_method as string)) {
-            return res.status(403).json({ 
-                message: "Order cannot be marked served until the digital payment is successfully verified." 
-            });
+            return res.status(403).json({ message: "Order cannot be marked served until the digital payment is successfully verified." });
         }
 
         if (upperStatus === 'CANCELLED' && !['MANAGER', 'OWNER'].includes(req.user!.role)) {
@@ -283,14 +273,10 @@ export const updateOrderStatus = async (req: Request<{orderId: string}, {}, upda
 export const getOrderStatus = async (req: Request<{orderId: string}, {}>, res: Response): Promise<Response | void> => {
     try {
         const { orderId } = req.params;
-        const order = await Order.findByPk(orderId, {
-            include: [{ model: OrderItem, include: [MenuItem] }]
-        });
-
+        const order = await Order.findByPk(orderId, { include: [{ model: OrderItem, include: [MenuItem] }] });
         if (!order) return res.status(404).json({ message: 'Order not found' });
         res.status(200).json(order);
     } catch (error) {
-        console.error('❌ Track Order Error:', error);
         res.status(500).json({ message: 'Failed to check order status.' });
     }
 };
@@ -324,9 +310,7 @@ export const markCashCollected = async (req: Request<{orderId: string}, {}>, res
         }
 
         res.json({ message: 'Cash collected and logged successfully', order: updatedOrderData });
-
     } catch (error) {
-        console.error('Error collecting cash:', error);
         res.status(500).json({ message: 'Failed to process cash collection' });
     }
 };
@@ -338,28 +322,12 @@ export const getHistoricalOrders = async (req: Request<{}, {}, {}, HistoricalOrd
 
         let dateFilter = {};
         if (startDate && endDate) {
-            dateFilter = {
-                createdAt: {
-                    [Op.between]: [new Date(startDate), new Date(endDate)]
-                }
-            };
+            dateFilter = { createdAt: { [Op.between]: [new Date(startDate), new Date(endDate)] } };
         }
 
         const orders = await Order.findAll({
-            where: {
-                venue_id: venueId,
-                ...dateFilter 
-            },
-            include: [
-                {
-                    model: OrderItem,
-                    include: [MenuItem] 
-                },
-                {
-                    model: User, 
-                    as: 'CashCollector'
-                }
-            ],
+            where: { venue_id: venueId, ...dateFilter },
+            include: [ { model: OrderItem, include: [MenuItem] }, { model: User, as: 'CashCollector' } ],
             order: [['createdAt', 'DESC']] 
         });
 
@@ -372,23 +340,15 @@ export const getHistoricalOrders = async (req: Request<{}, {}, {}, HistoricalOrd
         });
 
         res.status(200).json(safeOrders);
-
     } catch (error) {
-        console.error('❌ Get History Error:', error);
         res.status(500).json({ message: 'Failed to fetch order history' });
     }
 };
 
-// ============================================================================
-// ⚡ SPRINT 21: Table-Level Context Merging (Guest + Waiter synchronization)
-// ============================================================================
 export const getGuestOrders = async (req: Request, res: Response): Promise<Response | void> => {
     try {
         const guestSessionId = req.headers['x-guest-id'] as string | undefined;
-
-        if (!guestSessionId) {
-            return res.status(400).json({ message: "Missing x-guest-id header" });
-        }
+        if (!guestSessionId) return res.status(400).json({ message: "Missing x-guest-id header" });
 
         const orConditions: any[] = [
             { 
@@ -410,60 +370,37 @@ export const getGuestOrders = async (req: Request, res: Response): Promise<Respo
         }
 
         const orders = await Order.findAll({
-            where: { 
-                status: { [Op.ne]: 'CANCELLED' }, 
-                [Op.or]: orConditions
-            },
-            include: [
-                {
-                    model: OrderItem,
-                    include: [{ model: MenuItem, attributes: ['name', 'image_url'] }]
-                }
-            ],
+            where: { status: { [Op.ne]: 'CANCELLED' }, [Op.or]: orConditions },
+            include: [{ model: OrderItem, include: [{ model: MenuItem, attributes: ['name', 'image_url'] }] }],
             order: [['createdAt', 'DESC']] 
         });
 
         return res.status(200).json(orders);
-
     } catch (error: any) {
-        console.error("❌ Error fetching guest orders:", error);
         return res.status(500).json({ message: "Internal server error", error: error.message });
     }
 };
 
-// ============================================================================
-// ⚡ SPRINT 21: POS CASH TAB SETTLEMENT
-// ============================================================================
 export const settleOpenTab = async (req: Request<{}, {}, SettleTabBody>, res: Response): Promise<Response | void> => {
     try {
         const venueId = req.user!.venueId;
         const staffId = req.user!.userId;
         const { table_number, settlement_method } = req.body;
 
-        if (!table_number || !settlement_method) {
-            return res.status(400).json({ message: "Missing required fields." });
-        }
+        if (!table_number || !settlement_method) return res.status(400).json({ message: "Missing required fields." });
 
         const openOrders = await Order.findAll({
-            where: {
-                venue_id: venueId,
-                table_number: table_number,
-                payment_method: 'TAB',
-                payment_status: 'PENDING',
-                status: { [Op.notIn]: ['CANCELLED'] } 
-            }
+            where: { venue_id: venueId, table_number: table_number, payment_method: 'TAB', payment_status: 'PENDING', status: { [Op.notIn]: ['CANCELLED'] } }
         });
 
-        if (openOrders.length === 0) {
-            return res.status(404).json({ message: "No active tabs found for this table." });
-        }
+        if (openOrders.length === 0) return res.status(404).json({ message: "No active tabs found for this table." });
 
         const orderIds = openOrders.map(o => o.order_id);
 
         await Order.update({
             payment_status: 'PAID',
             cash_collected_by: settlement_method === 'CASH' ? staffId : null,
-            payment_method: settlement_method, // Convert to actual payment method used
+            payment_method: settlement_method, 
             notes: literal(`CONCAT(COALESCE(notes, ''), ' | Settled via ${settlement_method}')`)
         }, {
             where: { order_id: { [Op.in]: orderIds } }
@@ -472,37 +409,39 @@ export const settleOpenTab = async (req: Request<{}, {}, SettleTabBody>, res: Re
         const io = req.app.get('socketio');
         if (io) {
             io.to(`venue:${venueId}`).emit("payment:completed", { table_number, method: settlement_method, bulk: true });
-            orderIds.forEach(id => {
-                io.to(`order:${id}`).emit("payment:completed", { orderId: id, method: settlement_method });
-            });
+            orderIds.forEach(id => io.to(`order:${id}`).emit("payment:completed", { orderId: id, method: settlement_method }));
         }
 
         res.status(200).json({ message: `Tab settled for table ${table_number}`, updatedCount: openOrders.length });
     } catch (error) {
-        console.error("Settle Tab Error:", error);
         res.status(500).json({ message: "Failed to settle open tab." });
     }
 };
 
 // ============================================================================
-// ⚡ SPRINT 21: POS DIGITAL TAB PAYMENT INITIALIZATION
+// ⚡ SPRINT 22: POS DIGITAL PAYMENT INITIALIZATION
 // ============================================================================
 export const initTabPayment = async (req: Request<{}, {}, SettleTabBody>, res: Response): Promise<Response | void> => {
     try {
         const venueId = req.user!.venueId;
-        const { table_number, settlement_method } = req.body;
+        const { table_number, settlement_method, phone, provider } = req.body;
 
+        // ⚡ FIX: Removed `payment_method: 'TAB'` so it correctly grabs ALL pending digital checkout orders!
         const openOrders = await Order.findAll({
-            where: { venue_id: venueId, table_number, payment_method: 'TAB', payment_status: 'PENDING', status: { [Op.notIn]: ['CANCELLED'] } },
+            where: { venue_id: venueId, table_number, payment_status: 'PENDING', status: { [Op.notIn]: ['CANCELLED'] } },
             include: [{ model: Venue, attributes: ['gateway_subaccount_id', 'is_financially_onboarded'] }]
         });
 
-        if (openOrders.length === 0) return res.status(404).json({ message: "No active tabs found." });
+        if (openOrders.length === 0) return res.status(404).json({ message: "No pending orders found for this table." });
         
         const totalAmount = openOrders.reduce((sum, o) => sum + Number(o.total_amount), 0);
         const orderIds = openOrders.map(o => o.order_id);
         const venue = (openOrders[0] as any).Venue;
         const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
+
+        if (!paystackSecret || !venue.is_financially_onboarded) {
+            return res.status(500).json({ message: "Digital payments currently offline." });
+        }
 
         if (settlement_method === 'CARD') {
             const payload = {
@@ -517,15 +456,36 @@ export const initTabPayment = async (req: Request<{}, {}, SettleTabBody>, res: R
             });
             return res.status(200).json({ access_code: response.data.data.access_code });
         }
+
+        // ⚡ FIX: Added the missing Staff M-PESA Push dispatch
+        if (settlement_method === 'M-PESA') {
+            let formattedPhone = phone!.replace(/\D/g, '');
+            if (formattedPhone.startsWith('0')) formattedPhone = '254' + formattedPhone.slice(1);
+            
+            const payload = {
+                email: "pos-staff@smarttable.app",
+                amount: Math.round(totalAmount * 100),
+                currency: "KES",
+                subaccount: venue.gateway_subaccount_id,
+                mobile_money: { phone: formattedPhone, provider: provider || 'mpesa' },
+                metadata: { isTabSettlement: true, orderIds } 
+            };
+            const response = await axios.post('https://api.paystack.co/charge', payload, {
+                headers: { Authorization: `Bearer ${paystackSecret}`, 'Content-Type': 'application/json' }
+            });
+            return res.status(200).json({ method: 'M-PESA', message: "Prompt dispatched." });
+        }
         
+        return res.status(400).json({ message: "Invalid payment method." });
+
     } catch (error: any) {
-        console.error("Init Tab Payment Error:", error);
-        res.status(500).json({ message: "Failed to initialize tab payment" });
+        console.error("Init Tab Payment Error:", error?.response?.data || error.message);
+        res.status(500).json({ message: "Failed to initialize payment gateway." });
     }
 };
 
 // ============================================================================
-// ⚡ SPRINT 21: GUEST DIGITAL TAB SETTLEMENT ENGINE
+// ⚡ SPRINT 22: GUEST DIGITAL SETTLEMENT ENGINE
 // ============================================================================
 export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res: Response): Promise<Response | void> => {
     try {
@@ -536,12 +496,12 @@ export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res:
             return res.status(400).json({ message: "Invalid payload or missing session context." });
         }
 
+        // ⚡ FIX: Removed `payment_method: 'TAB'` so the universal engine can process direct CARD/MPESA checkouts
         const orders = await Order.findAll({
             where: {
                 order_id: { [Op.in]: orderIds },
                 guest_session_id: guestSessionId,
                 payment_status: 'PENDING',
-                payment_method: 'TAB',
                 status: { [Op.notIn]: ['CANCELLED'] }
             },
             include: [{ model: Venue, attributes: ['venue_id', 'gateway_subaccount_id', 'is_financially_onboarded', 'name'] }]
@@ -553,7 +513,6 @@ export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res:
 
         const venue = (orders[0] as any).Venue;
 
-        // SCENARIO A: Cash Settlement (Turn orders into CASH type)
         if (settlement_method === 'CASH') {
             await Order.update({ payment_method: 'CASH' }, { where: { order_id: { [Op.in]: orderIds } } });
             
@@ -565,7 +524,6 @@ export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res:
             return res.status(200).json({ message: "Cash collection requested.", method: 'CASH' });
         }
 
-        // SCENARIO B: Digital Settlement (Bundle and dispatch to Paystack)
         const totalAmount = orders.reduce((sum, o) => sum + Number(o.total_amount), 0);
         const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
         
@@ -609,6 +567,6 @@ export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res:
 
     } catch (error: any) {
         console.error("Guest Tab Checkout Error:", error?.response?.data || error.message);
-        return res.status(500).json({ message: "Failed to process tab checkout." });
+        return res.status(500).json({ message: "Failed to process digital checkout." });
     }
 };
