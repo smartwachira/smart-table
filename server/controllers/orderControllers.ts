@@ -45,7 +45,11 @@ export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Re
 
     try {
         const { items, payment_method, customer_name, phone_number } = req.body;
-        const guestSessionId = req.headers['x-guest-id'] as string | undefined;
+        
+        let guestSessionId = req.headers['x-guest-id'] as string | undefined;
+        if (!guestSessionId && req.headers.authorization?.startsWith('Bearer ')) {
+            guestSessionId = req.headers.authorization.split(' ')[1];
+        }
         
         let venue_id: string;
         let table_number: string;
@@ -418,15 +422,11 @@ export const settleOpenTab = async (req: Request<{}, {}, SettleTabBody>, res: Re
     }
 };
 
-// ============================================================================
-// ⚡ SPRINT 22: POS DIGITAL PAYMENT INITIALIZATION
-// ============================================================================
 export const initTabPayment = async (req: Request<{}, {}, SettleTabBody>, res: Response): Promise<Response | void> => {
     try {
         const venueId = req.user!.venueId;
         const { table_number, settlement_method, phone, provider } = req.body;
 
-        // ⚡ FIX: Removed `payment_method: 'TAB'` so it correctly grabs ALL pending digital checkout orders!
         const openOrders = await Order.findAll({
             where: { venue_id: venueId, table_number, payment_status: 'PENDING', status: { [Op.notIn]: ['CANCELLED'] } },
             include: [{ model: Venue, attributes: ['gateway_subaccount_id', 'is_financially_onboarded'] }]
@@ -457,10 +457,16 @@ export const initTabPayment = async (req: Request<{}, {}, SettleTabBody>, res: R
             return res.status(200).json({ access_code: response.data.data.access_code });
         }
 
-        // ⚡ FIX: Added the missing Staff M-PESA Push dispatch
         if (settlement_method === 'M-PESA') {
+            // ⚡ BULLETPROOF FORMATTER: Force Paystack's required +254 (E.164) format
             let formattedPhone = phone!.replace(/\D/g, '');
-            if (formattedPhone.startsWith('0')) formattedPhone = '254' + formattedPhone.slice(1);
+            if (formattedPhone.startsWith('0')) {
+                formattedPhone = '+254' + formattedPhone.slice(1);
+            } else if (formattedPhone.startsWith('254')) {
+                formattedPhone = '+' + formattedPhone;
+            } else if (formattedPhone.length === 9) {
+                formattedPhone = '+254' + formattedPhone;
+            }
             
             const payload = {
                 email: "pos-staff@smarttable.app",
@@ -484,25 +490,40 @@ export const initTabPayment = async (req: Request<{}, {}, SettleTabBody>, res: R
     }
 };
 
-// ============================================================================
-// ⚡ SPRINT 22: GUEST DIGITAL SETTLEMENT ENGINE
-// ============================================================================
 export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res: Response): Promise<Response | void> => {
     try {
-        const guestSessionId = req.headers['x-guest-id'] as string;
-        const { orderIds, settlement_method, phone, provider } = req.body;
-        
-        if (!guestSessionId || !orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
-            return res.status(400).json({ message: "Invalid payload or missing session context." });
+        let guestToken = req.headers['x-guest-id'] as string | undefined;
+        if (!guestToken && req.headers.authorization?.startsWith('Bearer ')) {
+            guestToken = req.headers.authorization.split(' ')[1];
         }
 
-        // ⚡ FIX: Removed `payment_method: 'TAB'` so the universal engine can process direct CARD/MPESA checkouts
+        const { orderIds, settlement_method, phone, provider } = req.body;
+        
+        if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+            return res.status(400).json({ message: "Invalid payload." });
+        }
+
+        const orConditions: any[] = [];
+        if (guestToken) {
+            orConditions.push({ guest_session_id: guestToken });
+        }
+        if (req.guest?.venueId && req.guest?.tableName) {
+            orConditions.push({
+                venue_id: req.guest.venueId,
+                table_number: req.guest.tableName
+            });
+        }
+
+        if (orConditions.length === 0) {
+            return res.status(403).json({ message: "Unauthorized session context." });
+        }
+
         const orders = await Order.findAll({
             where: {
                 order_id: { [Op.in]: orderIds },
-                guest_session_id: guestSessionId,
                 payment_status: 'PENDING',
-                status: { [Op.notIn]: ['CANCELLED'] }
+                status: { [Op.notIn]: ['CANCELLED'] },
+                [Op.or]: orConditions
             },
             include: [{ model: Venue, attributes: ['venue_id', 'gateway_subaccount_id', 'is_financially_onboarded', 'name'] }]
         });
@@ -546,8 +567,15 @@ export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res:
         }
 
         if (settlement_method === 'M-PESA') {
-            let formattedPhone = phone!.replace(/\D/g, '');
-            if (formattedPhone.startsWith('0')) formattedPhone = '254' + formattedPhone.slice(1);
+            // ⚡ BULLETPROOF FORMATTER: Force Paystack's required +254 (E.164) format
+            let formattedPhone = phone!.replace(/\D/g, ''); 
+            if (formattedPhone.startsWith('0')) {
+                formattedPhone = '+254' + formattedPhone.slice(1);
+            } else if (formattedPhone.startsWith('254')) {
+                formattedPhone = '+' + formattedPhone;
+            } else if (formattedPhone.length === 9) {
+                formattedPhone = '+254' + formattedPhone;
+            }
             
             const payload = {
                 email: "guest@smarttable.app",

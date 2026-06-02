@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
 import { toast } from 'sonner';
 import { io, Socket } from 'socket.io-client';
 import { 
     X, CreditCard, Smartphone, Loader2, ChevronRight, CheckCircle2 
 } from 'lucide-react';
+import api from '../../utils/axiosConfig';
 
 // ============================================================================
 // ⚡ ENCAPSULATED PAYSTACK LAUNCHER
@@ -139,7 +139,7 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
                 provider: method === 'MOBILE_MONEY' ? mobileProvider : undefined 
             };
 
-            const { data } = await axios.post(endpoint, payload, { headers });
+            const { data } = await api.post(endpoint, payload, { headers });
 
             if (method === 'CARD') {
                 setPaystackAccessCode(data.access_code);
