@@ -139,10 +139,7 @@ export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Re
 
         const io = req.app.get('socketio');
         if (io) {
-            io.to(`venue:${venue_id}`).emit('order:created', {
-                order: newOrder,
-                items: items
-            });
+            io.to(`venue:${venue_id}`).emit('order:created', { order: newOrder, items: items });
         }
 
         res.status(201).json({
@@ -175,10 +172,7 @@ export const getOrders = async (req: Request, res: Response): Promise<Response |
                     {
                         [Op.or]: [
                             { status: { [Op.in]: ['PENDING', 'PREPARING', 'READY'] } },
-                            { 
-                                status: { [Op.in]: ['COMPLETED', 'CANCELLED'] },
-                                updatedAt: { [Op.gte]: rollingWindow } 
-                            }
+                            { status: { [Op.in]: ['COMPLETED', 'CANCELLED'] }, updatedAt: { [Op.gte]: rollingWindow } }
                         ]
                     },
                     {
@@ -189,16 +183,7 @@ export const getOrders = async (req: Request, res: Response): Promise<Response |
                     }
                 ]
             } as any,
-            include: [
-                {
-                    model: OrderItem,
-                    include: [MenuItem] 
-                },
-                {
-                    model: User, 
-                    as: 'CashCollector'
-                }
-            ],
+            include: [ { model: OrderItem, include: [MenuItem] }, { model: User, as: 'CashCollector' } ],
             order: [['createdAt', 'ASC']] 
         });
 
@@ -213,7 +198,6 @@ export const getOrders = async (req: Request, res: Response): Promise<Response |
         res.status(200).json(safeOrders);
 
     } catch (error) {
-        console.error('❌ Get Orders Error:', error);
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -225,17 +209,14 @@ export const updateOrderStatus = async (req: Request<{orderId: string}, {}, upda
         const venueId = req.user!.venueId;
 
         const validStates = ['PENDING', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED'];
-        
         if (!status) return res.status(400).json({ message: "Status is required." });
 
         const upperStatus = status.toUpperCase();
-
         if (!validStates.includes(upperStatus)) {
             return res.status(400).json({ message: `Invalid status transition. Allowed status: ${validStates.join(', ')}` });
         }
 
         const order = await Order.findOne({ where: { order_id: orderId, venue_id: venueId } });
-
         if (!order) return res.status(404).json({ message: 'Order not found' });
 
         if (upperStatus === 'COMPLETED' && order.payment_status !== 'PAID' && !['TAB', 'CASH'].includes(order.payment_method as string)) {
@@ -247,12 +228,10 @@ export const updateOrderStatus = async (req: Request<{orderId: string}, {}, upda
         }
 
         order.status = upperStatus;
-        
         if (upperStatus === 'CANCELLED') {
             const reasonText = cancelReason || 'No reason provided';
             order.notes = order.notes ? `${order.notes} | Cancelled: ${reasonText}` : `Cancelled: ${reasonText}`;
         }
-        
         await order.save();
 
         const io = req.app.get('socketio');
@@ -265,11 +244,8 @@ export const updateOrderStatus = async (req: Request<{orderId: string}, {}, upda
                 io.to(`order:${order.order_id}`).emit("order:status_updated", { newStatus: upperStatus, orderId: order.order_id });
             }
         }
-
         res.json({ message: 'Order updated', order });
-
     } catch (error) {
-        console.error('Error updating order:', error);
         res.status(500).json({ message: 'Failed to update order' });
     }
 };
@@ -301,10 +277,8 @@ export const markCashCollected = async (req: Request<{orderId: string}, {}>, res
         order.cash_collected_by = staffId; 
 
         const staffMember = await User.findByPk(staffId);
-
         const updatedOrderData = order.toJSON() as any;
         updatedOrderData.CashCollector = {name: staffMember?.username || 'Unknown Staff' };
-        
         await order.save();
 
         const io = req.app.get('socketio');
@@ -312,7 +286,6 @@ export const markCashCollected = async (req: Request<{orderId: string}, {}>, res
             io.to(`venue:${venueId}`).emit("payment:completed", { orderId: order.order_id, method: 'CASH' });
             io.to(`order:${order.order_id}`).emit("payment:completed", { orderId: order.order_id, method: 'CASH' });
         }
-
         res.json({ message: 'Cash collected and logged successfully', order: updatedOrderData });
     } catch (error) {
         res.status(500).json({ message: 'Failed to process cash collection' });
@@ -422,6 +395,9 @@ export const settleOpenTab = async (req: Request<{}, {}, SettleTabBody>, res: Re
     }
 };
 
+// ============================================================================
+// ⚡ SPRINT 23: POS DIGITAL PAYMENT INITIALIZATION
+// ============================================================================
 export const initTabPayment = async (req: Request<{}, {}, SettleTabBody>, res: Response): Promise<Response | void> => {
     try {
         const venueId = req.user!.venueId;
@@ -443,22 +419,33 @@ export const initTabPayment = async (req: Request<{}, {}, SettleTabBody>, res: R
             return res.status(500).json({ message: "Digital payments currently offline." });
         }
 
-        if (settlement_method === 'CARD') {
-            const payload = {
+        const isAirtel = provider === 'airtel';
+        const isCard = settlement_method === 'CARD';
+
+        // ⚡ THE FIX: Route both Cards AND Airtel through the standard Paystack Drop-in initialization!
+        if (isCard || isAirtel) {
+            const payload: any = {
                 email: "pos-staff@smarttable.app",
                 amount: Math.round(totalAmount * 100),
                 currency: "KES",
                 subaccount: venue.gateway_subaccount_id,
                 metadata: { isTabSettlement: true, orderIds } 
             };
+
+            if (isAirtel) {
+                payload.channels = ['mobile_money']; // Restrict the Drop-in UI exclusively to Mobile Money networks
+            }
+
             const response = await axios.post('https://api.paystack.co/transaction/initialize', payload, {
                 headers: { Authorization: `Bearer ${paystackSecret}`, 'Content-Type': 'application/json' }
             });
-            return res.status(200).json({ access_code: response.data.data.access_code });
+            
+            // Return 'CARD' to trick the frontend SmartPaymentEngine into natively launching the Paystack Iframe!
+            return res.status(200).json({ method: 'CARD', access_code: response.data.data.access_code });
         }
 
-        if (settlement_method === 'M-PESA') {
-            // ⚡ BULLETPROOF FORMATTER: Force Paystack's required +254 (E.164) format
+        // Keep M-Pesa on the ultra-fast STK Background Push
+        if (settlement_method === 'M-PESA' && provider === 'mpesa') {
             let formattedPhone = phone!.replace(/\D/g, '');
             if (formattedPhone.startsWith('0')) {
                 formattedPhone = '+254' + formattedPhone.slice(1);
@@ -473,7 +460,7 @@ export const initTabPayment = async (req: Request<{}, {}, SettleTabBody>, res: R
                 amount: Math.round(totalAmount * 100),
                 currency: "KES",
                 subaccount: venue.gateway_subaccount_id,
-                mobile_money: { phone: formattedPhone, provider: provider || 'mpesa' },
+                mobile_money: { phone: formattedPhone, provider: 'mpesa' },
                 metadata: { isTabSettlement: true, orderIds } 
             };
             const response = await axios.post('https://api.paystack.co/charge', payload, {
@@ -490,6 +477,9 @@ export const initTabPayment = async (req: Request<{}, {}, SettleTabBody>, res: R
     }
 };
 
+// ============================================================================
+// ⚡ SPRINT 23: GUEST DIGITAL SETTLEMENT ENGINE
+// ============================================================================
 export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res: Response): Promise<Response | void> => {
     try {
         let guestToken = req.headers['x-guest-id'] as string | undefined;
@@ -508,10 +498,7 @@ export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res:
             orConditions.push({ guest_session_id: guestToken });
         }
         if (req.guest?.venueId && req.guest?.tableName) {
-            orConditions.push({
-                venue_id: req.guest.venueId,
-                table_number: req.guest.tableName
-            });
+            orConditions.push({ venue_id: req.guest.venueId, table_number: req.guest.tableName });
         }
 
         if (orConditions.length === 0) {
@@ -551,23 +538,33 @@ export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res:
         if (!paystackSecret || !venue.is_financially_onboarded) {
             return res.status(500).json({ message: "Digital payments currently offline." });
         }
+
+        const isAirtel = provider === 'airtel';
+        const isCard = settlement_method === 'CARD';
         
-        if (settlement_method === 'CARD') {
-            const payload = {
+        // ⚡ THE FIX: Route both Cards AND Airtel through the standard Paystack Drop-in initialization!
+        if (isCard || isAirtel) {
+            const payload: any = {
                 email: "guest@smarttable.app",
                 amount: Math.round(totalAmount * 100),
                 currency: "KES",
                 subaccount: venue.gateway_subaccount_id,
                 metadata: { isTabSettlement: true, orderIds } 
             };
+
+            if (isAirtel) {
+                payload.channels = ['mobile_money']; // Restrict the Drop-in UI exclusively to Mobile Money networks
+            }
+
             const response = await axios.post('https://api.paystack.co/transaction/initialize', payload, {
                 headers: { Authorization: `Bearer ${paystackSecret}`, 'Content-Type': 'application/json' }
             });
+            // Return 'CARD' to trick the frontend SmartPaymentEngine into natively launching the Paystack Iframe!
             return res.status(200).json({ method: 'CARD', access_code: response.data.data.access_code });
         }
 
-        if (settlement_method === 'M-PESA') {
-            // ⚡ BULLETPROOF FORMATTER: Force Paystack's required +254 (E.164) format
+        // Keep M-Pesa on the ultra-fast STK Background Push
+        if (settlement_method === 'M-PESA' && provider === 'mpesa') {
             let formattedPhone = phone!.replace(/\D/g, ''); 
             if (formattedPhone.startsWith('0')) {
                 formattedPhone = '+254' + formattedPhone.slice(1);
@@ -582,7 +579,7 @@ export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res:
                 amount: Math.round(totalAmount * 100),
                 currency: "KES",
                 subaccount: venue.gateway_subaccount_id,
-                mobile_money: { phone: formattedPhone, provider: provider || 'mpesa' },
+                mobile_money: { phone: formattedPhone, provider: 'mpesa' },
                 metadata: { isTabSettlement: true, orderIds } 
             };
             const response = await axios.post('https://api.paystack.co/charge', payload, {

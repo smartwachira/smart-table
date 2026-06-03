@@ -5,20 +5,19 @@ import Order from '../models/Order.js';
 import Venue from '../models/Venue.js';
 import crypto from 'crypto';
 
-// ⚡ SPRINT 22 FIX: DB ENUM Safety Mapper
-const determinePaymentMethod = (paystackChannel: string): string => {
-    if (!paystackChannel) return 'CARD';
+// ⚡ SPRINT 23: The Network Sniffer
+const determinePaymentMethod = (eventData: any): string => {
+    if (!eventData.channel) return 'CARD';
     
-    // 🛡️ Map Paystack responses STRICTLY to our Order.ts ENUM ('CASH' | 'M-PESA' | 'CARD' | 'TAB')
-    const channelMap: Record<string, string> = {
-        'mobile_money': 'M-PESA', // Safely maps Safaricom/Airtel back to M-PESA umbrella in DB
-        'card': 'CARD',
-        'bank': 'CARD',
-        'eft': 'CARD',
-        'apple_pay': 'CARD'
-    };
+    if (eventData.channel === 'mobile_money') {
+        // Look deep into Paystack's authorization block to find out exactly who processed this payment
+        const bank = String(eventData.authorization?.bank || eventData.authorization?.brand || '').toUpperCase();
+        
+        if (bank.includes('AIRTEL')) return 'AIRTEL';
+        return 'M-PESA'; // Defaults to M-PESA
+    }
     
-    return channelMap[paystackChannel.toLowerCase()] || 'CARD';
+    return 'CARD';
 };
 
 export const initializePayment = async (req: Request, res: Response): Promise<Response | void> => {
@@ -193,8 +192,8 @@ export const paystackWebhookHandler = async (req: Request, res: Response) => {
             }
         }
 
-        // ⚡ Secure Mapper applied here
-        const paymentMethod = determinePaymentMethod(event.data.channel);
+        // ⚡ Apply the powerful network sniffer here!
+        const paymentMethod = determinePaymentMethod(event.data);
 
         // --- SUCCESSFUL PAYMENTS ---
         if (event.event === 'charge.success') {
@@ -203,7 +202,7 @@ export const paystackWebhookHandler = async (req: Request, res: Response) => {
             if (isTabSettlement && bulkOrderIds.length > 0) {
                 await Order.update({ 
                     payment_status: 'PAID',
-                    payment_method: paymentMethod,
+                    payment_method: paymentMethod, // Now dynamically reads 'AIRTEL' or 'M-PESA' or 'CARD'
                     gateway_reference: reference 
                 }, { 
                     where: { order_id: { [Op.in]: bulkOrderIds } } 
