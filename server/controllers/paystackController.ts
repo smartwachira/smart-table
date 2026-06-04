@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
-import { Op } from 'sequelize'; 
+import { literal, Op } from 'sequelize'; 
 import Order from '../models/Order.js';
 import Venue from '../models/Venue.js';
 import crypto from 'crypto';
@@ -192,8 +192,11 @@ export const paystackWebhookHandler = async (req: Request, res: Response) => {
             }
         }
 
-        // ⚡ Apply the powerful network sniffer here!
+        // ⚡ Secure Mapper returns 'AIRTEL', 'M-PESA', or 'CARD' directly
         const paymentMethod = determinePaymentMethod(event.data);
+        
+        const actualNetwork = String(event.data.authorization?.bank || event.data.authorization?.brand || 'Digital Gateway');
+        const ledgerNote = `Settled via ${actualNetwork}`;
 
         // --- SUCCESSFUL PAYMENTS ---
         if (event.event === 'charge.success') {
@@ -202,8 +205,9 @@ export const paystackWebhookHandler = async (req: Request, res: Response) => {
             if (isTabSettlement && bulkOrderIds.length > 0) {
                 await Order.update({ 
                     payment_status: 'PAID',
-                    payment_method: paymentMethod, // Now dynamically reads 'AIRTEL' or 'M-PESA' or 'CARD'
-                    gateway_reference: reference 
+                    payment_method: paymentMethod, 
+                    gateway_reference: reference,
+                    notes: literal(`CONCAT(COALESCE(notes, ''), ' | ${ledgerNote}')`)
                 }, { 
                     where: { order_id: { [Op.in]: bulkOrderIds } } 
                 });
@@ -226,7 +230,8 @@ export const paystackWebhookHandler = async (req: Request, res: Response) => {
                     await order.update({ 
                         payment_status: 'PAID',
                         payment_method: paymentMethod, 
-                        gateway_reference: reference 
+                        gateway_reference: reference,
+                        notes: literal(`CONCAT(COALESCE(notes, ''), ' | ${ledgerNote}')`)
                     });
 
                     if (io) {

@@ -34,7 +34,7 @@ interface HistoricalOrdersQuery {
 
 interface SettleTabBody {
     table_number?: string;
-    settlement_method: 'CASH' | 'CARD' | 'M-PESA';
+    settlement_method: 'CASH' | 'CARD' | 'M-PESA' | 'AIRTEL';
     orderIds?: string[];
     phone?: string;
     provider?: string;
@@ -419,7 +419,7 @@ export const initTabPayment = async (req: Request<{}, {}, SettleTabBody>, res: R
             return res.status(500).json({ message: "Digital payments currently offline." });
         }
 
-        const isAirtel = provider === 'airtel';
+        const isAirtel = settlement_method === 'AIRTEL';
         const isCard = settlement_method === 'CARD';
 
         // ⚡ THE FIX: Route both Cards AND Airtel through the standard Paystack Drop-in initialization!

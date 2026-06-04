@@ -134,16 +134,16 @@ export default function SmartPaymentEngine({ isOpen, onClose, amount, orderIds, 
 
             const payload = {
                 orderIds,
-                settlement_method: method === 'MOBILE_MONEY' ? 'M-PESA' : 'CARD',
+                settlement_method: method === 'MOBILE_MONEY' ? ( mobileProvider === 'airtel' ? 'AIRTEL':'MPESA') : 'CARD',
                 phone: method === 'MOBILE_MONEY' ? phone : undefined,
                 provider: method === 'MOBILE_MONEY' ? mobileProvider : undefined 
             };
 
             const { data } = await api.post(endpoint, payload, { headers });
 
-            if (method === 'CARD') {
+            if (data.access_code) {
                 setPaystackAccessCode(data.access_code);
-            } else if (method === 'MOBILE_MONEY') {
+            } else{
                 setActiveTransactionPhase('AWAITING_PROMPT');
                 const networkName = mobileProvider === 'airtel' ? 'Airtel Money' : 'M-Pesa';
                 toast.success(`${networkName} prompt dispatched!`);
