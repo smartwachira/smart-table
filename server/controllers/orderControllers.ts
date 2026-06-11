@@ -401,17 +401,23 @@ export const settleOpenTab = async (req: Request<{}, {}, SettleTabBody>, res: Re
 export const initTabPayment = async (req: Request<{}, {}, SettleTabBody>, res: Response): Promise<Response | void> => {
     try {
         const venueId = req.user!.venueId;
-        const { table_number, settlement_method, phone, provider } = req.body;
+
+        const { orderIds, settlement_method, phone, } = req.body;
+
+        if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0){
+            return res.status(400).json({ message: "Invalid payload. No orders selected."})
+        }
 
         const openOrders = await Order.findAll({
-            where: { venue_id: venueId, table_number, payment_status: 'PENDING', status: { [Op.notIn]: ['CANCELLED'] } },
+            where: { venue_id: venueId, order_id: { [Op.in]: orderIds}, payment_status: 'PENDING', status: { [Op.notIn]: ['CANCELLED'] } },
             include: [{ model: Venue, attributes: ['gateway_subaccount_id', 'is_financially_onboarded'] }]
         });
 
-        if (openOrders.length === 0) return res.status(404).json({ message: "No pending orders found for this table." });
+        if (openOrders.length === 0 || openOrders.length !== orderIds.length) {
+            return res.status(404).json({ message: "Some orders are already paid or invalid." })
+        };
         
         const totalAmount = openOrders.reduce((sum, o) => sum + Number(o.total_amount), 0);
-        const orderIds = openOrders.map(o => o.order_id);
         const venue = (openOrders[0] as any).Venue;
         const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
 
@@ -445,7 +451,7 @@ export const initTabPayment = async (req: Request<{}, {}, SettleTabBody>, res: R
         }
 
         // Keep M-Pesa on the ultra-fast STK Background Push
-        if (settlement_method === 'M-PESA' && provider === 'mpesa') {
+        if (settlement_method === 'M-PESA' ) {
             let formattedPhone = phone!.replace(/\D/g, '');
             if (formattedPhone.startsWith('0')) {
                 formattedPhone = '+254' + formattedPhone.slice(1);
@@ -487,10 +493,10 @@ export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res:
             guestToken = req.headers.authorization.split(' ')[1];
         }
 
-        const { orderIds, settlement_method, phone, provider } = req.body;
+        const { orderIds, settlement_method, phone} = req.body;
         
         if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
-            return res.status(400).json({ message: "Invalid payload." });
+            return res.status(400).json({ message: "Invalid payload. No orders selected." });
         }
 
         const orConditions: any[] = [];
@@ -539,7 +545,7 @@ export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res:
             return res.status(500).json({ message: "Digital payments currently offline." });
         }
 
-        const isAirtel = provider === 'airtel';
+        const isAirtel = settlement_method === 'AIRTEL';
         const isCard = settlement_method === 'CARD';
         
         // ⚡ THE FIX: Route both Cards AND Airtel through the standard Paystack Drop-in initialization!
@@ -564,7 +570,7 @@ export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res:
         }
 
         // Keep M-Pesa on the ultra-fast STK Background Push
-        if (settlement_method === 'M-PESA' && provider === 'mpesa') {
+        if (settlement_method === 'M-PESA') {
             let formattedPhone = phone!.replace(/\D/g, ''); 
             if (formattedPhone.startsWith('0')) {
                 formattedPhone = '+254' + formattedPhone.slice(1);
@@ -588,7 +594,7 @@ export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res:
             return res.status(200).json({ method: 'M-PESA', message: "Prompt dispatched." });
         }
 
-        return res.status(400).json({ message: "Invalid payment method." });
+        return res.status(400).json({ message: `Invalid payment method: ${settlement_method}` });
 
     } catch (error: any) {
         console.error("Guest Tab Checkout Error:", error?.response?.data || error.message);
