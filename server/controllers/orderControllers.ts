@@ -139,7 +139,12 @@ export const createOrder = async (req: Request<{}, {}, CreateOrderBody>, res: Re
 
         const io = req.app.get('socketio');
         if (io) {
-            io.to(`venue:${venue_id}`).emit('order:created', { order: newOrder, items: items });
+            if (['TAB', 'CASH'].includes(payment_method)) {
+                io.to(`venue:${venue_id}`).emit('order:created', {
+                    order: newOrder,
+                    items: items
+                });
+            }
         }
 
         res.status(201).json({

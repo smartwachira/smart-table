@@ -55,11 +55,14 @@ export default function POS() {
         const tabs: Record<string, { table_number: string, total: number, order_count: number }> = {};
         liveOrders.forEach(order => {
             if (order.payment_method === 'TAB' && order.payment_status === 'PENDING' && order.status !== 'CANCELLED') {
-                if (!tabs[order.table_number]) {
-                    tabs[order.table_number] = { table_number: order.table_number, total: 0, order_count: 0 };
+
+                const tName = String(order.table_number).toUpperCase().trim()
+
+                if (!tabs[tName]) {
+                    tabs[tName] = { table_number: order.table_number, total: 0, order_count: 0 };
                 }
-                tabs[order.table_number].total += Number(order.total_amount);
-                tabs[order.table_number].order_count += 1;
+                tabs[tName].total += Number(order.total_amount);
+                tabs[tName].order_count += 1;
             }
         });
         return Object.values(tabs).sort((a, b) => b.total - a.total); 
