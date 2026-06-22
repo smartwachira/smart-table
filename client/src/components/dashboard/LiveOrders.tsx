@@ -393,7 +393,7 @@ export default function LiveOrders() {
                                             <CheckCircle2 size={12} /> {order.payment_method === 'CASH' && order.payment_status === 'PENDING' ? 'Cash Pending' : 'Paid'}
                                         </span>
                                     )}
-                                    <span className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest">#{order.order_id.slice(-6)}</span>
+                                    <span className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest">#{order.order_id.slice(0,6)}</span>
                                 </div>
                             </div>
                         );

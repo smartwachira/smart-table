@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { jwtDecode } from 'jwt-decode'; 
 import { toast } from 'sonner';
@@ -7,8 +7,6 @@ import {
 } from 'lucide-react';
 import { useCustomerCartStore } from '../../store/useCustomerCartStore';
 import { useSubmitGuestOrder } from '../../hooks/useCheckout';
-
-// ⚡ SPRINT 22: IMPORT THE UNIVERSAL ENGINE
 import SmartPaymentEngine from '../shared/SmartPaymentEngine'; 
 
 interface GuestJwtPayload {
@@ -34,12 +32,14 @@ export default function Checkout() {
     const [tableNumber, setTableNumber] = useState<string>('');
     const [customerName, setCustomerName] = useState<string>('');
 
-    // ⚡ SPRINT 22: Universal Engine State
     const [isEngineOpen, setIsEngineOpen] = useState(false);
     const [engineOrderIds, setEngineOrderIds] = useState<string[]>([]);
     const [engineAmount, setEngineAmount] = useState<number>(0);
 
     const submitOrderMutation = useSubmitGuestOrder();
+    
+    // ⚡ FIX: Submission Lock to prevent the Empty-Cart race condition bounce
+    const isSubmittingRef = useRef(false);
 
     useEffect(() => {
         const token = localStorage.getItem('guest_token');
@@ -66,16 +66,18 @@ export default function Checkout() {
          Array.isArray(venueConfig?.vip_tables) && 
          venueConfig.vip_tables.map((t: string) => t.toLowerCase()).includes(tableNumber.toLowerCase()));
 
+    // ⚡ FIX: Only bounce to menu if the cart is empty AND we aren't actively routing to a success page
     useEffect(() => {
-        if (venueId && cartItems.length === 0) navigate(`/menu`); 
-    }, [cartItems, navigate, venueId]);
+        if (venueId && cartItems.length === 0 && !isSubmittingRef.current) {
+            navigate(`/menu`); 
+        }
+    }, [cartItems.length, navigate, venueId]);
 
-    // ⚡ SPRINT 22: Decoupled Submission Logic
     const handleCheckoutSubmit = (method: 'CASH' | 'TAB' | 'DIGITAL') => {
         if (!customerName.trim()) return toast.error("Please enter your name for the order.");
         if (!venueId) return toast.error("Venue session lost. Please scan QR again.");
         
-        // We pass CARD as a placeholder for digital; the Engine dynamically overrides it with M-Pesa if selected by the user later
+        isSubmittingRef.current = true; // Lock the component from redirecting
         const backendMethod = method === 'DIGITAL' ? 'CARD' : method;
 
         const payload = {
@@ -95,20 +97,21 @@ export default function Checkout() {
         submitOrderMutation.mutate(payload as any, {
             onSuccess: (data) => {
                 if (method === 'DIGITAL') {
-                    // Trigger Universal Engine Handover
                     setEngineOrderIds([data.orderId]);
                     setEngineAmount(total);
                     setIsEngineOpen(true);
                 } else {
-                    // Physical Settlement Handover
                     toast.success(method === 'TAB' ? "Added to your Open Tab!" : "Order sent! Please pay your waiter.");
                     setTimeout(() => {
                         clearCart();
-                        navigate(`/order-status/${data.orderId}`); 
+                        navigate(`/order-status/${data.orderId}`, { replace: true }); 
                     }, 1500);
                 }
             },
-            onError: () => toast.error("Checkout failed. Please try again.")
+            onError: () => {
+                isSubmittingRef.current = false; // Release lock on error
+                toast.error("Checkout failed. Please try again.");
+            }
         });
     };
 
@@ -181,16 +184,19 @@ export default function Checkout() {
                 </div>
             </main>
 
-            {/* ⚡ SPRINT 22: THE UNIVERSAL PAYMENT ENGINE */}
             <SmartPaymentEngine 
                 isOpen={isEngineOpen}
-                onClose={() => setIsEngineOpen(false)}
+                onClose={() => {
+                    setIsEngineOpen(false);
+                    isSubmittingRef.current = false; // Release lock if user cancels payment
+                }}
                 amount={engineAmount}
                 orderIds={engineOrderIds}
-                venueId={venueId}
+                venueId={venueId || ''}
                 onSuccessCallback={() => {
+                    isSubmittingRef.current = true;
                     clearCart();
-                    navigate(`/order-status/${engineOrderIds[0]}`);
+                    navigate(`/order-status/${engineOrderIds[0]}`, { replace: true });
                 }}
             />
         </div>
