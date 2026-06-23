@@ -177,7 +177,8 @@ export const getOrders = async (req: Request, res: Response): Promise<Response |
                     {
                         [Op.or]: [
                             { status: { [Op.in]: ['PENDING', 'PREPARING', 'READY'] } },
-                            { status: { [Op.in]: ['COMPLETED', 'CANCELLED'] }, updatedAt: { [Op.gte]: rollingWindow } }
+                            { status: { [Op.in]: ['COMPLETED', 'CANCELLED'] }, updatedAt: { [Op.gte]: rollingWindow } },
+                            { payment_status: 'PENDING', payment_method: 'TAB',status:{ [Op.ne]:'CANCELLED'}}
                         ]
                     },
                     {
@@ -334,7 +335,7 @@ export const getGuestOrders = async (req: Request, res: Response): Promise<Respo
 
         const orConditions: any[] = [
             { 
-                guest_session_id: guestSessionId,
+                
                 [Op.or]: [
                     { payment_status: 'PAID' }, 
                     { payment_method: { [Op.in]: ['CASH', 'TAB'] } }
@@ -352,7 +353,7 @@ export const getGuestOrders = async (req: Request, res: Response): Promise<Respo
         }
 
         const orders = await Order.findAll({
-            where: { status: { [Op.ne]: 'CANCELLED' }, [Op.or]: orConditions },
+            where: { guest_session_id: guestSessionId, status: { [Op.ne]: 'CANCELLED' }, [Op.or]: orConditions },
             include: [{ model: OrderItem, include: [{ model: MenuItem, attributes: ['name', 'image_url'] }] }],
             order: [['createdAt', 'DESC']] 
         });

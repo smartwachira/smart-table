@@ -107,8 +107,7 @@ Order.init({
     },
     gateway_reference: {
         type: DataTypes.STRING,
-        allowNull: true,
-        unique: true
+        allowNull: true
     },
     notes: {
         type: DataTypes.TEXT,
