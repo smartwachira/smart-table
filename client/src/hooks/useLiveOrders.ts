@@ -101,8 +101,8 @@ export const useCollectCash = () => {
 export const useSettleTab = () => {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async ({ table_number, settlement_method }: { table_number: string, settlement_method: string }) => {
-            return axios.patch(`/api/orders/tabs/settle`, { table_number, settlement_method }, getConfig());
+        mutationFn: async ({ table_number, settlement_method, orderIds }: { table_number: string, settlement_method: string, orderIds?: string[] }) => {
+            return axios.patch(`/api/orders/tabs/settle`, { table_number, settlement_method ,orderIds}, getConfig());
         },
         onSuccess: () => {
             toast.success("Tab settled successfully!");

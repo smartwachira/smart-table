@@ -368,17 +368,29 @@ export const settleOpenTab = async (req: Request<{}, {}, SettleTabBody>, res: Re
     try {
         const venueId = req.user!.venueId;
         const staffId = req.user!.userId;
-        const { table_number, settlement_method } = req.body;
+        const { table_number, settlement_method, orderIds } = req.body;
 
         if (!table_number || !settlement_method) return res.status(400).json({ message: "Missing required fields." });
 
-        const openOrders = await Order.findAll({
-            where: { venue_id: venueId, table_number: table_number, payment_method: 'TAB', payment_status: 'PENDING', status: { [Op.notIn]: ['CANCELLED'] } }
-        });
+        // Base condition: Find unpaid tabs for this table
+        const whereClause: any = { 
+            venue_id: venueId, 
+            table_number: {[Op.iLike]: table_number}, 
+            payment_method: 'TAB', 
+            payment_status: 'PENDING', 
+            status: { [Op.notIn]: ['CANCELLED'] } 
+        };
 
-        if (openOrders.length === 0) return res.status(404).json({ message: "No active tabs found for this table." });
+        // 🛡️ SPLIT BILLING: If the waiter selected specific orders, filter by them!
+        if (orderIds && Array.isArray(orderIds) && orderIds.length > 0) {
+            whereClause.order_id = { [Op.in]: orderIds };
+        }
 
-        const orderIds = openOrders.map(o => o.order_id);
+        const openOrders = await Order.findAll({ where: whereClause });
+
+        if (openOrders.length === 0) return res.status(404).json({ message: "No active tabs found for this selection." });
+
+        const targetOrderIds = openOrders.map(o => o.order_id);
 
         await Order.update({
             payment_status: 'PAID',
@@ -386,16 +398,16 @@ export const settleOpenTab = async (req: Request<{}, {}, SettleTabBody>, res: Re
             payment_method: settlement_method, 
             notes: literal(`CONCAT(COALESCE(notes, ''), ' | Settled via ${settlement_method}')`)
         }, {
-            where: { order_id: { [Op.in]: orderIds } }
+            where: { order_id: { [Op.in]: targetOrderIds } }
         });
 
         const io = req.app.get('socketio');
         if (io) {
             io.to(`venue:${venueId}`).emit("payment:completed", { table_number, method: settlement_method, bulk: true });
-            orderIds.forEach(id => io.to(`order:${id}`).emit("payment:completed", { orderId: id, method: settlement_method }));
+            targetOrderIds.forEach(id => io.to(`order:${id}`).emit("payment:completed", { orderId: id, method: settlement_method }));
         }
 
-        res.status(200).json({ message: `Tab settled for table ${table_number}`, updatedCount: openOrders.length });
+        res.status(200).json({ message: `Tab settled successfully`, updatedCount: openOrders.length });
     } catch (error) {
         res.status(500).json({ message: "Failed to settle open tab." });
     }
