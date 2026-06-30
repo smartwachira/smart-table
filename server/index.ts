@@ -21,6 +21,7 @@ import MenuItem from './models/MenuItem.js';
 import Order from './models/Order.js';
 import OrderItem from './models/OrderItem.js';
 import User from './models/User.js';
+import TransactionLedger from "./models/TransactionLedger.js";
 
 //Import Routes
 import menuRoutes from './routes/menuRoutes.js';
@@ -104,6 +105,12 @@ Order.belongsTo(User, { foreignKey: 'cash_collected_by', targetKey: 'user_id', a
 
 User.hasMany(Order, { foreignKey: 'staff_id', sourceKey: 'user_id', as: 'CreatedOrders' });
 Order.belongsTo(User, { foreignKey: 'staff_id', targetKey: 'user_id', as: 'Creator' });
+
+Order.hasMany(TransactionLedger, { foreignKey: 'order_id',sourceKey: 'order_id', as: 'Transactions'});
+TransactionLedger.belongsTo(Order, { foreignKey: 'order_id', targetKey: 'order_id'});
+
+User.hasMany(TransactionLedger, {foreignKey: 'staff_id', sourceKey: 'user_id', as: 'CollectedTransactions'});
+TransactionLedger.belongsTo(User, { foreignKey: 'staff_id',targetKey: 'user_id', as: 'Cashier'});
 
 //Routes
 app.get('/', (req:Request, res:Response) =>{

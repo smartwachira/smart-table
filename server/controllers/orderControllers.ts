@@ -8,6 +8,7 @@ import sequelize from '../config/db.js';
 import { Op, literal } from 'sequelize';
 import Venue from '../models/Venue.js';
 import User from '../models/User.js';
+import TransactionLedger from '../models/TransactionLedger.js';
 
 interface OrderItemPayload {
     item_id: string;
@@ -364,78 +365,126 @@ export const getGuestOrders = async (req: Request, res: Response): Promise<Respo
     }
 };
 
-export const settleOpenTab = async (req: Request<{}, {}, SettleTabBody>, res: Response): Promise<Response | void> => {
+// ============================================================================
+// ⚡ SPRINT 24: SPLIT TENDER - CASH & PARTIAL SETTLEMENT LOGIC
+// ============================================================================
+export const settleOpenTab = async (req: Request<{}, {}, SettleTabBody & { amount_paid?: number }>, res: Response): Promise<Response | void> => {
+    const t = await sequelize.transaction();
     try {
         const venueId = req.user!.venueId;
         const staffId = req.user!.userId;
-        const { table_number, settlement_method, orderIds } = req.body;
+        const { table_number, settlement_method, orderIds, amount_paid } = req.body;
 
-        if (!table_number || !settlement_method) return res.status(400).json({ message: "Missing required fields." });
+        if (!table_number || settlement_method !== 'CASH') {
+            return res.status(400).json({ message: "Invalid partial settlement payload." });
+        }
 
-        // Base condition: Find unpaid tabs for this table
         const whereClause: any = { 
             venue_id: venueId, 
-            table_number: {[Op.iLike]: table_number}, 
-            payment_method: 'TAB', 
-            payment_status: 'PENDING', 
+            table_number: { [Op.iLike]: table_number }, 
+            payment_status: { [Op.in]: ['PENDING', 'PARTIALLY_PAID'] }, 
             status: { [Op.notIn]: ['CANCELLED'] } 
         };
 
-        // 🛡️ SPLIT BILLING: If the waiter selected specific orders, filter by them!
-        if (orderIds && Array.isArray(orderIds) && orderIds.length > 0) {
-            whereClause.order_id = { [Op.in]: orderIds };
+        if (orderIds && orderIds.length > 0) whereClause.order_id = { [Op.in]: orderIds };
+
+        const openOrders = await Order.findAll({ where: whereClause, transaction: t });
+        if (openOrders.length === 0) {
+            await t.rollback();
+            return res.status(404).json({ message: "No active balance found." });
         }
 
-        const openOrders = await Order.findAll({ where: whereClause });
+        let remainingBalanceToPay = amount_paid || 0;
+        
+        // If no specific amount is provided, calculate the full remaining balance
+        if (!amount_paid) {
+            for (const order of openOrders) {
+                const previousPayments = await TransactionLedger.sum('amount_paid', { where: { order_id: order.order_id }, transaction: t }) || 0;
+                remainingBalanceToPay += (Number(order.total_amount) - previousPayments);
+            }
+        }
 
-        if (openOrders.length === 0) return res.status(404).json({ message: "No active tabs found for this selection." });
+        for (const order of openOrders) {
+            if (remainingBalanceToPay <= 0) break;
 
-        const targetOrderIds = openOrders.map(o => o.order_id);
+            const previousPayments = await TransactionLedger.sum('amount_paid', { where: { order_id: order.order_id }, transaction: t }) || 0;
+            const orderBalance = Number(order.total_amount) - previousPayments;
 
-        await Order.update({
-            payment_status: 'PAID',
-            cash_collected_by: settlement_method === 'CASH' ? staffId : null,
-            payment_method: settlement_method, 
-            notes: literal(`CONCAT(COALESCE(notes, ''), ' | Settled via ${settlement_method}')`)
-        }, {
-            where: { order_id: { [Op.in]: targetOrderIds } }
-        });
+            if (orderBalance <= 0) continue; 
+
+            const paymentForThisOrder = Math.min(orderBalance, remainingBalanceToPay);
+
+            // 1. Write the micro-payment to the Ledger
+            await TransactionLedger.create({
+                order_id: order.order_id,
+                amount_paid: paymentForThisOrder,
+                payment_method: 'CASH',
+                staff_id: staffId
+            }, { transaction: t });
+
+            remainingBalanceToPay -= paymentForThisOrder;
+
+            // 2. Recalculate Order Status
+            const newTotalPaid = previousPayments + paymentForThisOrder;
+            const newStatus = newTotalPaid >= Number(order.total_amount) ? 'PAID' : 'PARTIALLY_PAID';
+
+            await order.update({
+                payment_status: newStatus,
+                cash_collected_by: newStatus === 'PAID' ? staffId : order.cash_collected_by,
+                payment_method: newStatus === 'PAID' ? 'CASH' : order.payment_method, 
+                notes: literal(`CONCAT(COALESCE(notes, ''), ' | Partial Cash: ${paymentForThisOrder}')`)
+            }, { transaction: t });
+        }
+
+        await t.commit();
 
         const io = req.app.get('socketio');
         if (io) {
-            io.to(`venue:${venueId}`).emit("payment:completed", { table_number, method: settlement_method, bulk: true });
-            targetOrderIds.forEach(id => io.to(`order:${id}`).emit("payment:completed", { orderId: id, method: settlement_method }));
+            io.to(`venue:${venueId}`).emit("payment:completed", { table_number, method: 'CASH', bulk: true });
+            openOrders.forEach(o => io.to(`order:${o.order_id}`).emit("payment:completed", { orderId: o.order_id, method: 'CASH' }));
         }
 
-        res.status(200).json({ message: `Tab settled successfully`, updatedCount: openOrders.length });
+        res.status(200).json({ message: `Payment applied successfully` });
     } catch (error) {
-        res.status(500).json({ message: "Failed to settle open tab." });
+        await t.rollback();
+        console.error("Split Settlement Error:", error);
+        res.status(500).json({ message: "Failed to apply payment." });
     }
 };
 
 // ============================================================================
-// ⚡ SPRINT 23: POS DIGITAL PAYMENT INITIALIZATION
+// ⚡ SPRINT 24: POS DIGITAL PAYMENT INITIALIZATION (SPLIT TENDER)
 // ============================================================================
-export const initTabPayment = async (req: Request<{}, {}, SettleTabBody>, res: Response): Promise<Response | void> => {
+export const initTabPayment = async (req: Request<{}, {}, SettleTabBody & { amount_to_pay?: number }>, res: Response): Promise<Response | void> => {
     try {
         const venueId = req.user!.venueId;
-
-        const { orderIds, settlement_method, phone, } = req.body;
+        const { orderIds, settlement_method, phone, amount_to_pay } = req.body;
 
         if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0){
             return res.status(400).json({ message: "Invalid payload. No orders selected."})
         }
 
         const openOrders = await Order.findAll({
-            where: { venue_id: venueId, order_id: { [Op.in]: orderIds}, payment_status: 'PENDING', status: { [Op.notIn]: ['CANCELLED'] } },
+            where: { venue_id: venueId, order_id: { [Op.in]: orderIds}, payment_status: { [Op.in]: ['PENDING', 'PARTIALLY_PAID'] }, status: { [Op.notIn]: ['CANCELLED'] } },
             include: [{ model: Venue, attributes: ['gateway_subaccount_id', 'is_financially_onboarded'] }]
         });
 
-        if (openOrders.length === 0 || openOrders.length !== orderIds.length) {
-            return res.status(404).json({ message: "Some orders are already paid or invalid." })
+        if (openOrders.length === 0) {
+            return res.status(404).json({ message: "No active balance found." })
         };
         
-        const totalAmount = openOrders.reduce((sum, o) => sum + Number(o.total_amount), 0);
+        let trueRemainingBalance = 0;
+        for (const order of openOrders) {
+            const previousPayments = await TransactionLedger.sum('amount_paid', { where: { order_id: order.order_id } }) || 0;
+            trueRemainingBalance += (Number(order.total_amount) - previousPayments);
+        }
+
+        const targetChargeAmount = amount_to_pay ? Number(amount_to_pay) : trueRemainingBalance;
+
+        if (targetChargeAmount > trueRemainingBalance) {
+            return res.status(400).json({ message: "Cannot pay more than the remaining balance." });
+        }
+
         const venue = (openOrders[0] as any).Venue;
         const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
 
@@ -446,46 +495,36 @@ export const initTabPayment = async (req: Request<{}, {}, SettleTabBody>, res: R
         const isAirtel = settlement_method === 'AIRTEL';
         const isCard = settlement_method === 'CARD';
 
-        // ⚡ THE FIX: Route both Cards AND Airtel through the standard Paystack Drop-in initialization!
         if (isCard || isAirtel) {
             const payload: any = {
                 email: "pos-staff@smarttable.app",
-                amount: Math.round(totalAmount * 100),
+                amount: Math.round(targetChargeAmount * 100),
                 currency: "KES",
                 subaccount: venue.gateway_subaccount_id,
-                metadata: { isTabSettlement: true, orderIds } 
+                metadata: { isTabSettlement: true, orderIds, splitAmount: targetChargeAmount } 
             };
 
-            if (isAirtel) {
-                payload.channels = ['mobile_money']; // Restrict the Drop-in UI exclusively to Mobile Money networks
-            }
+            if (isAirtel) payload.channels = ['mobile_money']; 
 
             const response = await axios.post('https://api.paystack.co/transaction/initialize', payload, {
                 headers: { Authorization: `Bearer ${paystackSecret}`, 'Content-Type': 'application/json' }
             });
             
-            // Return 'CARD' to trick the frontend SmartPaymentEngine into natively launching the Paystack Iframe!
             return res.status(200).json({ method: 'CARD', access_code: response.data.data.access_code });
         }
 
-        // Keep M-Pesa on the ultra-fast STK Background Push
         if (settlement_method === 'M-PESA' ) {
             let formattedPhone = phone!.replace(/\D/g, '');
-            if (formattedPhone.startsWith('0')) {
-                formattedPhone = '+254' + formattedPhone.slice(1);
-            } else if (formattedPhone.startsWith('254')) {
-                formattedPhone = '+' + formattedPhone;
-            } else if (formattedPhone.length === 9) {
-                formattedPhone = '+254' + formattedPhone;
-            }
+            if (formattedPhone.startsWith('0')) formattedPhone = '+254' + formattedPhone.slice(1);
+            else if (formattedPhone.length === 9) formattedPhone = '+254' + formattedPhone;
             
             const payload = {
                 email: "pos-staff@smarttable.app",
-                amount: Math.round(totalAmount * 100),
+                amount: Math.round(targetChargeAmount * 100),
                 currency: "KES",
                 subaccount: venue.gateway_subaccount_id,
                 mobile_money: { phone: formattedPhone, provider: 'mpesa' },
-                metadata: { isTabSettlement: true, orderIds } 
+                metadata: { isTabSettlement: true, orderIds, splitAmount: targetChargeAmount } 
             };
             const response = await axios.post('https://api.paystack.co/charge', payload, {
                 headers: { Authorization: `Bearer ${paystackSecret}`, 'Content-Type': 'application/json' }
@@ -502,25 +541,23 @@ export const initTabPayment = async (req: Request<{}, {}, SettleTabBody>, res: R
 };
 
 // ============================================================================
-// ⚡ SPRINT 23: GUEST DIGITAL SETTLEMENT ENGINE
+// ⚡ SPRINT 24: GUEST DIGITAL SETTLEMENT ENGINE (SPLIT TENDER)
 // ============================================================================
-export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res: Response): Promise<Response | void> => {
+export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody & { amount_to_pay?: number }>, res: Response): Promise<Response | void> => {
     try {
         let guestToken = req.headers['x-guest-id'] as string | undefined;
         if (!guestToken && req.headers.authorization?.startsWith('Bearer ')) {
             guestToken = req.headers.authorization.split(' ')[1];
         }
 
-        const { orderIds, settlement_method, phone} = req.body;
+        const { orderIds, settlement_method, phone, amount_to_pay } = req.body;
         
         if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
             return res.status(400).json({ message: "Invalid payload. No orders selected." });
         }
 
         const orConditions: any[] = [];
-        if (guestToken) {
-            orConditions.push({ guest_session_id: guestToken });
-        }
+        if (guestToken) orConditions.push({ guest_session_id: guestToken });
         if (req.guest?.venueId && req.guest?.tableName) {
             orConditions.push({ venue_id: req.guest.venueId, table_number: req.guest.tableName });
         }
@@ -532,22 +569,18 @@ export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res:
         const orders = await Order.findAll({
             where: {
                 order_id: { [Op.in]: orderIds },
-                payment_status: 'PENDING',
+                payment_status: { [Op.in]: ['PENDING', 'PARTIALLY_PAID'] },
                 status: { [Op.notIn]: ['CANCELLED'] },
                 [Op.or]: orConditions
             },
             include: [{ model: Venue, attributes: ['venue_id', 'gateway_subaccount_id', 'is_financially_onboarded', 'name'] }]
         });
 
-        if (orders.length !== orderIds.length) {
-            return res.status(400).json({ message: "Some orders are already paid or invalid." });
-        }
+        if (orders.length === 0) return res.status(400).json({ message: "No active balance found." });
 
         const venue = (orders[0] as any).Venue;
 
         if (settlement_method === 'CASH') {
-            await Order.update({ payment_method: 'CASH' }, { where: { order_id: { [Op.in]: orderIds } } });
-            
             const io = req.app.get('socketio');
             if (io) {
                 io.to(`venue:${venue.venue_id}`).emit('order:status_updated', { bulk: true });
@@ -556,7 +589,18 @@ export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res:
             return res.status(200).json({ message: "Cash collection requested.", method: 'CASH' });
         }
 
-        const totalAmount = orders.reduce((sum, o) => sum + Number(o.total_amount), 0);
+        let trueRemainingBalance = 0;
+        for (const order of orders) {
+            const previousPayments = await TransactionLedger.sum('amount_paid', { where: { order_id: order.order_id } }) || 0;
+            trueRemainingBalance += (Number(order.total_amount) - previousPayments);
+        }
+
+        const targetChargeAmount = amount_to_pay ? Number(amount_to_pay) : trueRemainingBalance;
+
+        if (targetChargeAmount > trueRemainingBalance) {
+            return res.status(400).json({ message: "Cannot pay more than the remaining balance." });
+        }
+
         const paystackSecret = process.env.PAYSTACK_SECRET_KEY;
         
         if (!paystackSecret || !venue.is_financially_onboarded) {
@@ -566,45 +610,35 @@ export const guestTabCheckout = async (req: Request<{}, {}, SettleTabBody>, res:
         const isAirtel = settlement_method === 'AIRTEL';
         const isCard = settlement_method === 'CARD';
         
-        // ⚡ THE FIX: Route both Cards AND Airtel through the standard Paystack Drop-in initialization!
         if (isCard || isAirtel) {
             const payload: any = {
                 email: "guest@smarttable.app",
-                amount: Math.round(totalAmount * 100),
+                amount: Math.round(targetChargeAmount * 100),
                 currency: "KES",
                 subaccount: venue.gateway_subaccount_id,
-                metadata: { isTabSettlement: true, orderIds } 
+                metadata: { isTabSettlement: true, orderIds, splitAmount: targetChargeAmount } 
             };
 
-            if (isAirtel) {
-                payload.channels = ['mobile_money']; // Restrict the Drop-in UI exclusively to Mobile Money networks
-            }
+            if (isAirtel) payload.channels = ['mobile_money']; 
 
             const response = await axios.post('https://api.paystack.co/transaction/initialize', payload, {
                 headers: { Authorization: `Bearer ${paystackSecret}`, 'Content-Type': 'application/json' }
             });
-            // Return 'CARD' to trick the frontend SmartPaymentEngine into natively launching the Paystack Iframe!
             return res.status(200).json({ method: 'CARD', access_code: response.data.data.access_code });
         }
 
-        // Keep M-Pesa on the ultra-fast STK Background Push
         if (settlement_method === 'M-PESA') {
             let formattedPhone = phone!.replace(/\D/g, ''); 
-            if (formattedPhone.startsWith('0')) {
-                formattedPhone = '+254' + formattedPhone.slice(1);
-            } else if (formattedPhone.startsWith('254')) {
-                formattedPhone = '+' + formattedPhone;
-            } else if (formattedPhone.length === 9) {
-                formattedPhone = '+254' + formattedPhone;
-            }
+            if (formattedPhone.startsWith('0')) formattedPhone = '+254' + formattedPhone.slice(1);
+            else if (formattedPhone.length === 9) formattedPhone = '+254' + formattedPhone;
             
             const payload = {
                 email: "guest@smarttable.app",
-                amount: Math.round(totalAmount * 100),
+                amount: Math.round(targetChargeAmount * 100),
                 currency: "KES",
                 subaccount: venue.gateway_subaccount_id,
                 mobile_money: { phone: formattedPhone, provider: 'mpesa' },
-                metadata: { isTabSettlement: true, orderIds } 
+                metadata: { isTabSettlement: true, orderIds, splitAmount: targetChargeAmount } 
             };
             const response = await axios.post('https://api.paystack.co/charge', payload, {
                 headers: { Authorization: `Bearer ${paystackSecret}`, 'Content-Type': 'application/json' }

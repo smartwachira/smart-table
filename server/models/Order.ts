@@ -2,7 +2,7 @@ import { DataTypes, Model, Optional } from "sequelize";
 import sequelize from '../config/db.js';
 
 // ⚡ SPRINT 21 FIX: Added 'UNPAID_TAB' to PaymentStatus and 'TAB' to PaymentMethod
-export type PaymentStatus = 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED' | 'PARTIALLY_REFUNDED' | 'UNPAID_TAB';
+export type PaymentStatus = 'PENDING' | 'PARTIALLY_PAID' | 'PAID' | 'FAILED' | 'REFUNDED' | 'PARTIALLY_REFUNDED' | 'UNPAID_TAB';
 export type PaymentMethod = 'CASH' | 'M-PESA' | 'AIRTEL' | 'CARD' | 'TAB';
 export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'delivered' | 'completed' | 'cancelled' | 'PENDING' | 'PREPARING' | 'READY' | 'DELIVERED' | 'COMPLETED' | 'CANCELLED';
 export interface OrderAttributes {
@@ -94,7 +94,7 @@ Order.init({
         allowNull: true
     },
     payment_status: {
-        type: DataTypes.ENUM('PENDING', 'PAID', 'FAILED', 'REFUNDED', 'PARTIALLY_REFUNDED', 'UNPAID_TAB'),
+        type: DataTypes.ENUM('PENDING', 'PARTIALLY_PAID','PAID', 'FAILED', 'REFUNDED', 'PARTIALLY_REFUNDED', 'UNPAID_TAB'),
         defaultValue: 'PENDING'
     },
     checkout_request_id: {

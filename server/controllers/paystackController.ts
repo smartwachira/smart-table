@@ -3,18 +3,19 @@ import axios from 'axios';
 import { literal, Op } from 'sequelize'; 
 import Order from '../models/Order.js';
 import Venue from '../models/Venue.js';
+import TransactionLedger from '../models/TransactionLedger.js';
 import crypto from 'crypto';
+import sequelize from '../config/db.js';
 
 // ⚡ SPRINT 23: The Network Sniffer
-const determinePaymentMethod = (eventData: any): string => {
+const determinePaymentMethod = (eventData: any): 'CASH' | 'M-PESA' | 'AIRTEL' | 'CARD' | 'TAB' => {
     if (!eventData.channel) return 'CARD';
     
     if (eventData.channel === 'mobile_money') {
-        // Look deep into Paystack's authorization block to find out exactly who processed this payment
         const bank = String(eventData.authorization?.bank || eventData.authorization?.brand || '').toUpperCase();
         
         if (bank.includes('AIRTEL')) return 'AIRTEL';
-        return 'M-PESA'; // Defaults to M-PESA
+        return 'M-PESA'; 
     }
     
     return 'CARD';
@@ -201,44 +202,63 @@ export const paystackWebhookHandler = async (req: Request, res: Response) => {
         // --- SUCCESSFUL PAYMENTS ---
         if (event.event === 'charge.success') {
             const reference = event.data.reference;
+            const amountPaid = event.data.metadata.splitAmount ? Number(event.data.metadata.splitAmount) : (event.data.amount / 100);
 
-            if (isTabSettlement && bulkOrderIds.length > 0) {
-                await Order.update({ 
-                    payment_status: 'PAID',
-                    payment_method: paymentMethod, 
-                    gateway_reference: reference,
-                    notes: literal(`CONCAT(COALESCE(notes, ''), ' | ${ledgerNote}')`)
-                }, { 
-                    where: { order_id: { [Op.in]: bulkOrderIds } } 
+            const t = await sequelize.transaction();
+            try {
+                let remainingToDistribute = amountPaid;
+                const targetOrderIds = (isTabSettlement && bulkOrderIds.length > 0) ? bulkOrderIds : [metadataOrderId];
+                
+                const orders = await Order.findAll({ 
+                    where: { order_id: { [Op.in]: targetOrderIds } }, 
+                    transaction: t 
                 });
 
-                if (io) {
-                    const sampleOrder = await Order.findByPk(bulkOrderIds[0]);
-                    if (sampleOrder) {
-                        io.to(`venue:${sampleOrder.venue_id}`).emit('payment:completed', { table_number: sampleOrder.table_number, method: paymentMethod, bulk: true });
-                    }
-                    bulkOrderIds.forEach(id => {
+                for (const order of orders) {
+                    if (remainingToDistribute <= 0) break;
+
+                    const previousPayments = await TransactionLedger.sum('amount_paid', { where: { order_id: order.order_id }, transaction: t }) || 0;
+                    const orderBalance = Number(order.total_amount) - previousPayments;
+
+                    if (orderBalance <= 0) continue;
+
+                    const appliedToThisOrder = Math.min(orderBalance, remainingToDistribute);
+
+                    // 1. Write Digital Payment to Ledger
+                    await TransactionLedger.create({
+                        order_id: order.order_id,
+                        amount_paid: appliedToThisOrder,
+                        payment_method: paymentMethod,
+                        gateway_reference: reference
+                    }, { transaction: t });
+
+                    remainingToDistribute -= appliedToThisOrder;
+
+                    // 2. Evaluate Order Status
+                    const newTotal = previousPayments + appliedToThisOrder;
+                    const newStatus = newTotal >= Number(order.total_amount) ? 'PAID' : 'PARTIALLY_PAID';
+
+                    await order.update({
+                        payment_status: newStatus,
+                        payment_method: newStatus === 'PAID' ? paymentMethod : order.payment_method,
+                        gateway_reference: reference,
+                        notes: literal(`CONCAT(COALESCE(notes, ''), ' | Partial Digital: ${appliedToThisOrder}')`)
+                    }, { transaction: t });
+                }
+
+                await t.commit();
+
+                // ⚡ Trigger Socket Updates
+                if (io && orders.length > 0) {
+                    const venueId = orders[0].venue_id;
+                    io.to(`venue:${venueId}`).emit('payment:completed', { bulk: true });
+                    targetOrderIds.forEach(id => {
                         io.to(`order:${id}`).emit('payment:completed', { orderId: id, method: paymentMethod });
                     });
                 }
-            } 
-            else {
-                let order = await Order.findOne({ where: { gateway_reference: reference } });
-                if (!order && metadataOrderId) order = await Order.findByPk(metadataOrderId);
-
-                if (order && order.payment_status !== 'PAID') {
-                    await order.update({ 
-                        payment_status: 'PAID',
-                        payment_method: paymentMethod, 
-                        gateway_reference: reference,
-                        notes: literal(`CONCAT(COALESCE(notes, ''), ' | ${ledgerNote}')`)
-                    });
-
-                    if (io) {
-                        io.to(`order:${order.order_id}`).emit('payment:completed', { orderId: order.order_id, method: paymentMethod });
-                        io.to(`venue:${order.venue_id}`).emit('payment:completed', { orderId: order.order_id, method: paymentMethod });
-                    }
-                }
+            } catch (error) {
+                await t.rollback();
+                console.error("Webhook DB Ledger Error:", error);
             }
         }
 
